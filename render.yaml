@@ -1,0 +1,49 @@
+services:
+  - type: web
+    name: data-agent-backend
+    runtime: docker
+    dockerfilePath: ./backend/Dockerfile
+    dockerContext: ./backend
+    plan: starter
+    healthCheckPath: /health
+    envVars:
+      - key: APP_ENV
+        value: production
+      - key: DEBUG
+        value: "false"
+      - key: DATABASE_URL
+        sync: false
+      - key: FRONTEND_URL
+        sync: false
+      - key: UPLOAD_DIRECTORY
+        value: uploads
+      - key: MAX_UPLOAD_MB
+        value: "100"
+      - key: MAX_PDF_PAGES
+        value: "1000"
+      - key: ALLOW_ENCRYPTED_PDF
+        value: "false"
+      - key: ORACLE_BASE_URL
+        sync: false
+      - key: ORACLE_DRY_RUN
+        value: "true"
+      - key: OCR_ENABLED
+        value: "true"
+      - key: OCR_LANGUAGE
+        value: eng
+      - key: OCR_DPI
+        value: "300"
+      - key: AI_PROVIDER
+        value: gemini
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: GEMINI_MODEL
+        value: gemini-2.5-flash
+      - key: AI_FALLBACK_ENABLED
+        value: "true"
+      - key: AI_PROVIDER_MODE
+        value: production
+      - key: AI_MAX_PAGES
+        value: "10"
+      - key: AI_MAX_CONTEXT_CHARS
+        value: "60000"
