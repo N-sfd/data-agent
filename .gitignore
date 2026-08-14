@@ -1,0 +1,38 @@
+# Environment / secrets
+.env
+.env.*
+!.env.example
+
+# Python
+.venv/
+venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Databases
+*.db
+*.sqlite
+*.sqlite3
+
+# Uploaded / generated content
+backend/uploads/
+
+# Node / Next.js
+node_modules/
+frontend/.next/
+frontend/next-env.d.ts
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Scratch/debug artifacts
+backend/body.json
+backend/doc_id.txt
+backend/extract.json
+backend/out.json
+backend/req.json
+backend/upload.json
