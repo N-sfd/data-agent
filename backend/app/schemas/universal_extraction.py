@@ -33,6 +33,8 @@ class SourceEvidence(BaseModel):
     source_text: str
     source_reference: str
 
+    section: str | None = None
+
     block_index: int | None = None
 
     x0: float | None = None

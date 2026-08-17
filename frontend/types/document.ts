@@ -1,3 +1,10 @@
+export interface ExistingDocumentSummary {
+  document_id: string;
+  original_filename: string;
+  size_bytes: number;
+  uploaded_at: string;
+}
+
 export interface UploadedDocument {
   document_id: string;
   original_filename: string;
@@ -9,6 +16,36 @@ export interface UploadedDocument {
   encrypted: boolean;
   uploaded_at: string;
   message: string;
+  duplicate?: boolean;
+  existing_document?: ExistingDocumentSummary | null;
+  pipeline_log?: string[];
+}
+
+export type DuplicateResolution = "use_existing" | "upload_anyway";
+
+export type DocumentStatus =
+  | "processing"
+  | "review_required"
+  | "completed";
+
+export interface DocumentSummary {
+  document_id: string;
+  original_filename: string;
+  document_type: string | null;
+  status: DocumentStatus;
+  confidence: number | null;
+  uploaded_at: string;
+}
+
+export interface DashboardStats {
+  total_documents: number;
+  completed: number;
+  review_required: number;
+  processing: number;
+  extraction_accuracy: number | null;
+  average_processing_seconds: number | null;
+  human_review_rate: number | null;
+  fields_extracted: number;
 }
 
 export interface ExtractionSummary {
@@ -87,6 +124,8 @@ export interface SourceEvidence {
   source_text: string;
   source_reference: string;
 
+  section?: string | null;
+
   block_index?: number | null;
 
   x0?: number | null;
@@ -150,4 +189,192 @@ export interface UniversalExtractionResult {
   unresolved_requests: string[];
 
   warnings: string[];
+}
+
+export type ContractSide = "buy_side" | "sell_side" | "unknown";
+
+export interface ContractClassification {
+  document_type: string;
+  industry: string | null;
+  contract_side: ContractSide;
+  language: string | null;
+  confidence: number;
+}
+
+export type ReviewStatus =
+  | "pending"
+  | "accepted"
+  | "edited"
+  | "rejected"
+  | "unknown";
+
+export type ReviewAction =
+  | "accept"
+  | "edit"
+  | "reject"
+  | "mark_unknown";
+
+export interface MetadataField {
+  field_group: string;
+  field_key: string;
+  label: string;
+
+  value: string;
+
+  confidence: number;
+
+  extraction_method: "label_value" | "regex" | "ai";
+
+  evidence: SourceEvidence;
+
+  verified: boolean;
+  review_status: ReviewStatus;
+  original_value: string;
+}
+
+export interface FieldAuditEntry {
+  action: ReviewAction;
+  previous_value: string | null;
+  new_value: string | null;
+  changed_by: string;
+  changed_at: string;
+}
+
+export type RelationshipStatus = "pending" | "confirmed" | "rejected";
+
+export interface DetectedRelationship {
+  parent_document_id: string;
+  parent_document_title: string;
+  parent_document_number: string | null;
+
+  relationship_type: string;
+
+  confidence: number;
+
+  matched_on: "contract_number" | "contract_title";
+
+  status: RelationshipStatus;
+}
+
+export interface ContractAnalysisResult {
+  document_id: string;
+
+  classification: ContractClassification;
+
+  metadata_fields: MetadataField[];
+
+  relationship: DetectedRelationship | null;
+
+  warnings: string[];
+}
+
+export type RelationshipAction = "confirm" | "reject";
+
+export interface ConfirmRelationshipResult {
+  document_id: string;
+  status: "confirmed" | "rejected";
+  relationship: DetectedRelationship | null;
+}
+
+export interface RenewalTerms {
+  type: "automatic" | "manual" | null;
+  period_months: number | null;
+  notice_days: number | null;
+}
+
+export type StructuredContractOutput = Record<string, unknown> & {
+  renewal?: RenewalTerms;
+};
+
+export interface HighlightBox {
+  x0: number;
+  y0: number;
+  x1: number;
+  y1: number;
+}
+
+export interface PageRender {
+  page_number: number;
+  image_data_url: string;
+  page_width: number;
+  page_height: number;
+  highlight: HighlightBox | null;
+}
+
+export interface ClauseResult {
+  clause_type: string;
+  classification: string;
+  extracted_text: string;
+  value_summary: string;
+  confidence: number;
+  evidence: SourceEvidence;
+}
+
+export interface ClauseExtractionResult {
+  document_id: string;
+  clauses: ClauseResult[];
+  warnings: string[];
+}
+
+export interface RateCardRow {
+  role: string;
+  rate: number | null;
+  unit: string | null;
+  currency: string | null;
+}
+
+export interface NormalizedTable {
+  table_id: string;
+  table_type: "rate_card" | "generic";
+  page_number: number;
+  source_reference: string;
+  headers: string[];
+  rows: Record<string, unknown>[];
+  rate_card_rows: RateCardRow[];
+}
+
+export interface TableExtractionResult {
+  document_id: string;
+  tables: NormalizedTable[];
+}
+
+export interface SignatureResult {
+  party_name: string;
+  signatory_name: string;
+  signatory_title: string;
+  signed: boolean;
+  signature_date: string | null;
+  confidence: number;
+  evidence: SourceEvidence;
+}
+
+export interface SignatureExtractionResult {
+  document_id: string;
+  signatures: SignatureResult[];
+  warnings: string[];
+}
+
+export type ExtractionFieldDataType =
+  | "text"
+  | "number"
+  | "currency"
+  | "date"
+  | "boolean"
+  | "list";
+
+export interface ExtractionField {
+  id: number;
+  model_id: number;
+  field_name: string;
+  description: string;
+  data_type: ExtractionFieldDataType;
+  created_at: string;
+}
+
+export interface ExtractionModel {
+  id: number;
+  name: string;
+  description: string;
+  created_at: string;
+  fields: ExtractionField[];
 }

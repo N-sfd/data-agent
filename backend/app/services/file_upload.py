@@ -7,15 +7,15 @@ from uuid import UUID
 import aiofiles
 from fastapi import UploadFile
 
+from app.services.security_validation import (
+    SecurityValidationError,
+    UploadTypeSpec,
+    resolve_upload_type,
+    validate_content_type,
+    validate_signature,
+)
 
-PDF_SIGNATURE = b"%PDF-"
 STREAM_CHUNK_SIZE = 1024 * 1024  # 1 MB
-
-ALLOWED_PDF_CONTENT_TYPES = {
-    "application/pdf",
-    "application/x-pdf",
-    "application/octet-stream",
-}
 
 
 class UploadValidationError(Exception):
@@ -25,13 +25,14 @@ class UploadValidationError(Exception):
 @dataclass(frozen=True)
 class SavedUpload:
     document_id: UUID
-    original_filename: str
     stored_path: Path
     size_bytes: int
     checksum_sha256: str
 
 
-def sanitize_display_filename(filename: str | None) -> str:
+def sanitize_display_filename(
+    filename: str | None, *, extension: str = ".pdf"
+) -> str:
     """
     Sanitize a filename for display and metadata storage.
 
@@ -40,7 +41,7 @@ def sanitize_display_filename(filename: str | None) -> str:
     """
 
     if not filename:
-        return "uploaded-document.pdf"
+        return f"uploaded-document{extension}"
 
     filename = Path(filename).name
     filename = filename.replace("\x00", "")
@@ -50,50 +51,59 @@ def sanitize_display_filename(filename: str | None) -> str:
     filename = filename[:150]
 
     if not filename:
-        return "uploaded-document.pdf"
+        return f"uploaded-document{extension}"
 
-    if not filename.lower().endswith(".pdf"):
-        filename = f"{filename}.pdf"
+    if not filename.lower().endswith(extension):
+        filename = f"{filename}{extension}"
 
     return filename
 
 
-def validate_upload_metadata(file: UploadFile) -> str:
-    original_filename = sanitize_display_filename(file.filename)
+def validate_upload_metadata(
+    file: UploadFile,
+) -> tuple[str, UploadTypeSpec]:
+    """
+    Validate an upload's declared filename/content-type before any bytes
+    are read, returning the sanitized display filename and its resolved
+    upload-type spec (PDF, DOCX, PNG, or JPG).
+    """
 
-    suffix = Path(original_filename).suffix.lower()
+    suffix = Path(file.filename or "").suffix.lower()
 
-    if suffix != ".pdf":
-        raise UploadValidationError(
-            "Only PDF documents are supported."
-        )
+    try:
+        spec = resolve_upload_type(suffix)
+    except SecurityValidationError as exc:
+        raise UploadValidationError(str(exc)) from exc
+
+    original_filename = sanitize_display_filename(
+        file.filename, extension=spec.extension
+    )
 
     supplied_content_type = (
         file.content_type or "application/octet-stream"
     ).lower()
 
-    if supplied_content_type not in ALLOWED_PDF_CONTENT_TYPES:
-        raise UploadValidationError(
-            "The uploaded file has an unsupported content type."
-        )
+    try:
+        validate_content_type(spec, supplied_content_type)
+    except SecurityValidationError as exc:
+        raise UploadValidationError(str(exc)) from exc
 
-    return original_filename
+    return original_filename, spec
 
 
-async def save_pdf_stream(
+async def save_upload_stream(
     *,
     file: UploadFile,
+    spec: UploadTypeSpec,
     document_id: UUID,
     destination: Path,
     max_size_bytes: int,
 ) -> SavedUpload:
     """
-    Stream an uploaded PDF to disk while enforcing the maximum size.
-
-    The first bytes are checked before the upload is accepted as a PDF.
+    Stream an already-validated upload to disk while enforcing the
+    maximum size and confirming its magic-byte signature.
     """
 
-    original_filename = validate_upload_metadata(file)
     sha256 = hashlib.sha256()
     total_size = 0
     first_chunk = True
@@ -111,16 +121,16 @@ async def save_pdf_stream(
                 if first_chunk:
                     first_chunk = False
 
-                    if not chunk.startswith(PDF_SIGNATURE):
-                        raise UploadValidationError(
-                            "The file does not contain a valid PDF signature."
-                        )
+                    try:
+                        validate_signature(spec, chunk)
+                    except SecurityValidationError as exc:
+                        raise UploadValidationError(str(exc)) from exc
 
                 total_size += len(chunk)
 
                 if total_size > max_size_bytes:
                     raise UploadValidationError(
-                        "The PDF exceeds the configured upload-size limit."
+                        "The file exceeds the configured upload-size limit."
                     )
 
                 sha256.update(chunk)
@@ -128,12 +138,11 @@ async def save_pdf_stream(
 
         if total_size == 0:
             raise UploadValidationError(
-                "The uploaded PDF is empty."
+                "The uploaded file is empty."
             )
 
         return SavedUpload(
             document_id=document_id,
-            original_filename=original_filename,
             stored_path=destination,
             size_bytes=total_size,
             checksum_sha256=sha256.hexdigest(),

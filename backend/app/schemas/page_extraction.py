@@ -130,3 +130,13 @@ class StoredBlockResponse(BaseModel):
 
     extraction_method: str
     source_reference: str
+
+
+class PageRenderResponse(BaseModel):
+    page_number: int
+    image_data_url: str
+
+    page_width: float
+    page_height: float
+
+    highlight: BoundingBox | None = None

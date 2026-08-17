@@ -1,3 +1,6 @@
+import base64
+
+import fitz
 from fastapi import (
     APIRouter,
     Depends,
@@ -14,6 +17,7 @@ from app.models.page_text_block import PageTextBlock
 from app.schemas.page_extraction import (
     DocumentExtractionRequest,
     DocumentExtractionSummary,
+    PageRenderResponse,
     StoredBlockResponse,
     StoredPageResponse,
 )
@@ -24,6 +28,9 @@ from app.services.document_extraction import (
 
 router = APIRouter()
 settings = get_settings()
+
+RENDER_ZOOM = 2.0
+HIGHLIGHT_SEARCH_LIMIT = 120
 
 
 @router.post(
@@ -233,3 +240,94 @@ async def get_page_blocks(
         )
         for block in blocks
     ]
+
+
+@router.get(
+    "/{document_id}/pages/{page_number}/render",
+    response_model=PageRenderResponse,
+)
+async def render_document_page(
+    document_id: str,
+    page_number: int,
+    highlight: str | None = None,
+    database: Session = Depends(get_database),
+) -> PageRenderResponse:
+    document = database.get(Document, document_id)
+
+    if document is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Document not found.",
+        )
+
+    file_path = settings.upload_path / document.stored_filename
+
+    if (
+        not file_path.exists()
+        or file_path.suffix.lower() != ".pdf"
+    ):
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                "Page rendering is only available for PDF documents."
+            ),
+        )
+
+    pdf: fitz.Document | None = None
+
+    try:
+        pdf = fitz.open(file_path)
+
+        if page_number < 1 or page_number > pdf.page_count:
+            raise HTTPException(
+                status_code=404,
+                detail="Page not found.",
+            )
+
+        page = pdf.load_page(page_number - 1)
+
+        matrix = fitz.Matrix(RENDER_ZOOM, RENDER_ZOOM)
+        pixmap = page.get_pixmap(matrix=matrix)
+        image_bytes = pixmap.tobytes("png")
+
+        image_data_url = (
+            "data:image/png;base64,"
+            + base64.b64encode(image_bytes).decode("ascii")
+        )
+
+        highlight_box = None
+
+        if highlight:
+            rects = page.search_for(
+                highlight[:HIGHLIGHT_SEARCH_LIMIT]
+            )
+
+            if rects:
+                rect = rects[0]
+                highlight_box = {
+                    "x0": rect.x0,
+                    "y0": rect.y0,
+                    "x1": rect.x1,
+                    "y1": rect.y1,
+                }
+
+        return PageRenderResponse(
+            page_number=page_number,
+            image_data_url=image_data_url,
+            page_width=page.rect.width,
+            page_height=page.rect.height,
+            highlight=highlight_box,
+        )
+
+    except HTTPException:
+        raise
+
+    except Exception as exc:
+        raise HTTPException(
+            status_code=500,
+            detail="The page could not be rendered.",
+        ) from exc
+
+    finally:
+        if pdf is not None:
+            pdf.close()

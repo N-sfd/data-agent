@@ -18,6 +18,7 @@ def source_evidence(
     document_name: str,
     page_number: int,
     source_text: str,
+    section: str | None = None,
 ) -> SourceEvidence:
 
     return SourceEvidence(
@@ -27,6 +28,7 @@ def source_evidence(
             f"{document_name}, "
             f"page {page_number}"
         ),
+        section=section,
     )
 
 

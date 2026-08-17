@@ -10,21 +10,43 @@ import {
   X,
 } from "lucide-react";
 
+import DuplicateDialog from "@/components/duplicate-dialog";
 import { apiUrl } from "@/lib/api";
+import { resolveDuplicate } from "@/lib/documents";
 import { formatBytes } from "@/lib/format";
-import type { UploadedDocument } from "@/types/document";
+import type {
+  ExistingDocumentSummary,
+  UploadedDocument,
+} from "@/types/document";
 
-interface PdfUploaderProps {
+const ACCEPTED_EXTENSIONS = [
+  ".pdf",
+  ".docx",
+  ".png",
+  ".jpg",
+  ".jpeg",
+];
+
+interface DocumentUploaderProps {
   onUploadComplete: (document: UploadedDocument) => void;
 }
 
-export default function PdfUploader({
+interface PendingDuplicate {
+  documentId: string;
+  originalFilename: string;
+  existingDocument: ExistingDocumentSummary;
+}
+
+export default function DocumentUploader({
   onUploadComplete,
-}: PdfUploaderProps) {
+}: DocumentUploaderProps) {
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [uploading, setUploading] = useState(false);
   const [progress, setProgress] = useState(0);
   const [error, setError] = useState("");
+  const [pendingDuplicate, setPendingDuplicate] =
+    useState<PendingDuplicate | null>(null);
+  const [resolving, setResolving] = useState(false);
 
   const onDrop = useCallback((acceptedFiles: File[]) => {
     setError("");
@@ -33,11 +55,14 @@ export default function PdfUploader({
 
     if (!file) return;
 
-    if (
-      file.type !== "application/pdf" &&
-      !file.name.toLowerCase().endsWith(".pdf")
-    ) {
-      setError("Please select a PDF document.");
+    const extension = file.name
+      .toLowerCase()
+      .slice(file.name.lastIndexOf("."));
+
+    if (!ACCEPTED_EXTENSIONS.includes(extension)) {
+      setError(
+        "Please select a PDF, DOCX, PNG, or JPG document.",
+      );
       return;
     }
 
@@ -53,12 +78,16 @@ export default function PdfUploader({
     onDrop,
     accept: {
       "application/pdf": [".pdf"],
+      "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
+        [".docx"],
+      "image/png": [".png"],
+      "image/jpeg": [".jpg", ".jpeg"],
     },
     multiple: false,
     maxFiles: 1,
   });
 
-  async function uploadPdf() {
+  async function uploadDocument() {
     if (!selectedFile) return;
 
     setUploading(true);
@@ -93,6 +122,16 @@ export default function PdfUploader({
         throw new Error(detail);
       }
 
+      if (result.duplicate && result.existing_document) {
+        setPendingDuplicate({
+          documentId: result.document_id,
+          originalFilename: result.original_filename,
+          existingDocument: result.existing_document,
+        });
+        setProgress(0);
+        return;
+      }
+
       setProgress(100);
 
       onUploadComplete(result);
@@ -109,6 +148,40 @@ export default function PdfUploader({
     }
   }
 
+  async function handleDuplicateResolution(
+    action: "use_existing" | "upload_anyway",
+  ) {
+    if (!pendingDuplicate) return;
+
+    setResolving(true);
+    setError("");
+
+    try {
+      const result = await resolveDuplicate(
+        pendingDuplicate.documentId,
+        action,
+        pendingDuplicate.originalFilename,
+      );
+
+      setProgress(100);
+      setPendingDuplicate(null);
+      onUploadComplete(result);
+    } catch (resolveError) {
+      setError(
+        resolveError instanceof Error
+          ? resolveError.message
+          : "Unable to resolve the duplicate upload.",
+      );
+    } finally {
+      setResolving(false);
+    }
+  }
+
+  function handleCancelDuplicate() {
+    setPendingDuplicate(null);
+    setProgress(0);
+  }
+
   function clearFile() {
     setSelectedFile(null);
     setProgress(0);
@@ -123,12 +196,12 @@ export default function PdfUploader({
         </p>
 
         <h2 className="mt-1 text-xl font-semibold text-slate-950">
-          Upload PDF
+          Upload document
         </h2>
 
         <p className="mt-2 text-sm leading-6 text-slate-500">
-          Upload a financial report, invoice document, budget,
-          statement, or other PDF for analysis.
+          Upload a contract, financial report, invoice, budget,
+          statement, or scanned agreement for analysis.
         </p>
       </div>
 
@@ -151,8 +224,8 @@ export default function PdfUploader({
 
           <p className="mt-4 font-medium text-slate-900">
             {isDragActive
-              ? "Drop your PDF here"
-              : "Drag and drop a PDF"}
+              ? "Drop your document here"
+              : "Drag and drop a document"}
           </p>
 
           <p className="mt-1 text-sm text-slate-500">
@@ -160,7 +233,8 @@ export default function PdfUploader({
           </p>
 
           <p className="mt-4 text-xs text-slate-400">
-            PDF only · Maximum size controlled by your backend
+            PDF · DOCX · PNG · JPG · Maximum size controlled by
+            your backend
           </p>
         </div>
       ) : (
@@ -219,7 +293,7 @@ export default function PdfUploader({
 
           <button
             type="button"
-            onClick={uploadPdf}
+            onClick={uploadDocument}
             disabled={uploading || progress === 100}
             className="mt-5 flex w-full items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 py-3 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
           >
@@ -236,7 +310,7 @@ export default function PdfUploader({
             ) : (
               <>
                 <UploadCloud className="h-4 w-4" />
-                Upload PDF
+                Upload document
               </>
             )}
           </button>
@@ -247,6 +321,20 @@ export default function PdfUploader({
         <div className="mt-4 rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">
           {error}
         </div>
+      )}
+
+      {pendingDuplicate && (
+        <DuplicateDialog
+          existingDocument={pendingDuplicate.existingDocument}
+          busy={resolving}
+          onUseExisting={() =>
+            handleDuplicateResolution("use_existing")
+          }
+          onUploadAnyway={() =>
+            handleDuplicateResolution("upload_anyway")
+          }
+          onCancel={handleCancelDuplicate}
+        />
       )}
     </div>
   );

@@ -1,3 +1,4 @@
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -20,6 +21,45 @@ from app.services.pdf_form_extractor import (
 
 class DocumentExtractionError(Exception):
     pass
+
+
+def _summarize_stored_pages(
+    *,
+    database: Session,
+    document_record: Document,
+    started_at: float,
+) -> dict:
+    pages = list(
+        database.scalars(
+            select(DocumentPage).where(
+                DocumentPage.document_id == document_record.id
+            )
+        )
+    )
+
+    document_record.processing_status = "completed"
+    document_record.processed_page_count = len(pages)
+    document_record.processing_duration_seconds = (
+        time.monotonic() - started_at
+    )
+    database.commit()
+
+    return {
+        "document_id": document_record.id,
+        "status": document_record.processing_status,
+        "total_document_pages": document_record.page_count,
+        "pages_requested": len(pages),
+        "pages_processed": len(pages),
+        "native_pages": len(pages),
+        "ocr_required_pages": 0,
+        "ocr_completed_pages": 0,
+        "failed_pages": 0,
+        "page_numbers_processed": [
+            page.page_number for page in pages
+        ],
+        "warnings": [],
+        "completed_at": datetime.now(timezone.utc),
+    }
 
 
 def resolve_page_range(
@@ -60,10 +100,31 @@ def process_document_pages(
     page_end: int | None,
     force_reprocess: bool,
 ) -> dict:
+    started_at = time.monotonic()
+
     if not file_path.exists():
         raise DocumentExtractionError(
-            "The stored PDF file could not be found."
+            "The stored document file could not be found."
         )
+
+    if file_path.suffix.lower() == ".docx":
+        # DOCX text is extracted synchronously at upload time (it's
+        # already digital, no OCR/page-image pipeline applies) — just
+        # report back what's already stored.
+        return _summarize_stored_pages(
+            database=database,
+            document_record=document_record,
+            started_at=started_at,
+        )
+
+    # Raster images open as a 1-page fitz document (so the text/OCR path
+    # below works unchanged), but they have no real PDF structure, so
+    # the PDF-specific form-field and table extractors can't run on them.
+    is_raster_image = file_path.suffix.lower() in {
+        ".png",
+        ".jpg",
+        ".jpeg",
+    }
 
     pdf: fitz.Document | None = None
 
@@ -133,16 +194,20 @@ def process_document_pages(
                     run_ocr=run_ocr,
                 )
 
-                fitz_page = pdf.load_page(page_number - 1)
+                if is_raster_image:
+                    form_fields: dict[str, str] = {}
+                    page_tables: list[dict] = []
+                else:
+                    fitz_page = pdf.load_page(page_number - 1)
 
-                form_fields = extract_page_form_fields(
-                    fitz_page
-                )
+                    form_fields = extract_page_form_fields(
+                        fitz_page
+                    )
 
-                page_tables = extract_page_tables(
-                    file_path,
-                    page_number,
-                )
+                    page_tables = extract_page_tables(
+                        file_path,
+                        page_number,
+                    )
 
                 page_record = DocumentPage(
                     document_id=document_record.id,
@@ -280,6 +345,10 @@ def process_document_pages(
             )
         else:
             document_record.processing_status = "completed"
+
+        document_record.processing_duration_seconds = (
+            time.monotonic() - started_at
+        )
 
         database.commit()
 

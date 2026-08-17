@@ -1,7 +1,6 @@
 import {
     CheckCircle2,
     Circle,
-    FileCheck2,
     ScanText,
   } from "lucide-react";
   
@@ -38,8 +37,8 @@ import {
   
           <StatusItem
             complete
-            title="PDF validated"
-            description={`${document.page_count} pages validated successfully.`}
+            title="Document validated"
+            description={`${document.page_count} page${document.page_count === 1 ? "" : "s"} validated successfully.`}
           />
   
           <StatusItem

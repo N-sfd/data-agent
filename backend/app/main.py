@@ -2,17 +2,37 @@
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api import (
+    contract_analysis,
+    dashboard,
     documents,
+    extraction_models,
     financial_analysis,
     page_extraction,
     universal_extraction,
 )
 from app.core.config import get_settings
 from app.database.base import Base
-from app.database.migrate import ensure_document_page_columns
+from app.database.migrate import (
+    ensure_document_metadata_field_columns,
+    ensure_document_page_columns,
+    ensure_documents_columns,
+)
 from app.database.session import engine
 from app.models import document as document_model  # noqa: F401
+from app.models import document_clause as document_clause_model  # noqa: F401
+from app.models import (  # noqa: F401
+    document_metadata_field as document_metadata_field_model,
+)
 from app.models import document_page as document_page_model  # noqa: F401
+from app.models import (  # noqa: F401
+    document_signature as document_signature_model,
+)
+from app.models import (  # noqa: F401
+    extraction_model as extraction_model_model,
+)
+from app.models import (  # noqa: F401
+    metadata_field_audit_log as metadata_field_audit_log_model,
+)
 from app.models import page_text_block as page_text_block_model  # noqa: F401
 
 settings = get_settings()
@@ -38,7 +58,7 @@ app.add_middleware(
         r"10\.\d{1,3}\.\d{1,3}\.\d{1,3}"
         r")(:\d+)?"
         if settings.debug
-        else None
+        else r"https://([a-z0-9-]+\.)*vercel\.app"
     ),
     allow_credentials=True,
     allow_methods=["*"],
@@ -69,11 +89,31 @@ app.include_router(
     tags=["Universal Extraction"],
 )
 
+app.include_router(
+    contract_analysis.router,
+    prefix="/api/documents",
+    tags=["Contract Analysis"],
+)
+
+app.include_router(
+    extraction_models.router,
+    prefix="/api/extraction-models",
+    tags=["Extraction Models"],
+)
+
+app.include_router(
+    dashboard.router,
+    prefix="/api/dashboard",
+    tags=["Dashboard"],
+)
+
 
 @app.on_event("startup")
 async def create_database_tables() -> None:
     Base.metadata.create_all(bind=engine)
     ensure_document_page_columns(engine)
+    ensure_documents_columns(engine)
+    ensure_document_metadata_field_columns(engine)
 
 
 @app.get("/")
