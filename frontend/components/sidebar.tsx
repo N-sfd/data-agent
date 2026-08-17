@@ -54,7 +54,7 @@ export default function Sidebar() {
   const pathname = usePathname();
 
   return (
-    <aside className="flex h-full w-64 shrink-0 flex-col bg-slate-900 text-slate-300">
+    <aside className="flex h-full min-h-0 w-64 shrink-0 flex-col self-stretch bg-slate-900 text-slate-300">
       <div className="flex h-16 shrink-0 items-center gap-2 px-6">
         <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-blue-600 text-sm font-bold text-white">
           D
