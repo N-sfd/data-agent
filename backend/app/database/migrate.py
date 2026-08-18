@@ -31,6 +31,8 @@ DOCUMENT_COLUMNS: dict[str, str] = {
     "parent_relationship_matched_on": "VARCHAR(20)",
     "parent_relationship_status": "VARCHAR(20)",
     "processing_duration_seconds": "FLOAT",
+    "approved_by": "VARCHAR(120)",
+    "approved_at": "DATETIME",
 }
 
 

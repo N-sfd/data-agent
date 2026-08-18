@@ -6,9 +6,11 @@ import {
   Archive,
   BarChart3,
   Building2,
+  ClipboardList,
   FileSearch,
   FileText,
   LayoutDashboard,
+  ListChecks,
   Search,
   Settings,
   type LucideIcon,
@@ -33,12 +35,13 @@ const PRIMARY_LINK: NavLink = {
 
 const STORE_LINKS: NavLink[] = [
   { label: "Extraction", icon: FileSearch, href: "/extraction/new" },
+  { label: "Review Queue", icon: ListChecks, href: "/review-queue" },
+  { label: "Repository", icon: Archive, href: "/repository" },
+  { label: "Search", icon: Search, href: "/search" },
+  { label: "Audit Log", icon: ClipboardList, href: "/audit-log" },
 ];
 
-const STORE_DISABLED: DisabledItem[] = [
-  { label: "Repository", icon: Archive },
-  { label: "Search", icon: Search },
-];
+const STORE_DISABLED: DisabledItem[] = [];
 
 const BOTTOM_LINKS: NavLink[] = [
   { label: "Settings", icon: Settings, href: "/settings/extraction-models" },

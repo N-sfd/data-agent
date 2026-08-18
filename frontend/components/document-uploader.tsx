@@ -11,7 +11,7 @@ import {
 } from "lucide-react";
 
 import DuplicateDialog from "@/components/duplicate-dialog";
-import { apiUrl } from "@/lib/api";
+import { apiFetch } from "@/lib/api";
 import { resolveDuplicate } from "@/lib/documents";
 import { formatBytes } from "@/lib/format";
 import type {
@@ -101,13 +101,10 @@ export default function DocumentUploader({
 
       setProgress(35);
 
-      const response = await fetch(
-        apiUrl("/api/documents/upload"),
-        {
+      const response = await apiFetch("/api/documents/upload", {
           method: "POST",
           body: formData,
-        },
-      );
+        });
 
       setProgress(80);
 

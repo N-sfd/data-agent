@@ -1,4 +1,4 @@
-import { apiUrl } from "@/lib/api";
+import { apiFetch } from "@/lib/api";
 
 export interface AiStatus {
   provider: string;
@@ -10,7 +10,7 @@ export interface AiStatus {
 
 export async function getAiStatus(): Promise<AiStatus | null> {
   try {
-    const response = await fetch(apiUrl("/health"), {
+    const response = await apiFetch("/health", {
       cache: "no-store",
     });
 

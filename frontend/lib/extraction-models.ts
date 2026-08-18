@@ -1,4 +1,4 @@
-import { apiUrl } from "@/lib/api";
+import { apiFetch } from "@/lib/api";
 
 import type {
   ExtractionField,
@@ -9,9 +9,7 @@ import type {
 export async function listExtractionModels(): Promise<
   ExtractionModel[]
 > {
-  const response = await fetch(
-    apiUrl("/api/extraction-models"),
-  );
+  const response = await apiFetch("/api/extraction-models");
 
   const result = await response.json();
 
@@ -30,16 +28,13 @@ export async function createExtractionModel(
   name: string,
   description: string,
 ): Promise<ExtractionModel> {
-  const response = await fetch(
-    apiUrl("/api/extraction-models"),
-    {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ name, description }),
+  const response = await apiFetch("/api/extraction-models", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
     },
-  );
+    body: JSON.stringify({ name, description }),
+  });
 
   const result = await response.json();
 
@@ -57,8 +52,8 @@ export async function createExtractionModel(
 export async function deleteExtractionModel(
   modelId: number,
 ): Promise<void> {
-  const response = await fetch(
-    apiUrl(`/api/extraction-models/${modelId}`),
+  const response = await apiFetch(
+    `/api/extraction-models/${modelId}`,
     {
       method: "DELETE",
     },
@@ -81,8 +76,8 @@ export async function addExtractionField(
   description: string,
   dataType: ExtractionFieldDataType,
 ): Promise<ExtractionModel> {
-  const response = await fetch(
-    apiUrl(`/api/extraction-models/${modelId}/fields`),
+  const response = await apiFetch(
+    `/api/extraction-models/${modelId}/fields`,
     {
       method: "POST",
       headers: {
@@ -113,10 +108,8 @@ export async function deleteExtractionField(
   modelId: number,
   fieldId: number,
 ): Promise<ExtractionModel> {
-  const response = await fetch(
-    apiUrl(
-      `/api/extraction-models/${modelId}/fields/${fieldId}`,
-    ),
+  const response = await apiFetch(
+    `/api/extraction-models/${modelId}/fields/${fieldId}`,
     {
       method: "DELETE",
     },

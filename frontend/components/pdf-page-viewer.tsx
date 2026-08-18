@@ -8,12 +8,16 @@ interface PdfPageViewerProps {
   render: PageRender | null;
   loading: boolean;
   error: string;
+  zoom?: number;
+  rotation?: 0 | 90 | 180 | 270;
 }
 
 export default function PdfPageViewer({
   render,
   loading,
   error,
+  zoom = 1,
+  rotation = 0,
 }: PdfPageViewerProps) {
   if (loading && !render) {
     return (
@@ -54,7 +58,13 @@ export default function PdfPageViewer({
       </div>
 
       <div className="flex-1 overflow-auto bg-slate-100 p-4">
-        <div className="relative mx-auto w-fit">
+        <div
+          className="relative mx-auto w-fit transition-transform"
+          style={{
+            transform: `scale(${zoom}) rotate(${rotation}deg)`,
+            transformOrigin: "top center",
+          }}
+        >
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
             src={render.image_data_url}

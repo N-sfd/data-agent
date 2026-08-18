@@ -16,7 +16,7 @@ function getInitials(name: string): string {
 }
 
 export default function Header({
-  userName = "Asif Khan",
+  userName = "Consult America",
 }: HeaderProps) {
   return (
     <header className="flex h-16 shrink-0 items-center justify-between border-b border-slate-200 bg-white px-6">

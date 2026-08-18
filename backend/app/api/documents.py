@@ -4,16 +4,23 @@ from pathlib import Path
 from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, File, HTTPException, Response, UploadFile
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
 from app.database.dependencies import get_database
 from app.models.document import Document
+from app.models.document_metadata_field import DocumentMetadataField
 from app.models.document_page import DocumentPage
+from app.models.metadata_field_audit_log import MetadataFieldAuditLog
 from app.models.page_text_block import PageTextBlock
 from app.parsers.docx_parser import parse_docx
+from app.schemas.contract_analysis import (
+    GlobalAuditEntry,
+    GlobalAuditLogResponse,
+)
 from app.schemas.document import (
+    DocumentSearchResponse,
     DocumentSummaryResponse,
     ExistingDocumentSummary,
     ResolveDuplicateRequest,
@@ -452,6 +459,8 @@ async def resolve_duplicate(
             uploaded_at=duplicate.uploaded_at,
             message="Continuing with the existing document.",
             pipeline_log=["Reused the existing document"],
+            approved_by=duplicate.approved_by,
+            approved_at=duplicate.approved_at,
         )
 
     log = ["Re-validated the staged file"]
@@ -516,6 +525,40 @@ async def resolve_duplicate(
         ) from exc
 
 
+def _build_document_summary(
+    database: Session, document: Document
+) -> DocumentSummaryResponse:
+    fields_extracted = database.scalar(
+        select(func.count(DocumentMetadataField.id)).where(
+            DocumentMetadataField.document_id == document.id
+        )
+    ) or 0
+
+    latest_audit_change = database.scalar(
+        select(func.max(MetadataFieldAuditLog.changed_at)).where(
+            MetadataFieldAuditLog.document_id == document.id
+        )
+    )
+
+    last_updated = (
+        max(document.uploaded_at, latest_audit_change)
+        if latest_audit_change
+        else document.uploaded_at
+    )
+
+    return DocumentSummaryResponse(
+        document_id=document.id,
+        original_filename=document.original_filename,
+        document_type=document.document_type,
+        status=compute_document_status(database, document),
+        confidence=compute_document_confidence(database, document),
+        uploaded_at=document.uploaded_at,
+        page_count=document.page_count,
+        fields_extracted=fields_extracted,
+        last_updated=last_updated,
+    )
+
+
 @router.get(
     "",
     response_model=list[DocumentSummaryResponse],
@@ -533,18 +576,142 @@ async def list_documents(
     )
 
     return [
-        DocumentSummaryResponse(
-            document_id=document.id,
-            original_filename=document.original_filename,
-            document_type=document.document_type,
-            status=compute_document_status(database, document),
-            confidence=compute_document_confidence(
-                database, document
-            ),
-            uploaded_at=document.uploaded_at,
-        )
+        _build_document_summary(database, document)
         for document in documents
     ]
+
+
+@router.get(
+    "/search",
+    response_model=DocumentSearchResponse,
+)
+async def search_documents(
+    q: str = "",
+    status: str | None = None,
+    document_type: str | None = None,
+    limit: int = 25,
+    offset: int = 0,
+    database: Session = Depends(get_database),
+) -> DocumentSearchResponse:
+    query = q.strip()
+
+    matching_ids: set[str] | None = None
+
+    if query:
+        like = f"%{query}%"
+
+        filename_matches = database.scalars(
+            select(Document.id).where(
+                Document.original_filename.ilike(like)
+            )
+        )
+
+        field_matches = database.scalars(
+            select(DocumentMetadataField.document_id)
+            .where(
+                DocumentMetadataField.field_key.in_(
+                    ["contract_number", "contract_title"]
+                ),
+                DocumentMetadataField.value.ilike(like),
+            )
+        )
+
+        page_text_matches = database.scalars(
+            select(DocumentPage.document_id).where(
+                DocumentPage.final_text.ilike(like)
+            )
+        )
+
+        matching_ids = (
+            set(filename_matches)
+            | set(field_matches)
+            | set(page_text_matches)
+        )
+
+        if not matching_ids:
+            return DocumentSearchResponse(documents=[], total=0)
+
+    base_query = select(Document)
+
+    if matching_ids is not None:
+        base_query = base_query.where(Document.id.in_(matching_ids))
+
+    if document_type:
+        base_query = base_query.where(
+            Document.document_type == document_type
+        )
+
+    all_matching = list(
+        database.scalars(
+            base_query.order_by(Document.uploaded_at.desc())
+        )
+    )
+
+    summaries = [
+        _build_document_summary(database, document)
+        for document in all_matching
+    ]
+
+    if status:
+        summaries = [
+            summary for summary in summaries if summary.status == status
+        ]
+
+    total = len(summaries)
+    page = summaries[offset : offset + limit]
+
+    return DocumentSearchResponse(documents=page, total=total)
+
+
+@router.get(
+    "/audit-log",
+    response_model=GlobalAuditLogResponse,
+)
+async def get_global_audit_log(
+    limit: int = 50,
+    offset: int = 0,
+    database: Session = Depends(get_database),
+) -> GlobalAuditLogResponse:
+    total = database.scalar(
+        select(func.count(MetadataFieldAuditLog.id))
+    ) or 0
+
+    rows = list(
+        database.scalars(
+            select(MetadataFieldAuditLog)
+            .order_by(MetadataFieldAuditLog.changed_at.desc())
+            .offset(offset)
+            .limit(limit)
+        )
+    )
+
+    document_ids = {row.document_id for row in rows}
+    filenames = {
+        document_id: filename
+        for document_id, filename in database.execute(
+            select(Document.id, Document.original_filename).where(
+                Document.id.in_(document_ids)
+            )
+        )
+    }
+
+    entries = [
+        GlobalAuditEntry(
+            document_id=row.document_id,
+            document_filename=filenames.get(
+                row.document_id, "Unknown document"
+            ),
+            field_key=row.field_key,
+            action=row.action,
+            previous_value=row.previous_value,
+            new_value=row.new_value,
+            changed_by=row.changed_by,
+            changed_at=row.changed_at,
+        )
+        for row in rows
+    ]
+
+    return GlobalAuditLogResponse(entries=entries, total=total)
 
 
 @router.get(
@@ -574,4 +741,6 @@ async def get_document(
         encrypted=document.encrypted,
         uploaded_at=document.uploaded_at,
         message="",
+        approved_by=document.approved_by,
+        approved_at=document.approved_at,
     )

@@ -243,6 +243,102 @@ def test_relationship_reject_clears_parent() -> None:
     assert second_reject.status_code == 409
 
 
+def test_child_relationships_lists_confirmed_and_pending_children() -> None:
+    contract_number = unique_contract_number()
+
+    msa_id = upload_and_extract(
+        [
+            "Contract Title: Master Services Agreement",
+            f"Contract Number: {contract_number}",
+        ],
+        f"msa-{uuid4()}.pdf",
+    )
+    analyze(msa_id)
+
+    no_children_yet = client.get(
+        f"/api/documents/{msa_id}/child-relationships"
+    )
+    assert no_children_yet.status_code == 200
+    assert no_children_yet.json()["children"] == []
+
+    amendment_id = upload_and_extract(
+        [
+            "Contract Title: Amendment No. 4 to Master Services Agreement",
+            f"Contract Number: {unique_contract_number('AMD')}",
+            (
+                "This Amendment is entered into pursuant to the "
+                f"Master Services Agreement ({contract_number})."
+            ),
+        ],
+        f"amendment-{uuid4()}.pdf",
+    )
+    analyze(amendment_id)
+
+    client.post(
+        f"/api/documents/{amendment_id}/confirm-relationship",
+        json={"action": "confirm"},
+    )
+
+    response = client.get(f"/api/documents/{msa_id}/child-relationships")
+    assert response.status_code == 200
+
+    body = response.json()
+    assert body["parent_document_id"] == msa_id
+    assert len(body["children"]) == 1
+
+    child = body["children"][0]
+    assert child["child_document_id"] == amendment_id
+    assert child["status"] == "confirmed"
+    assert child["relationship_type"] == "amendment_of"
+
+
+def test_approve_document_requires_full_review() -> None:
+    contract_number = unique_contract_number()
+
+    document_id = upload_and_extract(
+        [
+            "Contract Title: Master Services Agreement",
+            f"Contract Number: {contract_number}",
+            "Governing Law: State of Delaware",
+        ],
+        f"msa-{uuid4()}.pdf",
+    )
+    analyze(document_id)
+
+    blocked = client.post(
+        f"/api/documents/{document_id}/approve",
+        json={"changed_by": "Consult America"},
+    )
+    assert blocked.status_code == 409
+
+    fields = client.get(
+        f"/api/documents/{document_id}/analyze-contract"
+    ).json()["metadata_fields"]
+
+    for field in fields:
+        review = client.post(
+            f"/api/documents/{document_id}/metadata-fields/"
+            f"{field['field_key']}/review",
+            json={"action": "accept", "changed_by": "Consult America"},
+        )
+        assert review.status_code == 200
+
+    approved = client.post(
+        f"/api/documents/{document_id}/approve",
+        json={"changed_by": "Consult America"},
+    )
+    assert approved.status_code == 200
+
+    body = approved.json()
+    assert body["document_id"] == document_id
+    assert body["approved_by"] == "Consult America"
+    assert body["approved_at"]
+
+    detail = client.get(f"/api/documents/{document_id}")
+    assert detail.status_code == 200
+    assert detail.json()["approved_by"] == "Consult America"
+
+
 def test_section_citation_detected() -> None:
     document_id = upload_and_extract(
         [

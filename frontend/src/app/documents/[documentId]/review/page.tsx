@@ -2,38 +2,42 @@
 
 import { use, useEffect, useState } from "react";
 import Link from "next/link";
-import {
-  ArrowLeft,
-  CheckCircle2,
-  PenLine,
-  ScrollText,
-  Table2,
-} from "lucide-react";
+import { ArrowLeft, BadgeCheck } from "lucide-react";
 
-import ClauseList from "@/components/clause-list";
+import ContractRelationshipsTree from "@/components/contract-relationships-tree";
+import DocumentProfileCard from "@/components/document-profile-card";
 import ExportMenu from "@/components/export-menu";
+import ExtractionWorkspace from "@/components/extraction-workspace";
 import PdfPageViewer from "@/components/pdf-page-viewer";
-import RateCardTable from "@/components/rate-card-table";
+import PdfToolbar, { type SearchMatch } from "@/components/pdf-toolbar";
+import PipelineStrip from "@/components/pipeline-strip";
+import RelationshipCard from "@/components/relationship-card";
 import ReviewFieldList from "@/components/review-field-list";
-import SignatureList from "@/components/signature-list";
 import {
   acceptAllMetadataFields,
+  approveDocument,
+  confirmRelationship,
   extractClauses,
   extractSignatures,
   extractTables,
+  getChildRelationships,
   getClauses,
   getContractAnalysis,
   getDocument,
+  getDocumentPages,
   getPageRender,
   getSignatures,
   reviewMetadataField,
 } from "@/lib/documents";
 import type {
+  ChildRelationship,
   ClauseResult,
   ContractAnalysisResult,
+  DocumentPage,
   MetadataField,
   NormalizedTable,
   PageRender,
+  RelationshipAction,
   ReviewAction,
   SignatureResult,
   UploadedDocument,
@@ -41,11 +45,6 @@ import type {
 
 interface ReviewPageProps {
   params: Promise<{ documentId: string }>;
-}
-
-interface ActiveSource {
-  pageNumber: number;
-  sourceText: string;
 }
 
 export default function ReviewWorkspacePage({
@@ -57,22 +56,43 @@ export default function ReviewWorkspacePage({
     useState<UploadedDocument | null>(null);
   const [analysis, setAnalysis] =
     useState<ContractAnalysisResult | null>(null);
+  const [children, setChildren] = useState<ChildRelationship[]>([]);
   const [loadError, setLoadError] = useState("");
 
-  const [reviewerName, setReviewerName] = useState("Asif Khan");
+  const [reviewerName, setReviewerName] = useState("Consult America");
 
   const [activeFieldKey, setActiveFieldKey] =
     useState<string | null>(null);
-  const [activeSource, setActiveSource] =
-    useState<ActiveSource | null>(null);
+
+  const [currentPage, setCurrentPage] = useState(1);
+  const [highlightText, setHighlightText] = useState<string | null>(
+    null,
+  );
   const [pageRender, setPageRender] =
     useState<PageRender | null>(null);
   const [renderLoading, setRenderLoading] = useState(false);
   const [renderError, setRenderError] = useState("");
 
+  const [zoom, setZoom] = useState(1);
+  const [rotation, setRotation] = useState<0 | 90 | 180 | 270>(0);
+
+  const [documentPages, setDocumentPages] = useState<
+    DocumentPage[] | null
+  >(null);
+  const [searching, setSearching] = useState(false);
+  const [searchResults, setSearchResults] = useState<
+    SearchMatch[] | null
+  >(null);
+  const [lastQuery, setLastQuery] = useState("");
+
   const [reviewingKey, setReviewingKey] =
     useState<string | null>(null);
   const [acceptingAll, setAcceptingAll] = useState(false);
+
+  const [relationshipBusy, setRelationshipBusy] = useState(false);
+
+  const [approving, setApproving] = useState(false);
+  const [approveError, setApproveError] = useState("");
 
   const [clauses, setClauses] = useState<ClauseResult[]>([]);
   const [extractingClauses, setExtractingClauses] =
@@ -101,11 +121,13 @@ export default function ReviewWorkspacePage({
           analysisResult,
           clausesResult,
           signaturesResult,
+          childrenResult,
         ] = await Promise.all([
           getDocument(documentId),
           getContractAnalysis(documentId),
           getClauses(documentId).catch(() => null),
           getSignatures(documentId).catch(() => null),
+          getChildRelationships(documentId).catch(() => null),
         ]);
 
         if (!active) return;
@@ -121,14 +143,16 @@ export default function ReviewWorkspacePage({
           setSignatures(signaturesResult.signatures);
         }
 
+        if (childrenResult) {
+          setChildren(childrenResult.children);
+        }
+
         const firstField = analysisResult.metadata_fields[0];
 
         if (firstField) {
           setActiveFieldKey(firstField.field_key);
-          setActiveSource({
-            pageNumber: firstField.evidence.page_number,
-            sourceText: firstField.evidence.source_text,
-          });
+          setCurrentPage(firstField.evidence.page_number);
+          setHighlightText(firstField.evidence.source_text);
         }
       } catch (error) {
         if (!active) return;
@@ -149,11 +173,6 @@ export default function ReviewWorkspacePage({
   }, [documentId]);
 
   useEffect(() => {
-    if (!activeSource) {
-      return;
-    }
-
-    const source = activeSource;
     let active = true;
 
     async function loadPage() {
@@ -163,8 +182,8 @@ export default function ReviewWorkspacePage({
       try {
         const render = await getPageRender(
           documentId,
-          source.pageNumber,
-          source.sourceText,
+          currentPage,
+          highlightText ?? undefined,
         );
 
         if (active) {
@@ -190,30 +209,83 @@ export default function ReviewWorkspacePage({
     return () => {
       active = false;
     };
-  }, [activeSource, documentId]);
+  }, [currentPage, highlightText, documentId]);
 
   function handleSelectField(field: MetadataField) {
     setActiveFieldKey(field.field_key);
-    setActiveSource({
-      pageNumber: field.evidence.page_number,
-      sourceText: field.evidence.source_text,
-    });
+    setCurrentPage(field.evidence.page_number);
+    setHighlightText(field.evidence.source_text);
   }
 
   function handleViewClauseSource(clause: ClauseResult) {
     setActiveFieldKey(null);
-    setActiveSource({
-      pageNumber: clause.evidence.page_number,
-      sourceText: clause.evidence.source_text,
-    });
+    setCurrentPage(clause.evidence.page_number);
+    setHighlightText(clause.evidence.source_text);
   }
 
   function handleViewSignatureSource(signature: SignatureResult) {
     setActiveFieldKey(null);
-    setActiveSource({
-      pageNumber: signature.evidence.page_number,
-      sourceText: signature.evidence.source_text,
-    });
+    setCurrentPage(signature.evidence.page_number);
+    setHighlightText(signature.evidence.source_text);
+  }
+
+  function handlePageChange(page: number) {
+    if (!document || page < 1 || page > document.page_count) {
+      return;
+    }
+
+    setActiveFieldKey(null);
+    setHighlightText(null);
+    setCurrentPage(page);
+  }
+
+  function handleRotate() {
+    setRotation((current) =>
+      current === 270 ? 0 : ((current + 90) as 0 | 90 | 180 | 270),
+    );
+  }
+
+  async function handleSearch(query: string) {
+    setSearching(true);
+    setLastQuery(query);
+
+    try {
+      let pages = documentPages;
+
+      if (!pages) {
+        pages = await getDocumentPages(documentId);
+        setDocumentPages(pages);
+      }
+
+      const needle = query.toLowerCase();
+
+      const results: SearchMatch[] = pages
+        .map((page) => {
+          const haystack = page.final_text.toLowerCase();
+          let count = 0;
+          let index = haystack.indexOf(needle);
+
+          while (index !== -1) {
+            count += 1;
+            index = haystack.indexOf(needle, index + needle.length);
+          }
+
+          return { pageNumber: page.page_number, matches: count };
+        })
+        .filter((result) => result.matches > 0);
+
+      setSearchResults(results);
+    } catch {
+      setSearchResults([]);
+    } finally {
+      setSearching(false);
+    }
+  }
+
+  function handleJumpToResult(pageNumber: number) {
+    setActiveFieldKey(null);
+    setCurrentPage(pageNumber);
+    setHighlightText(lastQuery);
   }
 
   async function handleReviewField(
@@ -284,6 +356,71 @@ export default function ReviewWorkspacePage({
       // Non-fatal.
     } finally {
       setAcceptingAll(false);
+    }
+  }
+
+  async function handleRelationshipAction(
+    action: RelationshipAction,
+  ) {
+    if (!analysis?.relationship) {
+      return;
+    }
+
+    setRelationshipBusy(true);
+
+    try {
+      const result = await confirmRelationship(documentId, action);
+
+      setAnalysis((current) => {
+        if (!current) return current;
+
+        return {
+          ...current,
+          relationship: result.relationship,
+        };
+      });
+    } catch {
+      // Non-fatal; the card simply stays actionable for retry.
+    } finally {
+      setRelationshipBusy(false);
+    }
+  }
+
+  function handleChildrenChanged(updated: ChildRelationship[]) {
+    setChildren(updated);
+  }
+
+  async function handleApprove() {
+    if (!reviewerName.trim()) {
+      return;
+    }
+
+    setApproving(true);
+    setApproveError("");
+
+    try {
+      const result = await approveDocument(
+        documentId,
+        reviewerName.trim(),
+      );
+
+      setDocument((current) =>
+        current
+          ? {
+              ...current,
+              approved_by: result.approved_by,
+              approved_at: result.approved_at,
+            }
+          : current,
+      );
+    } catch (error) {
+      setApproveError(
+        error instanceof Error
+          ? error.message
+          : "Unable to approve this document.",
+      );
+    } finally {
+      setApproving(false);
     }
   }
 
@@ -371,6 +508,14 @@ export default function ReviewWorkspacePage({
     (field) => field.field_key === "contract_number",
   )?.value;
 
+  const fieldsExtracted = analysis.metadata_fields.length > 0;
+  const humanReviewComplete =
+    fieldsExtracted &&
+    analysis.metadata_fields.every(
+      (field) => field.review_status !== "pending",
+    );
+  const approved = Boolean(document.approved_at);
+
   return (
     <div className="flex h-[calc(100vh-4rem)] flex-col">
       <div className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-b border-slate-200 bg-white px-6 py-3">
@@ -387,6 +532,13 @@ export default function ReviewWorkspacePage({
             {contractNumber ?? document.original_filename}
           </p>
         </div>
+
+        <PipelineStrip
+          classified={Boolean(analysis.classification?.document_type)}
+          fieldsExtracted={fieldsExtracted}
+          humanReviewComplete={humanReviewComplete}
+          approved={approved}
+        />
 
         <div className="flex items-center gap-4">
           <ExportMenu
@@ -410,109 +562,119 @@ export default function ReviewWorkspacePage({
             />
           </label>
 
-          <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700">
-            <CheckCircle2 className="h-3.5 w-3.5" />
-            Extraction: Complete
-          </span>
+          {approved ? (
+            <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700">
+              <BadgeCheck className="h-3.5 w-3.5" />
+              Approved by {document.approved_by}
+            </span>
+          ) : (
+            <button
+              type="button"
+              onClick={handleApprove}
+              disabled={!humanReviewComplete || approving}
+              title={
+                humanReviewComplete
+                  ? undefined
+                  : "Every extracted field must be reviewed before this document can be approved."
+              }
+              className="inline-flex items-center gap-1.5 rounded-full bg-blue-600 px-3 py-1 text-xs font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-400"
+            >
+              <BadgeCheck className="h-3.5 w-3.5" />
+              {approving ? "Approving..." : "Approve Document"}
+            </button>
+          )}
         </div>
       </div>
 
+      {approveError && (
+        <p className="shrink-0 border-b border-red-100 bg-red-50 px-6 py-1.5 text-xs text-red-700">
+          {approveError}
+        </p>
+      )}
+
       <div className="grid flex-1 grid-cols-2 overflow-hidden">
         <div className="flex flex-col overflow-hidden border-r border-slate-200">
+          <PdfToolbar
+            currentPage={currentPage}
+            pageCount={document.page_count}
+            onPageChange={handlePageChange}
+            zoom={zoom}
+            onZoomChange={setZoom}
+            onRotate={handleRotate}
+            onSearch={handleSearch}
+            searching={searching}
+            searchResults={searchResults}
+            onJumpToResult={handleJumpToResult}
+          />
+
           <div className="flex-1 overflow-hidden">
             <PdfPageViewer
               render={pageRender}
               loading={renderLoading}
               error={renderError}
+              zoom={zoom}
+              rotation={rotation}
             />
           </div>
 
-          <div className="shrink-0 space-y-3 overflow-y-auto border-t border-slate-200 bg-slate-50 p-4">
-            <div className="flex flex-wrap gap-2">
-              <button
-                type="button"
-                onClick={handleExtractClauses}
-                disabled={extractingClauses}
-                className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                <ScrollText className="h-3.5 w-3.5" />
-                {extractingClauses
-                  ? "Extracting Clauses..."
-                  : "Extract Clauses"}
-              </button>
-
-              <button
-                type="button"
-                onClick={handleExtractTables}
-                disabled={extractingTables}
-                className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                <Table2 className="h-3.5 w-3.5" />
-                {extractingTables
-                  ? "Extracting Tables..."
-                  : "Extract Tables"}
-              </button>
-
-              <button
-                type="button"
-                onClick={handleExtractSignatures}
-                disabled={extractingSignatures}
-                className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                <PenLine className="h-3.5 w-3.5" />
-                {extractingSignatures
-                  ? "Extracting Signatures..."
-                  : "Extract Signatures"}
-              </button>
-            </div>
-
-            {clausesError && (
-              <p className="text-xs text-red-700">
-                {clausesError}
-              </p>
-            )}
-            {tablesError && (
-              <p className="text-xs text-red-700">
-                {tablesError}
-              </p>
-            )}
-            {signaturesError && (
-              <p className="text-xs text-red-700">
-                {signaturesError}
-              </p>
-            )}
-
-            {clauses.length > 0 && (
-              <ClauseList
-                clauses={clauses}
-                onViewSource={handleViewClauseSource}
-              />
-            )}
-
-            {tables.length > 0 && (
-              <RateCardTable tables={tables} />
-            )}
-
-            {signatures.length > 0 && (
-              <SignatureList
-                signatures={signatures}
-                onViewSource={handleViewSignatureSource}
-              />
-            )}
+          <div className="shrink-0 max-h-[45vh] overflow-y-auto border-t border-slate-200 bg-slate-50 p-4">
+            <ExtractionWorkspace
+              clauses={clauses}
+              extractingClauses={extractingClauses}
+              clausesError={clausesError}
+              onExtractClauses={handleExtractClauses}
+              onViewClauseSource={handleViewClauseSource}
+              tables={tables}
+              extractingTables={extractingTables}
+              tablesError={tablesError}
+              onExtractTables={handleExtractTables}
+              signatures={signatures}
+              extractingSignatures={extractingSignatures}
+              signaturesError={signaturesError}
+              onExtractSignatures={handleExtractSignatures}
+              onViewSignatureSource={handleViewSignatureSource}
+            />
           </div>
         </div>
 
-        <div className="overflow-hidden">
-          <ReviewFieldList
-            documentId={documentId}
-            fields={analysis.metadata_fields}
-            activeFieldKey={activeFieldKey}
-            onSelectField={handleSelectField}
-            onReviewField={handleReviewField}
-            onAcceptAll={handleAcceptAll}
-            reviewingKey={reviewingKey}
-            acceptingAll={acceptingAll}
-          />
+        <div className="flex h-full flex-col overflow-hidden">
+          <div className="max-h-[45vh] shrink-0 space-y-4 overflow-y-auto p-4 pb-0">
+            <DocumentProfileCard
+              classification={analysis.classification}
+            />
+
+            {analysis.relationship && (
+              <RelationshipCard
+                relationship={analysis.relationship}
+                onConfirm={() =>
+                  handleRelationshipAction("confirm")
+                }
+                onReject={() => handleRelationshipAction("reject")}
+                busy={relationshipBusy}
+              />
+            )}
+
+            {children.length > 0 && (
+              <ContractRelationshipsTree
+                rootLabel={contractNumber ?? document.original_filename}
+                childRelationships={children}
+                onChanged={handleChildrenChanged}
+              />
+            )}
+          </div>
+
+          <div className="min-h-0 flex-1">
+            <ReviewFieldList
+              documentId={documentId}
+              fields={analysis.metadata_fields}
+              activeFieldKey={activeFieldKey}
+              onSelectField={handleSelectField}
+              onReviewField={handleReviewField}
+              onAcceptAll={handleAcceptAll}
+              reviewingKey={reviewingKey}
+              acceptingAll={acceptingAll}
+            />
+          </div>
         </div>
       </div>
     </div>

@@ -1,20 +1,25 @@
-import { apiUrl } from "@/lib/api";
+import { apiFetch } from "@/lib/api";
 
 import type {
+  ApproveDocumentResult,
+  ChildRelationshipsResult,
   ClauseExtractionResult,
   ConfirmRelationshipResult,
   ContractAnalysisResult,
   DashboardStats,
   DocumentPage,
+  DocumentSearchResponse,
   DocumentSummary,
   DuplicateResolution,
   ExtractionSummary,
   FieldAuditEntry,
   FinancialAnalysisResult,
+  GlobalAuditLogResponse,
   MetadataField,
   PageRender,
   RelationshipAction,
   ReviewAction,
+  ReviewQueueEntry,
   SignatureExtractionResult,
   StructuredContractOutput,
   TableExtractionResult,
@@ -25,8 +30,8 @@ import type {
 export async function listDocuments(
   limit = 10,
 ): Promise<DocumentSummary[]> {
-  const response = await fetch(
-    apiUrl(`/api/documents?limit=${limit}`),
+  const response = await apiFetch(
+    `/api/documents?limit=${limit}`,
   );
 
   const result = await response.json();
@@ -43,7 +48,7 @@ export async function listDocuments(
 }
 
 export async function getDashboardStats(): Promise<DashboardStats> {
-  const response = await fetch(apiUrl("/api/dashboard/stats"));
+  const response = await apiFetch("/api/dashboard/stats");
 
   const result = await response.json();
 
@@ -58,15 +63,88 @@ export async function getDashboardStats(): Promise<DashboardStats> {
   return result;
 }
 
+export interface DocumentSearchParams {
+  q?: string;
+  status?: string;
+  documentType?: string;
+  limit?: number;
+  offset?: number;
+}
+
+export async function searchDocuments(
+  params: DocumentSearchParams = {},
+): Promise<DocumentSearchResponse> {
+  const query = new URLSearchParams();
+
+  if (params.q) query.set("q", params.q);
+  if (params.status) query.set("status", params.status);
+  if (params.documentType) {
+    query.set("document_type", params.documentType);
+  }
+  query.set("limit", String(params.limit ?? 25));
+  query.set("offset", String(params.offset ?? 0));
+
+  const response = await apiFetch(
+    `/api/documents/search?${query.toString()}`,
+  );
+
+  const result = await response.json();
+
+  if (!response.ok) {
+    throw new Error(
+      typeof result.detail === "string"
+        ? result.detail
+        : "Unable to search documents.",
+    );
+  }
+
+  return result;
+}
+
+export async function getGlobalAuditLog(
+  limit = 50,
+  offset = 0,
+): Promise<GlobalAuditLogResponse> {
+  const response = await apiFetch(
+    `/api/documents/audit-log?limit=${limit}&offset=${offset}`,
+  );
+
+  const result = await response.json();
+
+  if (!response.ok) {
+    throw new Error(
+      typeof result.detail === "string"
+        ? result.detail
+        : "Unable to retrieve the audit log.",
+    );
+  }
+
+  return result;
+}
+
+export async function getReviewQueue(): Promise<ReviewQueueEntry[]> {
+  const response = await apiFetch("/api/dashboard/review-queue");
+
+  const result = await response.json();
+
+  if (!response.ok) {
+    throw new Error(
+      typeof result.detail === "string"
+        ? result.detail
+        : "Unable to retrieve the review queue.",
+    );
+  }
+
+  return result;
+}
+
 export async function resolveDuplicate(
   documentId: string,
   action: DuplicateResolution,
   originalFilename?: string,
 ): Promise<UploadedDocument> {
-  const response = await fetch(
-    apiUrl(
-      `/api/documents/${documentId}/resolve-duplicate`,
-    ),
+  const response = await apiFetch(
+    `/api/documents/${documentId}/resolve-duplicate`,
     {
       method: "POST",
       headers: {
@@ -95,10 +173,8 @@ export async function resolveDuplicate(
 export async function extractDocumentPages(
   documentId: string,
 ): Promise<ExtractionSummary> {
-  const response = await fetch(
-    apiUrl(
-      `/api/documents/${documentId}/extract-pages`,
-    ),
+  const response = await apiFetch(
+    `/api/documents/${documentId}/extract-pages`,
     {
       method: "POST",
       headers: {
@@ -129,8 +205,8 @@ export async function extractDocumentPages(
 export async function getDocumentPages(
   documentId: string,
 ): Promise<DocumentPage[]> {
-  const response = await fetch(
-    apiUrl(`/api/documents/${documentId}/pages`),
+  const response = await apiFetch(
+    `/api/documents/${documentId}/pages`,
   );
 
   const result = await response.json();
@@ -150,19 +226,13 @@ export async function analyzeFinancialDocument(
   documentId: string,
   instruction: string,
 ): Promise<FinancialAnalysisResult> {
-
-  const response = await fetch(
-    apiUrl(
-      `/api/documents/${documentId}/analyze`,
-    ),
+  const response = await apiFetch(
+    `/api/documents/${documentId}/analyze`,
     {
       method: "POST",
-
       headers: {
-        "Content-Type":
-          "application/json",
+        "Content-Type": "application/json",
       },
-
       body: JSON.stringify({
         instruction,
         page_start: null,
@@ -188,10 +258,8 @@ export async function analyzeContract(
   documentId: string,
   extractionModelId?: number | null,
 ): Promise<ContractAnalysisResult> {
-  const response = await fetch(
-    apiUrl(
-      `/api/documents/${documentId}/analyze-contract`,
-    ),
+  const response = await apiFetch(
+    `/api/documents/${documentId}/analyze-contract`,
     {
       method: "POST",
       headers: {
@@ -220,10 +288,8 @@ export async function confirmRelationship(
   documentId: string,
   action: RelationshipAction,
 ): Promise<ConfirmRelationshipResult> {
-  const response = await fetch(
-    apiUrl(
-      `/api/documents/${documentId}/confirm-relationship`,
-    ),
+  const response = await apiFetch(
+    `/api/documents/${documentId}/confirm-relationship`,
     {
       method: "POST",
       headers: {
@@ -246,13 +312,59 @@ export async function confirmRelationship(
   return result;
 }
 
+export async function getChildRelationships(
+  documentId: string,
+): Promise<ChildRelationshipsResult> {
+  const response = await apiFetch(
+    `/api/documents/${documentId}/child-relationships`,
+  );
+
+  const result = await response.json();
+
+  if (!response.ok) {
+    throw new Error(
+      typeof result.detail === "string"
+        ? result.detail
+        : "Unable to retrieve contract relationships.",
+    );
+  }
+
+  return result;
+}
+
+export async function approveDocument(
+  documentId: string,
+  changedBy: string,
+): Promise<ApproveDocumentResult> {
+  const response = await apiFetch(
+    `/api/documents/${documentId}/approve`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ changed_by: changedBy }),
+    },
+  );
+
+  const result = await response.json();
+
+  if (!response.ok) {
+    throw new Error(
+      typeof result.detail === "string"
+        ? result.detail
+        : "Unable to approve this document.",
+    );
+  }
+
+  return result;
+}
+
 export async function getStructuredOutput(
   documentId: string,
 ): Promise<StructuredContractOutput> {
-  const response = await fetch(
-    apiUrl(
-      `/api/documents/${documentId}/structured-output`,
-    ),
+  const response = await apiFetch(
+    `/api/documents/${documentId}/structured-output`,
   );
 
   const result = await response.json();
@@ -271,9 +383,7 @@ export async function getStructuredOutput(
 export async function getDocument(
   documentId: string,
 ): Promise<UploadedDocument> {
-  const response = await fetch(
-    apiUrl(`/api/documents/${documentId}`),
-  );
+  const response = await apiFetch(`/api/documents/${documentId}`);
 
   const result = await response.json();
 
@@ -291,10 +401,8 @@ export async function getDocument(
 export async function getContractAnalysis(
   documentId: string,
 ): Promise<ContractAnalysisResult> {
-  const response = await fetch(
-    apiUrl(
-      `/api/documents/${documentId}/analyze-contract`,
-    ),
+  const response = await apiFetch(
+    `/api/documents/${documentId}/analyze-contract`,
   );
 
   const result = await response.json();
@@ -319,10 +427,8 @@ export async function getPageRender(
     ? `?${new URLSearchParams({ highlight })}`
     : "";
 
-  const response = await fetch(
-    apiUrl(
-      `/api/documents/${documentId}/pages/${pageNumber}/render${params}`,
-    ),
+  const response = await apiFetch(
+    `/api/documents/${documentId}/pages/${pageNumber}/render${params}`,
   );
 
   const result = await response.json();
@@ -345,10 +451,8 @@ export async function reviewMetadataField(
   changedBy: string,
   value?: string,
 ): Promise<MetadataField> {
-  const response = await fetch(
-    apiUrl(
-      `/api/documents/${documentId}/metadata-fields/${fieldKey}/review`,
-    ),
+  const response = await apiFetch(
+    `/api/documents/${documentId}/metadata-fields/${fieldKey}/review`,
     {
       method: "POST",
       headers: {
@@ -379,10 +483,8 @@ export async function acceptAllMetadataFields(
   documentId: string,
   changedBy: string,
 ): Promise<MetadataField[]> {
-  const response = await fetch(
-    apiUrl(
-      `/api/documents/${documentId}/metadata-fields/accept-all`,
-    ),
+  const response = await apiFetch(
+    `/api/documents/${documentId}/metadata-fields/accept-all`,
     {
       method: "POST",
       headers: {
@@ -409,10 +511,8 @@ export async function getFieldAuditLog(
   documentId: string,
   fieldKey: string,
 ): Promise<FieldAuditEntry[]> {
-  const response = await fetch(
-    apiUrl(
-      `/api/documents/${documentId}/metadata-fields/${fieldKey}/audit-log`,
-    ),
+  const response = await apiFetch(
+    `/api/documents/${documentId}/metadata-fields/${fieldKey}/audit-log`,
   );
 
   const result = await response.json();
@@ -431,8 +531,8 @@ export async function getFieldAuditLog(
 export async function extractClauses(
   documentId: string,
 ): Promise<ClauseExtractionResult> {
-  const response = await fetch(
-    apiUrl(`/api/documents/${documentId}/extract-clauses`),
+  const response = await apiFetch(
+    `/api/documents/${documentId}/extract-clauses`,
     {
       method: "POST",
     },
@@ -454,8 +554,8 @@ export async function extractClauses(
 export async function getClauses(
   documentId: string,
 ): Promise<ClauseExtractionResult> {
-  const response = await fetch(
-    apiUrl(`/api/documents/${documentId}/extract-clauses`),
+  const response = await apiFetch(
+    `/api/documents/${documentId}/extract-clauses`,
   );
 
   const result = await response.json();
@@ -474,8 +574,8 @@ export async function getClauses(
 export async function extractTables(
   documentId: string,
 ): Promise<TableExtractionResult> {
-  const response = await fetch(
-    apiUrl(`/api/documents/${documentId}/extract-tables`),
+  const response = await apiFetch(
+    `/api/documents/${documentId}/extract-tables`,
     {
       method: "POST",
     },
@@ -497,8 +597,8 @@ export async function extractTables(
 export async function extractSignatures(
   documentId: string,
 ): Promise<SignatureExtractionResult> {
-  const response = await fetch(
-    apiUrl(`/api/documents/${documentId}/extract-signatures`),
+  const response = await apiFetch(
+    `/api/documents/${documentId}/extract-signatures`,
     {
       method: "POST",
     },
@@ -520,8 +620,8 @@ export async function extractSignatures(
 export async function getSignatures(
   documentId: string,
 ): Promise<SignatureExtractionResult> {
-  const response = await fetch(
-    apiUrl(`/api/documents/${documentId}/extract-signatures`),
+  const response = await apiFetch(
+    `/api/documents/${documentId}/extract-signatures`,
   );
 
   const result = await response.json();
@@ -541,19 +641,13 @@ export async function universalExtract(
   documentId: string,
   instruction: string,
 ): Promise<UniversalExtractionResult> {
-
-  const response = await fetch(
-    apiUrl(
-      `/api/documents/${documentId}/extract`,
-    ),
+  const response = await apiFetch(
+    `/api/documents/${documentId}/extract`,
     {
       method: "POST",
-
       headers: {
-        "Content-Type":
-          "application/json",
+        "Content-Type": "application/json",
       },
-
       body: JSON.stringify({
         instruction,
         page_start: null,
@@ -564,16 +658,13 @@ export async function universalExtract(
     },
   );
 
-  const result =
-    await response.json();
+  const result = await response.json();
 
   if (!response.ok) {
-
     throw new Error(
       typeof result.detail === "string"
         ? result.detail
-        : result.detail?.message
-          ?? "Extraction failed.",
+        : result.detail?.message ?? "Extraction failed.",
     );
   }
 

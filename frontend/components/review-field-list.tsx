@@ -5,6 +5,8 @@ import {
   Check,
   CheckCheck,
   Clock,
+  ExternalLink,
+  FileSearch,
   HelpCircle,
   Pencil,
   X,
@@ -114,30 +116,84 @@ export default function ReviewFieldList({
         </button>
       </div>
 
-      <div className="flex-1 overflow-y-auto p-4">
-        {orderedGroups.map((group) => (
-          <div key={group} className="mb-5">
-            <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-              {group}
-            </p>
+      <div className="flex-1 overflow-auto">
+        <table className="w-full min-w-[640px] border-collapse text-left text-sm">
+          <thead className="sticky top-0 z-10 bg-slate-50 text-xs font-semibold uppercase tracking-wide text-slate-500">
+            <tr>
+              <th className="px-4 py-2 font-semibold">Field</th>
+              <th className="px-4 py-2 font-semibold">
+                Extracted Value
+              </th>
+              <th className="px-4 py-2 font-semibold">Confidence</th>
+              <th className="px-4 py-2 font-semibold">Status</th>
+              <th className="px-4 py-2 font-semibold">Actions</th>
+            </tr>
+          </thead>
 
-            <div className="mt-2 space-y-1.5">
-              {groups.get(group)!.map((field) => (
-                <FieldRow
-                  key={field.field_key}
-                  documentId={documentId}
-                  field={field}
-                  active={field.field_key === activeFieldKey}
-                  busy={reviewingKey === field.field_key}
-                  onSelect={() => onSelectField(field)}
-                  onReview={onReviewField}
-                />
-              ))}
-            </div>
-          </div>
-        ))}
+          <tbody>
+            {orderedGroups.map((group) => (
+              <FieldGroupRows
+                key={group}
+                documentId={documentId}
+                group={group}
+                fields={groups.get(group)!}
+                activeFieldKey={activeFieldKey}
+                reviewingKey={reviewingKey}
+                onSelectField={onSelectField}
+                onReviewField={onReviewField}
+              />
+            ))}
+          </tbody>
+        </table>
       </div>
     </div>
+  );
+}
+
+function FieldGroupRows({
+  documentId,
+  group,
+  fields,
+  activeFieldKey,
+  reviewingKey,
+  onSelectField,
+  onReviewField,
+}: {
+  documentId: string;
+  group: string;
+  fields: MetadataField[];
+  activeFieldKey: string | null;
+  reviewingKey: string | null;
+  onSelectField: (field: MetadataField) => void;
+  onReviewField: (
+    fieldKey: string,
+    action: ReviewAction,
+    value?: string,
+  ) => Promise<void> | void;
+}) {
+  return (
+    <>
+      <tr>
+        <th
+          colSpan={5}
+          className="border-t border-slate-200 bg-slate-100 px-4 py-1.5 text-left text-xs font-semibold uppercase tracking-wide text-slate-500"
+        >
+          {group}
+        </th>
+      </tr>
+
+      {fields.map((field) => (
+        <FieldRow
+          key={field.field_key}
+          documentId={documentId}
+          field={field}
+          active={field.field_key === activeFieldKey}
+          busy={reviewingKey === field.field_key}
+          onSelect={() => onSelectField(field)}
+          onReview={onReviewField}
+        />
+      ))}
+    </>
   );
 }
 
@@ -163,6 +219,7 @@ function FieldRow({
   const [editing, setEditing] = useState(false);
   const [draftValue, setDraftValue] = useState(field.value);
 
+  const [showSource, setShowSource] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
   const [history, setHistory] = useState<
     FieldAuditEntry[] | null
@@ -203,24 +260,66 @@ function FieldRow({
   }
 
   return (
-    <div
-      className={[
-        "rounded-xl border p-3 transition",
-        active
-          ? "border-blue-400 bg-blue-50"
-          : "border-slate-200 bg-white hover:border-slate-300",
-      ].join(" ")}
-    >
-      <button
-        type="button"
+    <>
+      <tr
         onClick={onSelect}
-        className="block w-full text-left"
+        className={[
+          "cursor-pointer border-t border-slate-200 align-top transition",
+          active ? "bg-blue-50" : "bg-white hover:bg-slate-50",
+        ].join(" ")}
       >
-        <div className="flex items-center justify-between gap-2">
-          <span className="text-xs text-slate-400">
-            {field.label}
-          </span>
+        <td className="px-4 py-2.5 text-xs text-slate-500">
+          {field.label}
+        </td>
 
+        <td className="px-4 py-2.5">
+          {editing ? (
+            <div
+              onClick={(event) => event.stopPropagation()}
+              className="flex items-center gap-1.5"
+            >
+              <input
+                type="text"
+                value={draftValue}
+                onChange={(event) =>
+                  setDraftValue(event.target.value)
+                }
+                className="min-w-0 flex-1 rounded-md border border-slate-300 px-2 py-1 text-xs"
+                autoFocus
+              />
+
+              <button
+                type="button"
+                onClick={submitEdit}
+                disabled={busy}
+                className="rounded-md bg-blue-600 px-2 py-1 text-xs font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                Save
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setEditing(false);
+                  setDraftValue(field.value);
+                }}
+                className="rounded-md border border-slate-200 px-2 py-1 text-xs text-slate-600 hover:bg-slate-50"
+              >
+                Cancel
+              </button>
+            </div>
+          ) : (
+            <p className="max-w-xs truncate text-sm font-medium text-slate-800">
+              {field.value}
+            </p>
+          )}
+        </td>
+
+        <td className="px-4 py-2.5">
+          <ConfidenceBadge confidence={field.confidence} />
+        </td>
+
+        <td className="px-4 py-2.5">
           <span
             className={[
               "rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide",
@@ -229,149 +328,170 @@ function FieldRow({
           >
             {STATUS_LABELS[field.review_status]}
           </span>
-        </div>
+        </td>
 
-        <div className="mt-1 flex items-center justify-between gap-2">
-          <p className="truncate text-sm font-medium text-slate-800">
-            {field.value}
-          </p>
+        <td className="px-4 py-2.5">
+          {!editing && (
+            <div
+              onClick={(event) => event.stopPropagation()}
+              className="flex flex-wrap items-center gap-1.5"
+            >
+              <ActionButton
+                icon={<Check className="h-3 w-3" />}
+                label="Accept"
+                tone="emerald"
+                disabled={busy}
+                onClick={() => onReview(field.field_key, "accept")}
+              />
 
-          <ConfidenceBadge confidence={field.confidence} />
-        </div>
-      </button>
+              <ActionButton
+                icon={<Pencil className="h-3 w-3" />}
+                label="Edit"
+                tone="slate"
+                disabled={busy}
+                onClick={() => setEditing(true)}
+              />
 
-      {editing ? (
-        <div className="mt-2 flex items-center gap-1.5">
-          <input
-            type="text"
-            value={draftValue}
-            onChange={(event) =>
-              setDraftValue(event.target.value)
-            }
-            className="min-w-0 flex-1 rounded-md border border-slate-300 px-2 py-1 text-xs"
-            autoFocus
-          />
+              <ActionButton
+                icon={<X className="h-3 w-3" />}
+                label="Reject"
+                tone="red"
+                disabled={busy}
+                onClick={() => onReview(field.field_key, "reject")}
+              />
 
-          <button
-            type="button"
-            onClick={submitEdit}
-            disabled={busy}
-            className="rounded-md bg-blue-600 px-2 py-1 text-xs font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
-          >
-            Save
-          </button>
+              <ActionButton
+                icon={<HelpCircle className="h-3 w-3" />}
+                label="Mark Unknown"
+                tone="amber"
+                disabled={busy}
+                onClick={() =>
+                  onReview(field.field_key, "mark_unknown")
+                }
+              />
 
-          <button
-            type="button"
-            onClick={() => {
-              setEditing(false);
-              setDraftValue(field.value);
-            }}
-            className="rounded-md border border-slate-200 px-2 py-1 text-xs text-slate-600 hover:bg-slate-50"
-          >
-            Cancel
-          </button>
-        </div>
-      ) : (
-        <div className="mt-2 flex flex-wrap items-center gap-1.5">
-          <ActionButton
-            icon={<Check className="h-3 w-3" />}
-            label="Accept"
-            tone="emerald"
-            disabled={busy}
-            onClick={() => onReview(field.field_key, "accept")}
-          />
+              <button
+                type="button"
+                onClick={() => setShowSource((current) => !current)}
+                className="inline-flex items-center gap-1 text-xs font-semibold text-slate-500 hover:text-slate-700"
+              >
+                <FileSearch className="h-3 w-3" />
+                {showSource ? "Hide Source" : "Source"}
+              </button>
 
-          <ActionButton
-            icon={<Pencil className="h-3 w-3" />}
-            label="Edit"
-            tone="slate"
-            disabled={busy}
-            onClick={() => setEditing(true)}
-          />
+              <button
+                type="button"
+                onClick={toggleHistory}
+                className="inline-flex items-center gap-1 text-xs font-semibold text-slate-500 hover:text-slate-700"
+              >
+                <Clock className="h-3 w-3" />
+                {showHistory ? "Hide History" : "History"}
+              </button>
+            </div>
+          )}
+        </td>
+      </tr>
 
-          <ActionButton
-            icon={<X className="h-3 w-3" />}
-            label="Reject"
-            tone="red"
-            disabled={busy}
-            onClick={() => onReview(field.field_key, "reject")}
-          />
+      {showSource && (
+        <tr className="border-t border-slate-100 bg-slate-50">
+          <td colSpan={5} className="px-4 py-2.5">
+            <div className="space-y-2 rounded-lg border border-slate-200 bg-white p-2.5 text-xs">
+              <div className="flex flex-wrap items-center gap-3 text-slate-500">
+                <span>
+                  Page{" "}
+                  <span className="font-medium text-slate-800">
+                    {field.evidence.page_number}
+                  </span>
+                </span>
 
-          <ActionButton
-            icon={<HelpCircle className="h-3 w-3" />}
-            label="Mark Unknown"
-            tone="amber"
-            disabled={busy}
-            onClick={() =>
-              onReview(field.field_key, "mark_unknown")
-            }
-          />
+                {field.evidence.section && (
+                  <span>
+                    Section{" "}
+                    <span className="font-medium text-slate-800">
+                      {field.evidence.section}
+                    </span>
+                  </span>
+                )}
+              </div>
 
-          <button
-            type="button"
-            onClick={toggleHistory}
-            className="ml-auto inline-flex items-center gap-1 text-xs font-semibold text-slate-500 hover:text-slate-700"
-          >
-            <Clock className="h-3 w-3" />
-            {showHistory ? "Hide History" : "History"}
-          </button>
-        </div>
+              <p className="rounded-md bg-slate-50 p-2 italic text-slate-700">
+                &ldquo;{field.evidence.source_text}&rdquo;
+              </p>
+
+              <button
+                type="button"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onSelect();
+                }}
+                className="inline-flex items-center gap-1 text-xs font-semibold text-blue-700 hover:text-blue-800"
+              >
+                <ExternalLink className="h-3 w-3" />
+                Open Source
+              </button>
+            </div>
+          </td>
+        </tr>
       )}
 
       {showHistory && (
-        <div className="mt-3 space-y-2 rounded-lg border border-slate-200 bg-white p-2.5 text-xs">
-          <div>
-            <span className="text-slate-400">AI extracted</span>
-            <p className="font-medium text-slate-800">
-              {field.original_value}
-            </p>
-          </div>
-
-          {historyLoading && (
-            <p className="text-slate-400">Loading history...</p>
-          )}
-
-          {!historyLoading &&
-            history !== null &&
-            history.length === 0 && (
-              <p className="text-slate-400">
-                No reviewer actions yet.
-              </p>
-            )}
-
-          {!historyLoading &&
-            history?.map((entry, index) => (
-              <div
-                key={index}
-                className="border-t border-slate-100 pt-2"
-              >
-                <span className="text-slate-400">
-                  Reviewer {ACTION_LABELS[entry.action].toLowerCase()}
-                  {entry.new_value &&
-                  entry.new_value !== entry.previous_value
-                    ? ":"
-                    : ""}
-                </span>
-
-                {entry.new_value &&
-                  entry.new_value !== entry.previous_value && (
-                    <p className="font-medium text-slate-800">
-                      {entry.new_value}
-                    </p>
-                  )}
-
-                <p className="mt-1 text-slate-500">
-                  Changed by: {entry.changed_by}
-                </p>
-                <p className="text-slate-400">
-                  {new Date(entry.changed_at).toLocaleString()}
+        <tr className="border-t border-slate-100 bg-slate-50">
+          <td colSpan={5} className="px-4 py-2.5">
+            <div className="space-y-2 rounded-lg border border-slate-200 bg-white p-2.5 text-xs">
+              <div>
+                <span className="text-slate-400">AI extracted</span>
+                <p className="font-medium text-slate-800">
+                  {field.original_value}
                 </p>
               </div>
-            ))}
-        </div>
+
+              {historyLoading && (
+                <p className="text-slate-400">Loading history...</p>
+              )}
+
+              {!historyLoading &&
+                history !== null &&
+                history.length === 0 && (
+                  <p className="text-slate-400">
+                    No reviewer actions yet.
+                  </p>
+                )}
+
+              {!historyLoading &&
+                history?.map((entry, index) => (
+                  <div
+                    key={index}
+                    className="border-t border-slate-100 pt-2"
+                  >
+                    <span className="text-slate-400">
+                      Reviewer{" "}
+                      {ACTION_LABELS[entry.action].toLowerCase()}
+                      {entry.new_value &&
+                      entry.new_value !== entry.previous_value
+                        ? ":"
+                        : ""}
+                    </span>
+
+                    {entry.new_value &&
+                      entry.new_value !== entry.previous_value && (
+                        <p className="font-medium text-slate-800">
+                          {entry.new_value}
+                        </p>
+                      )}
+
+                    <p className="mt-1 text-slate-500">
+                      Changed by: {entry.changed_by}
+                    </p>
+                    <p className="text-slate-400">
+                      {new Date(entry.changed_at).toLocaleString()}
+                    </p>
+                  </div>
+                ))}
+            </div>
+          </td>
+        </tr>
       )}
-    </div>
+    </>
   );
 }
 

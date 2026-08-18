@@ -1,10 +1,11 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   ChevronDown,
   ChevronUp,
   FileSearch,
+  Loader2,
   ScanText,
 } from "lucide-react";
 
@@ -12,15 +13,68 @@ import type { DocumentPage } from "@/types/document";
 
 interface ExtractedPagesProps {
   pages: DocumentPage[];
+  extracting?: boolean;
+  error?: string;
+  onRetry?: () => void;
 }
 
 export default function ExtractedPages({
   pages,
+  extracting = false,
+  error = "",
+  onRetry,
 }: ExtractedPagesProps) {
   const [expandedPage, setExpandedPage] =
     useState<number | null>(
       pages.length > 0 ? pages[0].page_number : null,
     );
+
+  useEffect(() => {
+    if (pages.length > 0 && expandedPage === null) {
+      setExpandedPage(pages[0].page_number);
+    }
+  }, [pages, expandedPage]);
+
+  if (extracting) {
+    return (
+      <div className="rounded-2xl border border-slate-200 bg-white p-8 text-center shadow-sm">
+        <Loader2 className="mx-auto h-8 w-8 animate-spin text-blue-600" />
+
+        <p className="mt-3 font-medium text-slate-700">
+          Extracting pages
+        </p>
+
+        <p className="mt-1 text-sm text-slate-500">
+          Reading text from the uploaded document. This can
+          take a moment for large PDFs.
+        </p>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="rounded-2xl border border-red-200 bg-white p-8 text-center shadow-sm">
+        <FileSearch className="mx-auto h-8 w-8 text-red-400" />
+
+        <p className="mt-3 font-medium text-slate-700">
+          Page extraction failed
+        </p>
+
+        <p className="mt-1 text-sm text-red-600">{error}</p>
+
+        {onRetry && (
+          <button
+            type="button"
+            onClick={onRetry}
+            className="mt-4 rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700"
+          >
+            Retry extraction
+          </button>
+        )}
+      </div>
+    );
+  }
 
   if (pages.length === 0) {
     return (
@@ -28,11 +82,12 @@ export default function ExtractedPages({
         <FileSearch className="mx-auto h-8 w-8 text-slate-300" />
 
         <p className="mt-3 font-medium text-slate-700">
-          No extracted pages yet
+          Waiting for a document
         </p>
 
         <p className="mt-1 text-sm text-slate-500">
-          Run document extraction to view page-level text.
+          Upload a file and page text will appear here
+          automatically.
         </p>
       </div>
     );

@@ -155,3 +155,14 @@ class Document(Base):
         Float,
         nullable=True,
     )
+
+    # Approval gate (review workspace pipeline).
+    approved_by: Mapped[str | None] = mapped_column(
+        String(120),
+        nullable=True,
+    )
+
+    approved_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )

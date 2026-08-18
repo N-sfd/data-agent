@@ -1,3 +1,4 @@
+from datetime import datetime, timezone
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -14,6 +15,10 @@ from app.models.extraction_model import ExtractionField
 from app.schemas.contract_analysis import (
     AcceptAllRequest,
     AnalyzeContractRequest,
+    ApproveDocumentRequest,
+    ApproveDocumentResponse,
+    ChildRelationship,
+    ChildRelationshipsResponse,
     ConfirmRelationshipRequest,
     ConfirmRelationshipResponse,
     ContractAnalysisResponse,
@@ -53,6 +58,7 @@ from app.services.contract_structured_output import (
 from app.services.contract_table_extractor import (
     normalize_document_tables,
 )
+from app.services.dashboard_stats import compute_document_status
 from app.services.relationship_detector import (
     DetectedRelationshipMatch,
     detect_relationship,
@@ -363,6 +369,108 @@ async def confirm_relationship(
         document_id=document.id,
         status="rejected",
         relationship=None,
+    )
+
+
+@router.get(
+    "/{document_id}/child-relationships",
+    response_model=ChildRelationshipsResponse,
+)
+async def get_child_relationships(
+    document_id: str,
+    database: Session = Depends(get_database),
+) -> ChildRelationshipsResponse:
+    parent = database.get(Document, document_id)
+
+    if parent is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Document not found.",
+        )
+
+    child_documents = list(
+        database.scalars(
+            select(Document).where(
+                Document.parent_document_id == document_id
+            )
+        )
+    )
+
+    children: list[ChildRelationship] = []
+
+    for child in child_documents:
+        title_field = get_metadata_field(
+            database,
+            document_id=child.id,
+            field_key="contract_title",
+        )
+        number_field = get_metadata_field(
+            database,
+            document_id=child.id,
+            field_key="contract_number",
+        )
+
+        children.append(
+            ChildRelationship(
+                child_document_id=child.id,
+                child_document_title=(
+                    title_field.value
+                    if title_field and title_field.value
+                    else child.original_filename
+                ),
+                child_document_number=(
+                    number_field.value if number_field else None
+                ),
+                relationship_type=child.parent_relationship_type
+                or "",
+                confidence=child.parent_relationship_confidence
+                or 0.0,
+                status=child.parent_relationship_status
+                or "pending",
+            )
+        )
+
+    return ChildRelationshipsResponse(
+        parent_document_id=document_id,
+        children=children,
+    )
+
+
+@router.post(
+    "/{document_id}/approve",
+    response_model=ApproveDocumentResponse,
+)
+async def approve_document(
+    document_id: str,
+    payload: ApproveDocumentRequest,
+    database: Session = Depends(get_database),
+) -> ApproveDocumentResponse:
+    document = database.get(Document, document_id)
+
+    if document is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Document not found.",
+        )
+
+    if compute_document_status(database, document) != "completed":
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "This document isn't ready to approve yet — it must "
+                "be classified and every extracted field must be "
+                "reviewed first."
+            ),
+        )
+
+    document.approved_by = payload.changed_by
+    document.approved_at = datetime.now(timezone.utc)
+    database.commit()
+
+    return ApproveDocumentResponse(
+        document_id=document.id,
+        approved_by=document.approved_by,
+        approved_at=document.approved_at,
     )
 
 

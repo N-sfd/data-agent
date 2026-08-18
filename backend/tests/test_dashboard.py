@@ -183,3 +183,78 @@ def test_dashboard_stats_reflect_known_document() -> None:
         + stats["processing"]
         == stats["total_documents"]
     )
+
+    assert 0 <= stats["review_completion_rate"] <= 100
+    assert stats["fields_extracted_today"] >= len(
+        analyzed["metadata_fields"]
+    )
+    assert stats["documents_requiring_manual_review"] >= 0
+    # OCR/clause accuracy may legitimately be None if nothing in the
+    # whole test DB has triggered OCR or clause extraction yet.
+    assert stats["ocr_accuracy"] is None or (
+        0 <= stats["ocr_accuracy"] <= 100
+    )
+    assert stats["clause_extraction_accuracy"] is None or (
+        0 <= stats["clause_extraction_accuracy"] <= 1
+    )
+
+
+def test_document_list_includes_page_and_field_counts() -> None:
+    document_id = upload(
+        [
+            "Contract Title: Master Services Agreement",
+            f"Governing Law: State of Delaware {uuid4()}",
+        ],
+        f"counts-{uuid4()}.pdf",
+    )
+    extract_pages(document_id)
+
+    document = find_document(document_id)
+    assert document["page_count"] == 1
+    assert document["fields_extracted"] == 0
+    assert document["last_updated"] == document["uploaded_at"]
+
+    analyze(document_id)
+
+    document = find_document(document_id)
+    assert document["fields_extracted"] > 0
+
+    client.post(
+        f"/api/documents/{document_id}/metadata-fields/accept-all",
+        json={"changed_by": "Test Reviewer"},
+    )
+
+    document = find_document(document_id)
+    # Accepting fields writes audit log rows, which should push
+    # last_updated later than the original upload time.
+    assert document["last_updated"] >= document["uploaded_at"]
+
+
+def test_review_queue_buckets_rejected_and_unknown_first() -> None:
+    document_id = upload(
+        [
+            "Contract Title: Master Services Agreement",
+            f"Governing Law: State of Delaware {uuid4()}",
+        ],
+        f"queue-{uuid4()}.pdf",
+    )
+    extract_pages(document_id)
+    analyzed = analyze(document_id)
+
+    first_field_key = analyzed["metadata_fields"][0]["field_key"]
+
+    reject_response = client.post(
+        f"/api/documents/{document_id}/metadata-fields/"
+        f"{first_field_key}/review",
+        json={"action": "reject", "changed_by": "Test Reviewer"},
+    )
+    assert reject_response.status_code == 200
+
+    response = client.get("/api/dashboard/review-queue")
+    assert response.status_code == 200
+
+    entries = {
+        entry["document_id"]: entry for entry in response.json()
+    }
+    assert document_id in entries
+    assert entries[document_id]["queue_bucket"] == "rejected"

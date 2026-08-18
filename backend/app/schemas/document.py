@@ -26,6 +26,8 @@ class UploadedDocumentResponse(BaseModel):
     duplicate: bool = False
     existing_document: ExistingDocumentSummary | None = None
     pipeline_log: list[str] = Field(default_factory=list)
+    approved_by: str | None = None
+    approved_at: datetime | None = None
 
 
 class ResolveDuplicateRequest(BaseModel):
@@ -40,3 +42,11 @@ class DocumentSummaryResponse(BaseModel):
     status: Literal["processing", "review_required", "completed"]
     confidence: float | None
     uploaded_at: datetime
+    page_count: int
+    fields_extracted: int
+    last_updated: datetime
+
+
+class DocumentSearchResponse(BaseModel):
+    documents: list[DocumentSummaryResponse]
+    total: int

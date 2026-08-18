@@ -111,6 +111,25 @@ class FieldAuditEntry(BaseModel):
     changed_at: datetime
 
 
+class GlobalAuditEntry(BaseModel):
+    document_id: str
+    document_filename: str
+    field_key: str
+
+    action: ReviewActionLiteral
+
+    previous_value: str | None = None
+    new_value: str | None = None
+
+    changed_by: str
+    changed_at: datetime
+
+
+class GlobalAuditLogResponse(BaseModel):
+    entries: list[GlobalAuditEntry]
+    total: int
+
+
 class DetectedRelationship(BaseModel):
     parent_document_id: str
     parent_document_title: str
@@ -156,3 +175,34 @@ class ConfirmRelationshipResponse(BaseModel):
     document_id: str
     status: Literal["confirmed", "rejected"]
     relationship: DetectedRelationship | None = None
+
+
+class ChildRelationship(BaseModel):
+    child_document_id: str
+    child_document_title: str
+    child_document_number: str | None = None
+
+    relationship_type: str
+
+    confidence: float = Field(ge=0, le=1)
+
+    status: Literal[
+        "pending",
+        "confirmed",
+        "rejected",
+    ]
+
+
+class ChildRelationshipsResponse(BaseModel):
+    parent_document_id: str
+    children: list[ChildRelationship] = Field(default_factory=list)
+
+
+class ApproveDocumentRequest(BaseModel):
+    changed_by: str = Field(min_length=1, max_length=120)
+
+
+class ApproveDocumentResponse(BaseModel):
+    document_id: str
+    approved_by: str
+    approved_at: datetime

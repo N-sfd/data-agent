@@ -19,6 +19,8 @@ export interface UploadedDocument {
   duplicate?: boolean;
   existing_document?: ExistingDocumentSummary | null;
   pipeline_log?: string[];
+  approved_by?: string | null;
+  approved_at?: string | null;
 }
 
 export type DuplicateResolution = "use_existing" | "upload_anyway";
@@ -35,6 +37,9 @@ export interface DocumentSummary {
   status: DocumentStatus;
   confidence: number | null;
   uploaded_at: string;
+  page_count: number;
+  fields_extracted: number;
+  last_updated: string;
 }
 
 export interface DashboardStats {
@@ -46,6 +51,48 @@ export interface DashboardStats {
   average_processing_seconds: number | null;
   human_review_rate: number | null;
   fields_extracted: number;
+  review_completion_rate: number | null;
+  ocr_accuracy: number | null;
+  clause_extraction_accuracy: number | null;
+  fields_extracted_today: number;
+  documents_requiring_manual_review: number;
+}
+
+export type ReviewQueueBucket =
+  | "high"
+  | "medium"
+  | "low"
+  | "rejected"
+  | "unknown";
+
+export interface ReviewQueueEntry {
+  document_id: string;
+  original_filename: string;
+  document_type: string | null;
+  confidence: number | null;
+  queue_bucket: ReviewQueueBucket;
+  uploaded_at: string;
+}
+
+export interface DocumentSearchResponse {
+  documents: DocumentSummary[];
+  total: number;
+}
+
+export interface GlobalAuditEntry {
+  document_id: string;
+  document_filename: string;
+  field_key: string;
+  action: ReviewAction;
+  previous_value: string | null;
+  new_value: string | null;
+  changed_by: string;
+  changed_at: string;
+}
+
+export interface GlobalAuditLogResponse {
+  entries: GlobalAuditEntry[];
+  total: number;
 }
 
 export interface ExtractionSummary {
@@ -254,6 +301,29 @@ export interface DetectedRelationship {
   matched_on: "contract_number" | "contract_title";
 
   status: RelationshipStatus;
+}
+
+export interface ChildRelationship {
+  child_document_id: string;
+  child_document_title: string;
+  child_document_number: string | null;
+
+  relationship_type: string;
+
+  confidence: number;
+
+  status: RelationshipStatus;
+}
+
+export interface ChildRelationshipsResult {
+  parent_document_id: string;
+  children: ChildRelationship[];
+}
+
+export interface ApproveDocumentResult {
+  document_id: string;
+  approved_by: string;
+  approved_at: string;
 }
 
 export interface ContractAnalysisResult {

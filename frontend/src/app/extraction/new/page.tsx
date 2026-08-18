@@ -386,7 +386,14 @@ export default function NewExtractionPage() {
           )}
 
           {document && (
-            <ExtractedPages pages={pages} />
+            <ExtractedPages
+              pages={pages}
+              extracting={extracting}
+              error={workflowError}
+              onRetry={() =>
+                handleUploadComplete(document)
+              }
+            />
           )}
         </section>
       </div>
