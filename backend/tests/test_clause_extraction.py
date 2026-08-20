@@ -45,6 +45,11 @@ class ClauseStubAIProvider(AIProvider):
     ) -> dict[str, Any]:
         return {"signatures": []}
 
+    async def extract_structured_tables(
+        self, *, page_context: str, table_specs: list
+    ) -> dict[str, Any]:
+        return {"rows": []}
+
     async def extract_clauses(
         self, *, page_context: str
     ) -> dict[str, Any]:

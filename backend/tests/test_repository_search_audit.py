@@ -43,6 +43,74 @@ class RepoSearchStubAIProvider(AIProvider):
     ) -> dict[str, Any]:
         return {"signatures": []}
 
+    async def extract_structured_tables(
+        self, *, page_context: str, table_specs: list
+    ) -> dict[str, Any]:
+        return {"rows": []}
+
+
+class HierarchyStubAIProvider(AIProvider):
+    """Classifies by content, so an Amendment fixture actually
+    triggers relationship detection (unlike the fixed-type stub
+    above)."""
+
+    async def extract(
+        self, *, instruction: str, page_context: str
+    ) -> dict[str, Any]:
+        return {"answer": None, "values": [], "warnings": []}
+
+    async def classify(self, *, page_context: str) -> dict[str, Any]:
+        if "Amendment" in page_context:
+            return {
+                "document_type": "Amendment",
+                "industry": "Technology",
+                "contract_side": "buy_side",
+                "language": "English",
+                "confidence": 0.9,
+            }
+
+        return {
+            "document_type": "Master Services Agreement",
+            "industry": "Technology",
+            "contract_side": "buy_side",
+            "language": "English",
+            "confidence": 0.95,
+        }
+
+    async def extract_fields(
+        self, *, page_context: str, field_specs: list[FieldSpec]
+    ) -> dict[str, Any]:
+        return {"fields": []}
+
+    async def extract_clauses(
+        self, *, page_context: str
+    ) -> dict[str, Any]:
+        return {"clauses": []}
+
+    async def extract_signatures(
+        self, *, page_context: str
+    ) -> dict[str, Any]:
+        return {"signatures": []}
+
+    async def extract_structured_tables(
+        self, *, page_context: str, table_specs: list
+    ) -> dict[str, Any]:
+        return {"rows": []}
+
+
+def analyze_with_type_detection(document_id: str) -> dict:
+    with patch(
+        "app.api.contract_analysis.create_ai_provider",
+        return_value=HierarchyStubAIProvider(),
+    ):
+        response = client.post(
+            f"/api/documents/{document_id}/analyze-contract"
+        )
+
+    assert response.status_code == 200, response.text
+
+    return response.json()
+
 
 def create_pdf(lines: list[str]) -> bytes:
     pdf = fitz.open()
@@ -206,3 +274,126 @@ def test_global_audit_log_reflects_field_review() -> None:
     assert matching[0]["action"] == "accept"
     assert matching[0]["changed_by"] == "Audit Tester"
     assert matching[0]["document_filename"].startswith("audit-")
+
+
+def test_search_returns_repository_columns() -> None:
+    unique = str(uuid4())
+    document_id = upload(
+        [
+            f"Contract Title: Marker {unique}",
+            "Supplier: Acme Technologies",
+            "Effective Date: January 1, 2026",
+            "Expiration Date: December 31, 2027",
+        ],
+        f"columns-{uuid4()}.pdf",
+    )
+    extract_pages(document_id)
+    analyze(document_id)
+
+    response = client.get(
+        "/api/documents/search", params={"q": unique}
+    )
+    assert response.status_code == 200
+    documents = response.json()["documents"]
+
+    match = next(
+        d for d in documents if d["document_id"] == document_id
+    )
+    assert match["counterparty"] == "Acme Technologies"
+    assert match["effective_date"] == "2026-01-01"
+    assert match["expiration_date"] == "2027-12-31"
+
+
+def test_search_confidence_range_filter() -> None:
+    unique = str(uuid4())
+    document_id = upload(
+        [f"Contract Title: Marker {unique}"],
+        f"confidence-{uuid4()}.pdf",
+    )
+    extract_pages(document_id)
+    analyze(document_id)
+
+    too_high = client.get(
+        "/api/documents/search",
+        params={"q": unique, "confidence_min": 0.99},
+    )
+    assert too_high.json()["total"] == 0
+
+    matches = client.get(
+        "/api/documents/search",
+        params={"q": unique, "confidence_min": 0.5},
+    )
+    assert matches.json()["total"] == 1
+
+
+def test_search_document_type_filter() -> None:
+    unique = str(uuid4())
+    document_id = upload(
+        [f"Contract Title: Marker {unique}"],
+        f"type-filter-{uuid4()}.pdf",
+    )
+    extract_pages(document_id)
+    analyze(document_id)
+
+    wrong_type = client.get(
+        "/api/documents/search",
+        params={"q": unique, "document_type": "NDA"},
+    )
+    assert wrong_type.json()["total"] == 0
+
+    right_type = client.get(
+        "/api/documents/search",
+        params={
+            "q": unique,
+            "document_type": "Master Services Agreement",
+        },
+    )
+    assert right_type.json()["total"] == 1
+
+
+def test_document_hierarchy_includes_confirmed_parent_child() -> None:
+    # Contract numbers must be purely numeric after the prefix to match
+    # CONTRACT_NUMBER_PATTERN in relationship_detector.py.
+    contract_number = str(uuid4().int)[:6]
+
+    parent_id = upload(
+        [
+            "Contract Title: Master Services Agreement",
+            f"Contract Number: MSA-2026-{contract_number}",
+        ],
+        f"hierarchy-parent-{uuid4()}.pdf",
+    )
+    extract_pages(parent_id)
+    analyze_with_type_detection(parent_id)
+
+    child_id = upload(
+        [
+            "Contract Title: Amendment No. 1 to Master Services Agreement",
+            f"Contract Number: AMD-2026-{contract_number}",
+            (
+                "This Amendment is entered into pursuant to the "
+                f"Master Services Agreement (MSA-2026-{contract_number})."
+            ),
+        ],
+        f"hierarchy-child-{uuid4()}.pdf",
+    )
+    extract_pages(child_id)
+    analyze_with_type_detection(child_id)
+
+    client.post(
+        f"/api/documents/{child_id}/confirm-relationship",
+        json={"action": "confirm", "changed_by": "Contract Manager"},
+    )
+
+    response = client.get("/api/documents/hierarchy")
+    assert response.status_code == 200
+
+    roots = response.json()["roots"]
+    parent_node = next(
+        (r for r in roots if r["document_id"] == parent_id), None
+    )
+    assert parent_node is not None
+    assert any(
+        child["document_id"] == child_id
+        for child in parent_node["children"]
+    )

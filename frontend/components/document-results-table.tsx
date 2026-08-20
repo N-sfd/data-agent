@@ -1,16 +1,33 @@
 import Link from "next/link";
 
 import { STATUS_LABELS, STATUS_STYLES } from "@/lib/document-status";
-import type { DocumentSummary } from "@/types/document";
+import type {
+  DocumentSummary,
+  RepositoryStatus,
+} from "@/types/document";
+
+const REPOSITORY_STATUS_LABELS: Record<RepositoryStatus, string> = {
+  not_approved: "Not Approved",
+  approved: "Approved",
+  repository: "In Repository",
+};
+
+const REPOSITORY_STATUS_STYLES: Record<RepositoryStatus, string> = {
+  not_approved: "bg-slate-100 text-slate-600",
+  approved: "bg-emerald-50 text-emerald-700",
+  repository: "bg-violet-50 text-violet-700",
+};
 
 interface DocumentResultsTableProps {
   documents: DocumentSummary[];
   emptyMessage: string;
+  showExtendedColumns?: boolean;
 }
 
 export default function DocumentResultsTable({
   documents,
   emptyMessage,
+  showExtendedColumns = false,
 }: DocumentResultsTableProps) {
   if (documents.length === 0) {
     return (
@@ -31,6 +48,19 @@ export default function DocumentResultsTable({
             <th className="px-6 py-3 text-left font-semibold text-slate-700">
               Type
             </th>
+            {showExtendedColumns && (
+              <>
+                <th className="px-6 py-3 text-left font-semibold text-slate-700">
+                  Counterparty
+                </th>
+                <th className="px-6 py-3 text-left font-semibold text-slate-700">
+                  Effective Date
+                </th>
+                <th className="px-6 py-3 text-left font-semibold text-slate-700">
+                  Expiration Date
+                </th>
+              </>
+            )}
             <th className="px-6 py-3 text-left font-semibold text-slate-700">
               Pages
             </th>
@@ -40,6 +70,16 @@ export default function DocumentResultsTable({
             <th className="px-6 py-3 text-left font-semibold text-slate-700">
               Confidence
             </th>
+            {showExtendedColumns && (
+              <>
+                <th className="px-6 py-3 text-left font-semibold text-slate-700">
+                  Relationship
+                </th>
+                <th className="px-6 py-3 text-left font-semibold text-slate-700">
+                  Repository
+                </th>
+              </>
+            )}
             <th className="px-6 py-3 text-left font-semibold text-slate-700">
               Status
             </th>
@@ -65,6 +105,19 @@ export default function DocumentResultsTable({
               <td className="px-6 py-3 text-slate-600">
                 {document.document_type ?? "—"}
               </td>
+              {showExtendedColumns && (
+                <>
+                  <td className="px-6 py-3 text-slate-600">
+                    {document.counterparty ?? "—"}
+                  </td>
+                  <td className="px-6 py-3 text-slate-600">
+                    {document.effective_date ?? "—"}
+                  </td>
+                  <td className="px-6 py-3 text-slate-600">
+                    {document.expiration_date ?? "—"}
+                  </td>
+                </>
+              )}
               <td className="px-6 py-3 text-slate-600">
                 {document.page_count}
               </td>
@@ -76,6 +129,29 @@ export default function DocumentResultsTable({
                   ? `${Math.round(document.confidence * 100)}%`
                   : "—"}
               </td>
+              {showExtendedColumns && (
+                <>
+                  <td className="px-6 py-3 text-slate-600">
+                    {document.relationship ?? "—"}
+                  </td>
+                  <td className="px-6 py-3">
+                    <span
+                      className={[
+                        "rounded-full px-2.5 py-0.5 text-xs font-semibold",
+                        REPOSITORY_STATUS_STYLES[
+                          document.repository_status ?? "not_approved"
+                        ],
+                      ].join(" ")}
+                    >
+                      {
+                        REPOSITORY_STATUS_LABELS[
+                          document.repository_status ?? "not_approved"
+                        ]
+                      }
+                    </span>
+                  </td>
+                </>
+              )}
               <td className="px-6 py-3">
                 <span
                   className={[

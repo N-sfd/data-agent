@@ -2,6 +2,7 @@ from abc import ABC, abstractmethod
 from typing import Any
 
 from app.services.contract_field_schema import FieldSpec
+from app.services.contract_structured_table_schema import StructuredTableSpec
 
 
 class AIProviderError(Exception):
@@ -53,6 +54,16 @@ class AIProvider(ABC):
         self,
         *,
         page_context: str,
+    ) -> dict[str, Any]:
+
+        raise NotImplementedError
+
+    @abstractmethod
+    async def extract_structured_tables(
+        self,
+        *,
+        page_context: str,
+        table_specs: list[StructuredTableSpec],
     ) -> dict[str, Any]:
 
         raise NotImplementedError
@@ -115,3 +126,12 @@ class DisabledAIProvider(AIProvider):
     ) -> dict[str, Any]:
 
         return {"signatures": []}
+
+    async def extract_structured_tables(
+        self,
+        *,
+        page_context: str,
+        table_specs: list[StructuredTableSpec],
+    ) -> dict[str, Any]:
+
+        return {"rows": []}

@@ -29,6 +29,13 @@ class Settings(BaseSettings):
 
     ai_provider: str = "gemini"
 
+    convera_enabled: bool = False
+    convera_api_url: str = "http://localhost:8000"
+    convera_api_key: str | None = None
+    convera_timeout_seconds: int = 120
+    convera_documents_enabled: bool = False
+    convera_ai_enabled: bool = False
+
     gemini_api_key: str | None = None
     gemini_model: str = "gemini-2.5-flash"
 

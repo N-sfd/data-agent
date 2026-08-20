@@ -43,6 +43,11 @@ class DashboardStubAIProvider(AIProvider):
     ) -> dict[str, Any]:
         return {"signatures": []}
 
+    async def extract_structured_tables(
+        self, *, page_context: str, table_specs: list
+    ) -> dict[str, Any]:
+        return {"rows": []}
+
 
 def create_pdf(lines: list[str]) -> bytes:
     pdf = fitz.open()

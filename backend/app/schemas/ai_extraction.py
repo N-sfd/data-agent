@@ -117,3 +117,29 @@ class AISignatureExtractionResult(BaseModel):
     signatures: list[AISignatureResult] = Field(
         default_factory=list
     )
+
+
+class AIStructuredRow(BaseModel):
+    family: str
+
+    row: dict[str, str] = Field(
+        default_factory=dict
+    )
+
+    page_number: int = Field(
+        ge=1
+    )
+
+    source_text: str
+
+    confidence: float = Field(
+        default=0.7,
+        ge=0,
+        le=1,
+    )
+
+
+class AIStructuredTablesResult(BaseModel):
+    rows: list[AIStructuredRow] = Field(
+        default_factory=list
+    )

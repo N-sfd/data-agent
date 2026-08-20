@@ -13,6 +13,7 @@ from app.schemas.universal_extraction import SourceEvidence
 from app.services.ai_context import build_page_context
 from app.services.ai_provider import AIProvider, AIProviderError
 from app.services.contract_field_schema import (
+    CODE_FIELD_PATTERNS,
     DATE_FIELD_KEYS,
     FIELD_SPECS,
     MONEY_FIELD_KEYS,
@@ -39,6 +40,20 @@ def _normalize_date(raw_value: str) -> str:
 
 def _normalize_money(raw_value: str) -> str:
     match = MONEY_PATTERN.search(raw_value)
+
+    if match:
+        return match.group(0)
+
+    return raw_value
+
+
+def _normalize_code(field_key: str, raw_value: str) -> str:
+    pattern = CODE_FIELD_PATTERNS.get(field_key)
+
+    if pattern is None:
+        return raw_value
+
+    match = pattern.search(raw_value)
 
     if match:
         return match.group(0)
@@ -92,6 +107,9 @@ def _normalize_field_value(
 
     if field.key in MONEY_FIELD_KEYS:
         return _normalize_money(raw_value)
+
+    if field.key in CODE_FIELD_PATTERNS:
+        return _normalize_code(field.key, raw_value)
 
     return raw_value
 

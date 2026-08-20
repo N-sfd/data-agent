@@ -10,6 +10,11 @@ from app.core.config import Settings
 from app.models.document import Document
 from app.models.document_page import DocumentPage
 from app.models.page_text_block import PageTextBlock
+from app.services.document_provider import (
+    ConveraError,
+    extract_document,
+    should_use_convera_documents,
+)
 from app.services.generic_table_extractor import (
     extract_page_tables,
 )
@@ -89,6 +94,93 @@ def resolve_page_range(
     return first_page, last_page
 
 
+def _process_pdf_via_convera(
+    *,
+    database: Session,
+    document_record: Document,
+    file_path: Path,
+    settings: Settings,
+    started_at: float,
+) -> dict:
+    try:
+        normalized = extract_document(
+            file_path,
+            settings=settings,
+        )
+    except ConveraError as exc:
+        raise DocumentExtractionError(str(exc)) from exc
+
+    pages = normalized.get("pages", [])
+    ocr_required = normalized.get("ocr_required", False)
+
+    database.execute(
+        delete(DocumentPage).where(
+            DocumentPage.document_id == document_record.id
+        )
+    )
+    database.flush()
+
+    for page in pages:
+        page_number = page.get("page", 1)
+        text = page.get("text", "")
+
+        # Convera's extraction payload doesn't always include page
+        # dimensions; page_width/page_height are NOT NULL columns with
+        # no default, so fall back to standard US Letter (in PDF
+        # points) rather than failing the insert.
+        page_width = page.get("width") or page.get("page_width") or 612.0
+        page_height = (
+            page.get("height") or page.get("page_height") or 792.0
+        )
+
+        # Convera's current API doesn't return table data (confirmed
+        # against the live service), and Data Agent's table detection
+        # has always been local/deterministic (pdfplumber) rather than
+        # sourced from a document-AI response — run it against the
+        # original file the same way the local extraction path does,
+        # so downstream code (normalize_document_tables) sees the same
+        # DocumentPage.tables_json shape regardless of which pipeline
+        # produced the page text. Tolerate pdfplumber failures (e.g. a
+        # scanned, image-only page) rather than failing the upload.
+        try:
+            page_tables = extract_page_tables(file_path, page_number)
+        except Exception:
+            page_tables = []
+
+        database.add(
+            DocumentPage(
+                document_id=document_record.id,
+                page_number=page_number,
+                page_label=str(page_number),
+                native_text=text,
+                ocr_text=None,
+                final_text=text,
+                tables_json=page_tables or None,
+                has_tables=bool(page_tables),
+                is_scanned=ocr_required,
+                text_length=len(text),
+                extraction_method="convera",
+                requires_ocr=ocr_required,
+                ocr_attempted=False,
+                ocr_succeeded=False,
+                character_count=len(text),
+                word_count=len(text.split()),
+                page_width=page_width,
+                page_height=page_height,
+                extraction_status="completed",
+                extracted_at=datetime.now(timezone.utc),
+            )
+        )
+
+    database.commit()
+
+    return _summarize_stored_pages(
+        database=database,
+        document_record=document_record,
+        started_at=started_at,
+    )
+
+
 def process_document_pages(
     *,
     database: Session,
@@ -114,6 +206,18 @@ def process_document_pages(
         return _summarize_stored_pages(
             database=database,
             document_record=document_record,
+            started_at=started_at,
+        )
+
+    if (
+        should_use_convera_documents(settings)
+        and file_path.suffix.lower() == ".pdf"
+    ):
+        return _process_pdf_via_convera(
+            database=database,
+            document_record=document_record,
+            file_path=file_path,
+            settings=settings,
             started_at=started_at,
         )
 

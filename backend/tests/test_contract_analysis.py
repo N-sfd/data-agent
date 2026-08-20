@@ -54,6 +54,11 @@ class StubAIProvider(AIProvider):
     ) -> dict[str, Any]:
         return {"signatures": []}
 
+    async def extract_structured_tables(
+        self, *, page_context: str, table_specs: list
+    ) -> dict[str, Any]:
+        return {"rows": []}
+
 
 def create_pdf(lines: list[str]) -> bytes:
     pdf = fitz.open()
@@ -151,6 +156,26 @@ def test_metadata_extraction_deterministic_fields() -> None:
         "Master Services Agreement"
     )
     assert result["relationship"] is None
+
+
+def test_naics_code_field_normalized_via_code_pattern() -> None:
+    document_id = upload_and_extract(
+        [
+            "Contract Title: Government Services Agreement",
+            "NAICS Code: 541511",
+        ],
+        f"naics-{uuid4()}.pdf",
+    )
+
+    result = analyze(document_id)
+
+    fields_by_key = {
+        field["field_key"]: field
+        for field in result["metadata_fields"]
+    }
+
+    assert fields_by_key["naics_code"]["value"] == "541511"
+    assert fields_by_key["naics_code"]["field_group"] == "Government"
 
 
 def test_relationship_detection_and_confirm() -> None:
@@ -337,6 +362,80 @@ def test_approve_document_requires_full_review() -> None:
     detail = client.get(f"/api/documents/{document_id}")
     assert detail.status_code == 200
     assert detail.json()["approved_by"] == "Consult America"
+
+
+def test_promote_document_requires_approval_first() -> None:
+    document_id = upload_and_extract(
+        [
+            "Contract Title: Master Services Agreement",
+            f"Contract Number: {unique_contract_number()}",
+        ],
+        f"promote-{uuid4()}.pdf",
+    )
+    analyze(document_id)
+
+    blocked = client.post(
+        f"/api/documents/{document_id}/promote",
+        json={"changed_by": "Consult America"},
+    )
+    assert blocked.status_code == 409
+
+    fields = client.get(
+        f"/api/documents/{document_id}/analyze-contract"
+    ).json()["metadata_fields"]
+
+    for field in fields:
+        client.post(
+            f"/api/documents/{document_id}/metadata-fields/"
+            f"{field['field_key']}/review",
+            json={"action": "accept", "changed_by": "Consult America"},
+        )
+
+    # Still blocked — approved, but not yet promoted, must not imply
+    # repository membership.
+    still_blocked = client.post(
+        f"/api/documents/{document_id}/promote",
+        json={"changed_by": "Consult America"},
+    )
+    assert still_blocked.status_code == 409
+
+    approved = client.post(
+        f"/api/documents/{document_id}/approve",
+        json={"changed_by": "Consult America"},
+    )
+    assert approved.status_code == 200
+
+    search_before = client.get(
+        "/api/documents/search", params={"q": document_id}
+    ).json()
+    assert search_before["documents"] == [] or all(
+        doc["repository_status"] != "repository"
+        for doc in search_before["documents"]
+    )
+
+    promoted = client.post(
+        f"/api/documents/{document_id}/promote",
+        json={"changed_by": "Consult America"},
+    )
+    assert promoted.status_code == 200
+
+    body = promoted.json()
+    assert body["document_id"] == document_id
+    assert body["promoted_by"] == "Consult America"
+    assert body["promoted_at"]
+
+    detail = client.get(f"/api/documents/{document_id}")
+    assert detail.status_code == 200
+    assert detail.json()["promoted_by"] == "Consult America"
+
+
+def test_promote_unknown_document_returns_404() -> None:
+    response = client.post(
+        "/api/documents/not-a-real-id/promote",
+        json={"changed_by": "Consult America"},
+    )
+
+    assert response.status_code == 404
 
 
 def test_section_citation_detected() -> None:
@@ -623,4 +722,219 @@ def test_accept_all_only_touches_pending_fields() -> None:
     by_key = {field["field_key"]: field for field in body}
     assert by_key["governing_law"]["review_status"] == "rejected"
     assert by_key["contract_title"]["review_status"] == "accepted"
-    assert by_key["payment_terms"]["review_status"] == "accepted"
+
+
+def test_document_status_computed_for_original_and_amendment() -> None:
+    msa_id = upload_and_extract(
+        ["Contract Title: Master Services Agreement"],
+        f"status-msa-{uuid4()}.pdf",
+    )
+    result = analyze(msa_id)
+    assert result["classification"]["document_status"] == "Original"
+
+    amendment_id = upload_and_extract(
+        ["Contract Title: Amendment No. 9 to Master Services Agreement"],
+        f"status-amd-{uuid4()}.pdf",
+    )
+    result = analyze(amendment_id)
+    assert result["classification"]["document_status"] == "Amendment"
+
+
+def test_update_classification_records_audit_history() -> None:
+    document_id = upload_and_extract(
+        ["Contract Title: Master Services Agreement"],
+        f"reclassify-{uuid4()}.pdf",
+    )
+    analyze(document_id)
+
+    response = client.patch(
+        f"/api/documents/{document_id}/classification",
+        json={
+            "document_type": "NDA",
+            "changed_by": "Compliance Reviewer",
+        },
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["document_type"] == "NDA"
+    assert body["confidence"] == 1.0
+
+    history = client.get(
+        f"/api/documents/{document_id}/classification-history"
+    )
+    assert history.status_code == 200
+    entries = history.json()
+    assert len(entries) == 1
+    assert entries[0]["field_changed"] == "document_type"
+    assert entries[0]["previous_value"] == (
+        "Master Services Agreement"
+    )
+    assert entries[0]["new_value"] == "NDA"
+    assert entries[0]["changed_by"] == "Compliance Reviewer"
+
+    # A no-op update (same value) must not add another audit row.
+    client.patch(
+        f"/api/documents/{document_id}/classification",
+        json={"document_type": "NDA", "changed_by": "Compliance Reviewer"},
+    )
+    history_after = client.get(
+        f"/api/documents/{document_id}/classification-history"
+    )
+    assert len(history_after.json()) == 1
+
+
+def test_relationship_detection_includes_reasons() -> None:
+    contract_number = unique_contract_number()
+
+    msa_id = upload_and_extract(
+        [
+            "Contract Title: Master Services Agreement",
+            f"Contract Number: {contract_number}",
+        ],
+        f"reasons-msa-{uuid4()}.pdf",
+    )
+    analyze(msa_id)
+
+    amendment_id = upload_and_extract(
+        [
+            "Contract Title: Amendment No. 5 to Master Services Agreement",
+            f"Contract Number: {unique_contract_number('AMD')}",
+            (
+                "This Amendment is entered into pursuant to the "
+                f"Master Services Agreement ({contract_number})."
+            ),
+        ],
+        f"reasons-amd-{uuid4()}.pdf",
+    )
+    result = analyze(amendment_id)
+
+    reasons = result["relationship"]["reasons"]
+    assert "Matching contract number" in reasons
+    assert "Explicit agreement reference" in reasons
+    assert result["relationship"]["detection_method"] == "automatic"
+
+
+def test_manual_relationship_assignment() -> None:
+    parent_id = upload_and_extract(
+        ["Contract Title: Master Services Agreement"],
+        f"manual-parent-{uuid4()}.pdf",
+    )
+    analyze(parent_id)
+
+    child_id = upload_and_extract(
+        ["Contract Title: Unrelated Standalone Document"],
+        f"manual-child-{uuid4()}.pdf",
+    )
+    analyze(child_id)
+
+    response = client.post(
+        f"/api/documents/{child_id}/relationship",
+        json={
+            "parent_document_id": parent_id,
+            "relationship_type": "amendment_of",
+            "changed_by": "Contract Manager",
+        },
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["parent_document_id"] == parent_id
+    assert body["status"] == "manual"
+    assert body["detection_method"] == "manual"
+
+    children = client.get(
+        f"/api/documents/{parent_id}/child-relationships"
+    )
+    assert any(
+        child["child_document_id"] == child_id
+        for child in children.json()["children"]
+    )
+
+    remove = client.request(
+        "DELETE",
+        f"/api/documents/{child_id}/relationship",
+        json={"changed_by": "Contract Manager"},
+    )
+    assert remove.status_code == 200
+
+
+def test_relationship_rejects_self_reference() -> None:
+    document_id = upload_and_extract(
+        ["Contract Title: Standalone Document"],
+        f"self-ref-{uuid4()}.pdf",
+    )
+    analyze(document_id)
+
+    response = client.post(
+        f"/api/documents/{document_id}/relationship",
+        json={
+            "parent_document_id": document_id,
+            "changed_by": "Contract Manager",
+        },
+    )
+    assert response.status_code == 422
+
+
+def test_relationship_rejects_circular_chain() -> None:
+    doc_a = upload_and_extract(
+        ["Contract Title: Document A"],
+        f"cycle-a-{uuid4()}.pdf",
+    )
+    analyze(doc_a)
+
+    doc_b = upload_and_extract(
+        ["Contract Title: Document B"],
+        f"cycle-b-{uuid4()}.pdf",
+    )
+    analyze(doc_b)
+
+    # A -> B
+    first = client.post(
+        f"/api/documents/{doc_a}/relationship",
+        json={
+            "parent_document_id": doc_b,
+            "changed_by": "Contract Manager",
+        },
+    )
+    assert first.status_code == 200
+
+    # B -> A would close the loop; must be rejected.
+    second = client.post(
+        f"/api/documents/{doc_b}/relationship",
+        json={
+            "parent_document_id": doc_a,
+            "changed_by": "Contract Manager",
+        },
+    )
+    assert second.status_code == 409
+
+
+def test_relationship_rejects_duplicate_link() -> None:
+    parent_id = upload_and_extract(
+        ["Contract Title: Master Services Agreement"],
+        f"dup-parent-{uuid4()}.pdf",
+    )
+    analyze(parent_id)
+
+    child_id = upload_and_extract(
+        ["Contract Title: Standalone Document"],
+        f"dup-child-{uuid4()}.pdf",
+    )
+    analyze(child_id)
+
+    first = client.post(
+        f"/api/documents/{child_id}/relationship",
+        json={
+            "parent_document_id": parent_id,
+            "changed_by": "Contract Manager",
+        },
+    )
+    assert first.status_code == 200
+
+    second = client.post(
+        f"/api/documents/{child_id}/relationship",
+        json={
+            "parent_document_id": parent_id,
+            "changed_by": "Contract Manager",
+        },
+    )
+    assert second.status_code == 409

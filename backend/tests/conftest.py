@@ -16,16 +16,55 @@ from app.database.migrate import (  # noqa: E402
     ensure_documents_columns,
 )
 from app.database.session import engine  # noqa: E402
+from app.models import (  # noqa: E402,F401
+    classification_audit_log as _classification_audit_log_model,
+)
 from app.models import document as _document_model  # noqa: E402,F401
+from app.models import (  # noqa: E402,F401
+    document_address as _document_address_model,
+)
+from app.models import (  # noqa: E402,F401
+    document_amendment_history as _document_amendment_history_model,
+)
 from app.models import (  # noqa: E402,F401
     document_clause as _document_clause_model,
 )
 from app.models import (  # noqa: E402,F401
+    document_clause_reference as _document_clause_reference_model,
+)
+from app.models import (  # noqa: E402,F401
+    document_contact as _document_contact_model,
+)
+from app.models import (  # noqa: E402,F401
+    document_delivery_schedule as _document_delivery_schedule_model,
+)
+from app.models import (  # noqa: E402,F401
+    document_funding_line as _document_funding_line_model,
+)
+from app.models import (  # noqa: E402,F401
+    document_insurance_requirement as _document_insurance_requirement_model,
+)
+from app.models import (  # noqa: E402,F401
+    document_key_position as _document_key_position_model,
+)
+from app.models import (  # noqa: E402,F401
+    document_line_item as _document_line_item_model,
+)
+from app.models import (  # noqa: E402,F401
     document_metadata_field as _document_metadata_field_model,
+)
+from app.models import (  # noqa: E402,F401
+    document_order_range as _document_order_range_model,
 )
 from app.models import document_page as _document_page_model  # noqa: E402,F401
 from app.models import (  # noqa: E402,F401
+    document_performance_period as _document_performance_period_model,
+)
+from app.models import (  # noqa: E402,F401
     document_signature as _document_signature_model,
+)
+from app.models import (  # noqa: E402,F401
+    document_wawf_instruction as _document_wawf_instruction_model,
 )
 from app.models import (  # noqa: E402,F401
     extraction_model as _extraction_model_model,
@@ -35,6 +74,9 @@ from app.models import (  # noqa: E402,F401
 )
 from app.models import (  # noqa: E402,F401
     page_text_block as _page_text_block_model,
+)
+from app.models import (  # noqa: E402,F401
+    relationship_audit_log as _relationship_audit_log_model,
 )
 
 

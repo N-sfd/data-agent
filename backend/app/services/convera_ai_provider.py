@@ -1,7 +1,8 @@
 import json
+import re
 from typing import Any
 
-from google import genai
+import httpx
 
 from app.prompts.classification import (
     CLASSIFICATION_SYSTEM_PROMPT,
@@ -41,25 +42,42 @@ from app.services.contract_field_schema import FieldSpec
 from app.services.contract_structured_table_schema import StructuredTableSpec
 
 
-class GeminiAIProvider(AIProvider):
+_JSON_FENCE_PATTERN = re.compile(
+    r"```(?:json)?\s*(.*?)\s*```",
+    re.DOTALL | re.IGNORECASE,
+)
+
+
+def _parse_json_response(
+    text: str,
+    response_schema: type,
+) -> dict[str, Any]:
+    cleaned = text.strip()
+
+    fenced = _JSON_FENCE_PATTERN.search(cleaned)
+    if fenced:
+        cleaned = fenced.group(1).strip()
+
+    parsed = json.loads(cleaned)
+    validated = response_schema.model_validate(parsed)
+    return validated.model_dump()
+
+
+class ConveraAIProvider(AIProvider):
 
     def __init__(
         self,
         *,
+        api_url: str,
         api_key: str,
-        model: str,
     ) -> None:
-
         if not api_key:
             raise AIProviderError(
-                "Gemini API key is missing."
+                "Convera API key is missing."
             )
 
-        self.client = genai.Client(
-            api_key=api_key
-        )
-
-        self.model = model
+        self.api_url = api_url.rstrip("/")
+        self.api_key = api_key
 
     async def extract(
         self,
@@ -67,7 +85,6 @@ class GeminiAIProvider(AIProvider):
         instruction: str,
         page_context: str,
     ) -> dict[str, Any]:
-
         user_prompt = f"""
 USER REQUEST:
 
@@ -80,9 +97,7 @@ DOCUMENT CONTENT:
 """
 
         return await self._generate(
-            system_instruction=(
-                UNIVERSAL_EXTRACTION_SYSTEM_PROMPT
-            ),
+            system_instruction=UNIVERSAL_EXTRACTION_SYSTEM_PROMPT,
             user_prompt=user_prompt,
             response_schema=AIExtractionResult,
             failure_label="extraction",
@@ -93,7 +108,6 @@ DOCUMENT CONTENT:
         *,
         page_context: str,
     ) -> dict[str, Any]:
-
         user_prompt = f"""
 DOCUMENT CONTENT:
 
@@ -101,9 +115,7 @@ DOCUMENT CONTENT:
 """
 
         return await self._generate(
-            system_instruction=(
-                CLASSIFICATION_SYSTEM_PROMPT
-            ),
+            system_instruction=CLASSIFICATION_SYSTEM_PROMPT,
             user_prompt=user_prompt,
             response_schema=ContractClassification,
             failure_label="classification",
@@ -115,7 +127,6 @@ DOCUMENT CONTENT:
         page_context: str,
         field_specs: list[FieldSpec],
     ) -> dict[str, Any]:
-
         field_block = build_field_request_block(field_specs)
 
         user_prompt = f"""
@@ -128,9 +139,7 @@ DOCUMENT CONTENT:
 """
 
         return await self._generate(
-            system_instruction=(
-                METADATA_EXTRACTION_SYSTEM_PROMPT
-            ),
+            system_instruction=METADATA_EXTRACTION_SYSTEM_PROMPT,
             user_prompt=user_prompt,
             response_schema=AIFieldExtractionResult,
             failure_label="field extraction",
@@ -141,7 +150,6 @@ DOCUMENT CONTENT:
         *,
         page_context: str,
     ) -> dict[str, Any]:
-
         user_prompt = f"""
 DOCUMENT CONTENT:
 
@@ -149,9 +157,7 @@ DOCUMENT CONTENT:
 """
 
         return await self._generate(
-            system_instruction=(
-                CLAUSE_EXTRACTION_SYSTEM_PROMPT
-            ),
+            system_instruction=CLAUSE_EXTRACTION_SYSTEM_PROMPT,
             user_prompt=user_prompt,
             response_schema=AIClauseExtractionResult,
             failure_label="clause extraction",
@@ -162,7 +168,6 @@ DOCUMENT CONTENT:
         *,
         page_context: str,
     ) -> dict[str, Any]:
-
         user_prompt = f"""
 DOCUMENT CONTENT:
 
@@ -170,9 +175,7 @@ DOCUMENT CONTENT:
 """
 
         return await self._generate(
-            system_instruction=(
-                SIGNATURE_EXTRACTION_SYSTEM_PROMPT
-            ),
+            system_instruction=SIGNATURE_EXTRACTION_SYSTEM_PROMPT,
             user_prompt=user_prompt,
             response_schema=AISignatureExtractionResult,
             failure_label="signature extraction",
@@ -184,7 +187,6 @@ DOCUMENT CONTENT:
         page_context: str,
         table_specs: list[StructuredTableSpec],
     ) -> dict[str, Any]:
-
         table_block = build_structured_table_request_block(table_specs)
 
         user_prompt = f"""
@@ -197,9 +199,7 @@ DOCUMENT CONTENT:
 """
 
         return await self._generate(
-            system_instruction=(
-                STRUCTURED_TABLE_EXTRACTION_SYSTEM_PROMPT
-            ),
+            system_instruction=STRUCTURED_TABLE_EXTRACTION_SYSTEM_PROMPT,
             user_prompt=user_prompt,
             response_schema=AIStructuredTablesResult,
             failure_label="structured table extraction",
@@ -213,52 +213,64 @@ DOCUMENT CONTENT:
         response_schema: type,
         failure_label: str,
     ) -> dict[str, Any]:
+        schema_json = json.dumps(
+            response_schema.model_json_schema(),
+            indent=2,
+        )
+
+        system_prompt = (
+            f"{system_instruction}\n\n"
+            "Respond with valid JSON only. "
+            "Do not include markdown fences or commentary.\n\n"
+            f"JSON schema:\n{schema_json}"
+        )
+
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt},
+        ]
 
         try:
+            async with httpx.AsyncClient(timeout=180.0) as client:
+                response = await client.post(
+                    f"{self.api_url}/v1/chat/completions",
+                    headers={
+                        "Authorization": f"Bearer {self.api_key}",
+                        "Content-Type": "application/json",
+                    },
+                    json={
+                        "model": "default",
+                        "messages": messages,
+                    },
+                )
 
-            response = self.client.models.generate_content(
-                model=self.model,
-
-                contents=user_prompt,
-
-                config={
-                    "system_instruction":
-                        system_instruction,
-
-                    "response_mime_type":
-                        "application/json",
-
-                    "response_schema":
-                        response_schema,
-                },
-            )
-
-            if not response.text:
-
+            if response.status_code >= 400:
+                detail = response.text
+                try:
+                    detail = response.json().get("detail", detail)
+                except Exception:
+                    pass
                 raise AIProviderError(
-                    "Gemini returned an empty response."
+                    f"Convera chat failed ({response.status_code}): {detail}"
                 )
 
-            parsed = json.loads(
-                response.text
-            )
+            payload = response.json()
+            content = (payload.get("content") or "").strip()
 
-            validated = (
-                response_schema
-                .model_validate(
-                    parsed
+            if not content:
+                raise AIProviderError(
+                    "Convera returned an empty response."
                 )
-            )
 
-            return (
-                validated.model_dump()
+            return _parse_json_response(
+                content,
+                response_schema,
             )
 
         except AIProviderError:
             raise
 
         except Exception as exc:
-
             raise AIProviderError(
-                f"Gemini {failure_label} failed: {exc}"
+                f"Convera {failure_label} failed: {exc}"
             ) from exc

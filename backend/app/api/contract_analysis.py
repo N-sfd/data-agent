@@ -7,18 +7,24 @@ from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
 from app.database.dependencies import get_database
+from app.models.classification_audit_log import ClassificationAuditLog
 from app.models.document import Document
 from app.models.document_metadata_field import DocumentMetadataField
 from app.models.document_page import DocumentPage
 from app.models.metadata_field_audit_log import MetadataFieldAuditLog
 from app.models.extraction_model import ExtractionField
+from app.models.relationship_audit_log import RelationshipAuditLog
 from app.schemas.contract_analysis import (
     AcceptAllRequest,
     AnalyzeContractRequest,
     ApproveDocumentRequest,
     ApproveDocumentResponse,
+    PromoteDocumentRequest,
+    PromoteDocumentResponse,
     ChildRelationship,
     ChildRelationshipsResponse,
+    ClassificationHistoryEntry,
+    ClassificationUpdateRequest,
     ConfirmRelationshipRequest,
     ConfirmRelationshipResponse,
     ContractAnalysisResponse,
@@ -26,13 +32,16 @@ from app.schemas.contract_analysis import (
     DetectedRelationship,
     FieldAuditEntry,
     FieldReviewRequest,
+    ManualRelationshipRequest,
     MetadataFieldResult,
+    RemoveRelationshipRequest,
 )
 from app.schemas.contract_clauses import ClauseExtractionResponse
 from app.schemas.contract_signatures import (
     SignatureExtractionResponse,
 )
 from app.schemas.contract_tables import TableExtractionResponse
+from app.schemas.structured_tables import StructuredTablesResponse
 from app.services.ai_provider import AIProviderError
 from app.services.ai_provider_factory import create_ai_provider
 from app.services.contract_classifier import classify_contract
@@ -55,10 +64,16 @@ from app.services.contract_signature_extractor import (
 from app.services.contract_structured_output import (
     build_structured_output,
 )
+from app.services.contract_structured_table_extractor import (
+    extract_document_structured_tables,
+    get_document_structured_tables,
+    structured_table_response_kwargs,
+)
 from app.services.contract_table_extractor import (
     normalize_document_tables,
 )
 from app.services.dashboard_stats import compute_document_status
+from app.services.document_status import compute_document_status_label
 from app.services.relationship_detector import (
     DetectedRelationshipMatch,
     detect_relationship,
@@ -140,6 +155,8 @@ def _build_relationship_response(
         confidence=match.confidence,
         matched_on=match.matched_on,
         status=status,
+        reasons=match.reasons,
+        detection_method=match.detection_method,
     )
 
 
@@ -160,7 +177,37 @@ def _relationship_match_from_document(
             document.parent_relationship_matched_on
             or "contract_number"
         ),
+        reasons=document.parent_relationship_reasons or [],
+        detection_method=(
+            document.parent_relationship_detection_method
+            or "automatic"
+        ),
     )
+
+
+def _would_create_cycle(
+    database: Session, *, document_id: str, proposed_parent_id: str
+) -> bool:
+    """True if setting document_id's parent to proposed_parent_id would
+    create a cycle — walk the proposed parent's ancestor chain looking
+    for document_id."""
+
+    current_id: str | None = proposed_parent_id
+    visited: set[str] = set()
+
+    while current_id is not None:
+        if current_id == document_id:
+            return True
+
+        if current_id in visited:
+            break
+
+        visited.add(current_id)
+
+        current = database.get(Document, current_id)
+        current_id = current.parent_document_id if current else None
+
+    return False
 
 
 @router.post(
@@ -244,11 +291,29 @@ async def analyze_contract(
         document.parent_relationship_confidence = match.confidence
         document.parent_relationship_matched_on = match.matched_on
         document.parent_relationship_status = "pending"
+        document.parent_relationship_reasons = match.reasons
+        document.parent_relationship_detection_method = (
+            match.detection_method
+        )
         database.commit()
 
         relationship_response = _build_relationship_response(
             database, match, status="pending"
         )
+
+    contract_title = next(
+        (
+            field.value
+            for field in metadata_fields
+            if field.field_key == "contract_title"
+        ),
+        None,
+    )
+    document.document_status = compute_document_status_label(
+        document, contract_title=contract_title
+    )
+    database.commit()
+    classification.document_status = document.document_status
 
     return ContractAnalysisResponse(
         document_id=document.id,
@@ -286,6 +351,7 @@ async def get_contract_analysis(
         industry=document.industry,
         contract_side=document.contract_side or "unknown",
         language=document.document_language,
+        document_status=document.document_status or "Unknown",
         confidence=document.classification_confidence or 0.0,
     )
 
@@ -344,8 +410,40 @@ async def confirm_relationship(
             detail="No pending relationship to resolve for this document.",
         )
 
+    changed_by = payload.changed_by
+
     if payload.action == "confirm":
+        if _would_create_cycle(
+            database,
+            document_id=document.id,
+            proposed_parent_id=document.parent_document_id,
+        ):
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    "Confirming this relationship would create a "
+                    "circular reference between the two documents."
+                ),
+            )
+
+        previous_status = document.parent_relationship_status
         document.parent_relationship_status = "confirmed"
+        document.document_status = compute_document_status_label(
+            document
+        )
+        database.add(
+            RelationshipAuditLog(
+                document_id=document.id,
+                action="confirm",
+                previous_parent_id=document.parent_document_id,
+                new_parent_id=document.parent_document_id,
+                previous_relationship_type=(
+                    document.parent_relationship_type
+                ),
+                new_relationship_type=document.parent_relationship_type,
+                changed_by=changed_by,
+            )
+        )
         database.commit()
 
         match = _relationship_match_from_document(document)
@@ -361,8 +459,22 @@ async def confirm_relationship(
             relationship=relationship,
         )
 
+    database.add(
+        RelationshipAuditLog(
+            document_id=document.id,
+            action="reject",
+            previous_parent_id=document.parent_document_id,
+            new_parent_id=None,
+            previous_relationship_type=document.parent_relationship_type,
+            new_relationship_type=None,
+            changed_by=changed_by,
+        )
+    )
+
     document.parent_relationship_status = "rejected"
     document.parent_document_id = None
+    document.parent_relationship_reasons = None
+    document.document_status = compute_document_status_label(document)
     database.commit()
 
     return ConfirmRelationshipResponse(
@@ -427,6 +539,7 @@ async def get_child_relationships(
                 or 0.0,
                 status=child.parent_relationship_status
                 or "pending",
+                reasons=child.parent_relationship_reasons or [],
             )
         )
 
@@ -434,6 +547,267 @@ async def get_child_relationships(
         parent_document_id=document_id,
         children=children,
     )
+
+
+@router.post(
+    "/{document_id}/relationship",
+    response_model=DetectedRelationship,
+)
+async def assign_relationship(
+    document_id: str,
+    payload: ManualRelationshipRequest,
+    database: Session = Depends(get_database),
+) -> DetectedRelationship:
+    document = database.get(Document, document_id)
+
+    if document is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Document not found.",
+        )
+
+    if payload.parent_document_id == document_id:
+        raise HTTPException(
+            status_code=422,
+            detail="A document cannot be its own parent.",
+        )
+
+    parent = database.get(Document, payload.parent_document_id)
+
+    if parent is None:
+        raise HTTPException(
+            status_code=404,
+            detail="The selected parent document does not exist.",
+        )
+
+    if (
+        document.parent_document_id == payload.parent_document_id
+        and document.parent_relationship_status
+        in {"confirmed", "manual"}
+    ):
+        raise HTTPException(
+            status_code=409,
+            detail="These documents are already linked.",
+        )
+
+    if _would_create_cycle(
+        database,
+        document_id=document_id,
+        proposed_parent_id=payload.parent_document_id,
+    ):
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "Assigning this parent would create a circular "
+                "reference between the two documents."
+            ),
+        )
+
+    database.add(
+        RelationshipAuditLog(
+            document_id=document.id,
+            action="manual_assign",
+            previous_parent_id=document.parent_document_id,
+            new_parent_id=payload.parent_document_id,
+            previous_relationship_type=document.parent_relationship_type,
+            new_relationship_type=payload.relationship_type,
+            changed_by=payload.changed_by,
+        )
+    )
+
+    document.parent_document_id = payload.parent_document_id
+    document.parent_relationship_type = payload.relationship_type
+    document.parent_relationship_confidence = 1.0
+    document.parent_relationship_matched_on = "contract_number"
+    document.parent_relationship_status = "manual"
+    document.parent_relationship_reasons = ["Manually assigned"]
+    document.parent_relationship_detection_method = "manual"
+    document.document_status = compute_document_status_label(document)
+    database.commit()
+
+    match = _relationship_match_from_document(document)
+    assert match is not None
+
+    return _build_relationship_response(
+        database, match, status="manual"
+    )
+
+
+@router.delete(
+    "/{document_id}/relationship",
+)
+async def remove_relationship(
+    document_id: str,
+    payload: RemoveRelationshipRequest,
+    database: Session = Depends(get_database),
+) -> dict[str, str]:
+    document = database.get(Document, document_id)
+
+    if document is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Document not found.",
+        )
+
+    if document.parent_document_id is None:
+        raise HTTPException(
+            status_code=409,
+            detail="This document has no relationship to remove.",
+        )
+
+    database.add(
+        RelationshipAuditLog(
+            document_id=document.id,
+            action="remove",
+            previous_parent_id=document.parent_document_id,
+            new_parent_id=None,
+            previous_relationship_type=document.parent_relationship_type,
+            new_relationship_type=None,
+            changed_by=payload.changed_by,
+        )
+    )
+
+    document.parent_document_id = None
+    document.parent_relationship_type = None
+    document.parent_relationship_confidence = None
+    document.parent_relationship_matched_on = None
+    document.parent_relationship_status = None
+    document.parent_relationship_reasons = None
+    document.parent_relationship_detection_method = None
+    document.document_status = compute_document_status_label(document)
+    database.commit()
+
+    return {"status": "removed"}
+
+
+@router.patch(
+    "/{document_id}/classification",
+    response_model=ContractClassification,
+)
+async def update_classification(
+    document_id: str,
+    payload: ClassificationUpdateRequest,
+    database: Session = Depends(get_database),
+) -> ContractClassification:
+    document = database.get(Document, document_id)
+
+    if document is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Document not found.",
+        )
+
+    updates: list[tuple[str, str | None, str | None]] = []
+
+    if (
+        payload.document_type is not None
+        and payload.document_type != document.document_type
+    ):
+        updates.append(
+            (
+                "document_type",
+                document.document_type,
+                payload.document_type,
+            )
+        )
+        document.document_type = payload.document_type
+
+    if (
+        payload.contract_side is not None
+        and payload.contract_side != document.contract_side
+    ):
+        updates.append(
+            (
+                "contract_side",
+                document.contract_side,
+                payload.contract_side,
+            )
+        )
+        document.contract_side = payload.contract_side
+
+    if (
+        payload.language is not None
+        and payload.language != document.document_language
+    ):
+        updates.append(
+            (
+                "language",
+                document.document_language,
+                payload.language,
+            )
+        )
+        document.document_language = payload.language
+
+    for field_changed, previous_value, new_value in updates:
+        database.add(
+            ClassificationAuditLog(
+                document_id=document.id,
+                field_changed=field_changed,
+                previous_value=previous_value,
+                new_value=new_value,
+                changed_by=payload.changed_by,
+            )
+        )
+
+    if updates:
+        # A manual correction is as certain as classification gets.
+        document.classification_confidence = 1.0
+
+    title_field = get_metadata_field(
+        database,
+        document_id=document.id,
+        field_key="contract_title",
+    )
+    document.document_status = compute_document_status_label(
+        document,
+        contract_title=title_field.value if title_field else None,
+    )
+    database.commit()
+
+    return ContractClassification(
+        document_type=document.document_type or "Other",
+        industry=document.industry,
+        contract_side=document.contract_side or "unknown",
+        language=document.document_language,
+        document_status=document.document_status or "Unknown",
+        confidence=document.classification_confidence or 0.0,
+    )
+
+
+@router.get(
+    "/{document_id}/classification-history",
+    response_model=list[ClassificationHistoryEntry],
+)
+async def get_classification_history(
+    document_id: str,
+    database: Session = Depends(get_database),
+) -> list[ClassificationHistoryEntry]:
+    document = database.get(Document, document_id)
+
+    if document is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Document not found.",
+        )
+
+    entries = list(
+        database.scalars(
+            select(ClassificationAuditLog)
+            .where(ClassificationAuditLog.document_id == document_id)
+            .order_by(ClassificationAuditLog.changed_at.desc())
+        )
+    )
+
+    return [
+        ClassificationHistoryEntry(
+            field_changed=entry.field_changed,
+            previous_value=entry.previous_value,
+            new_value=entry.new_value,
+            changed_by=entry.changed_by,
+            changed_at=entry.changed_at,
+        )
+        for entry in entries
+    ]
 
 
 @router.post(
@@ -471,6 +845,43 @@ async def approve_document(
         document_id=document.id,
         approved_by=document.approved_by,
         approved_at=document.approved_at,
+    )
+
+
+@router.post(
+    "/{document_id}/promote",
+    response_model=PromoteDocumentResponse,
+)
+async def promote_document(
+    document_id: str,
+    payload: PromoteDocumentRequest,
+    database: Session = Depends(get_database),
+) -> PromoteDocumentResponse:
+    document = database.get(Document, document_id)
+
+    if document is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Document not found.",
+        )
+
+    if document.approved_at is None:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "This document must be approved before it can be "
+                "promoted to the repository."
+            ),
+        )
+
+    document.promoted_by = payload.changed_by
+    document.promoted_at = datetime.now(timezone.utc)
+    database.commit()
+
+    return PromoteDocumentResponse(
+        document_id=document.id,
+        promoted_by=document.promoted_by,
+        promoted_at=document.promoted_at,
     )
 
 
@@ -780,4 +1191,56 @@ async def get_extracted_signatures(
             for signature in signatures
         ],
         warnings=[],
+    )
+
+
+@router.post(
+    "/{document_id}/extract-structured-tables",
+    response_model=StructuredTablesResponse,
+)
+async def extract_structured_tables(
+    document_id: str,
+    database: Session = Depends(get_database),
+) -> StructuredTablesResponse:
+    document = _load_ready_document(database, document_id)
+    pages = _load_pages(database, document_id)
+
+    ai_provider = create_ai_provider(settings)
+
+    results, warnings = await extract_document_structured_tables(
+        database=database,
+        document=document,
+        pages=pages,
+        ai_provider=ai_provider,
+    )
+
+    return StructuredTablesResponse(
+        document_id=document.id,
+        warnings=warnings,
+        **structured_table_response_kwargs(results),
+    )
+
+
+@router.get(
+    "/{document_id}/extract-structured-tables",
+    response_model=StructuredTablesResponse,
+)
+async def get_extracted_structured_tables(
+    document_id: str,
+    database: Session = Depends(get_database),
+) -> StructuredTablesResponse:
+    document = database.get(Document, document_id)
+
+    if document is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Document not found.",
+        )
+
+    results = get_document_structured_tables(database, document_id)
+
+    return StructuredTablesResponse(
+        document_id=document.id,
+        warnings=[],
+        **structured_table_response_kwargs(results),
     )

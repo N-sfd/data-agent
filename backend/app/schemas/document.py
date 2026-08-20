@@ -28,6 +28,8 @@ class UploadedDocumentResponse(BaseModel):
     pipeline_log: list[str] = Field(default_factory=list)
     approved_by: str | None = None
     approved_at: datetime | None = None
+    promoted_by: str | None = None
+    promoted_at: datetime | None = None
 
 
 class ResolveDuplicateRequest(BaseModel):
@@ -45,8 +47,30 @@ class DocumentSummaryResponse(BaseModel):
     page_count: int
     fields_extracted: int
     last_updated: datetime
+    counterparty: str | None = None
+    effective_date: str | None = None
+    expiration_date: str | None = None
+    contract_value: str | None = None
+    relationship: str | None = None
+    repository_status: Literal[
+        "not_approved", "approved", "repository"
+    ] = "not_approved"
 
 
 class DocumentSearchResponse(BaseModel):
     documents: list[DocumentSummaryResponse]
     total: int
+
+
+class HierarchyNode(BaseModel):
+    document_id: str
+    title: str
+    document_number: str | None = None
+    document_type: str | None = None
+    relationship_type: str | None = None
+    relationship_status: str | None = None
+    children: list["HierarchyNode"] = Field(default_factory=list)
+
+
+class DocumentHierarchyResponse(BaseModel):
+    roots: list[HierarchyNode]

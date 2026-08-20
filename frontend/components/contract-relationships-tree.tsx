@@ -12,6 +12,7 @@ interface ContractRelationshipsTreeProps {
   rootLabel: string;
   childRelationships: ChildRelationship[];
   onChanged: (updated: ChildRelationship[]) => void;
+  reviewerName: string;
 }
 
 const RELATIONSHIP_TYPE_LABELS: Record<string, string> = {
@@ -25,6 +26,7 @@ export default function ContractRelationshipsTree({
   rootLabel,
   childRelationships,
   onChanged,
+  reviewerName,
 }: ContractRelationshipsTreeProps) {
   const [busyId, setBusyId] = useState<string | null>(null);
 
@@ -38,6 +40,7 @@ export default function ContractRelationshipsTree({
       const result = await confirmRelationship(
         child.child_document_id,
         action,
+        reviewerName,
       );
 
       onChanged(

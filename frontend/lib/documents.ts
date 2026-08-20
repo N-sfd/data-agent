@@ -3,10 +3,15 @@ import { apiFetch } from "@/lib/api";
 import type {
   ApproveDocumentResult,
   ChildRelationshipsResult,
+  ClassificationHistoryEntry,
+  ClassificationUpdate,
   ClauseExtractionResult,
   ConfirmRelationshipResult,
   ContractAnalysisResult,
+  ContractClassification,
   DashboardStats,
+  DetectedRelationship,
+  DocumentHierarchyResult,
   DocumentPage,
   DocumentSearchResponse,
   DocumentSummary,
@@ -17,6 +22,7 @@ import type {
   GlobalAuditLogResponse,
   MetadataField,
   PageRender,
+  PromoteDocumentResult,
   RelationshipAction,
   ReviewAction,
   ReviewQueueEntry,
@@ -67,6 +73,9 @@ export interface DocumentSearchParams {
   q?: string;
   status?: string;
   documentType?: string;
+  confidence_min?: number;
+  confidence_max?: number;
+  repositoryStatus?: string;
   limit?: number;
   offset?: number;
 }
@@ -80,6 +89,15 @@ export async function searchDocuments(
   if (params.status) query.set("status", params.status);
   if (params.documentType) {
     query.set("document_type", params.documentType);
+  }
+  if (params.confidence_min !== undefined) {
+    query.set("confidence_min", String(params.confidence_min));
+  }
+  if (params.confidence_max !== undefined) {
+    query.set("confidence_max", String(params.confidence_max));
+  }
+  if (params.repositoryStatus) {
+    query.set("repository_status", params.repositoryStatus);
   }
   query.set("limit", String(params.limit ?? 25));
   query.set("offset", String(params.offset ?? 0));
@@ -287,6 +305,7 @@ export async function analyzeContract(
 export async function confirmRelationship(
   documentId: string,
   action: RelationshipAction,
+  changedBy: string,
 ): Promise<ConfirmRelationshipResult> {
   const response = await apiFetch(
     `/api/documents/${documentId}/confirm-relationship`,
@@ -295,7 +314,7 @@ export async function confirmRelationship(
       headers: {
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({ action }),
+      body: JSON.stringify({ action, changed_by: changedBy }),
     },
   );
 
@@ -306,6 +325,129 @@ export async function confirmRelationship(
       typeof result.detail === "string"
         ? result.detail
         : "Unable to resolve the relationship.",
+    );
+  }
+
+  return result;
+}
+
+export async function assignRelationship(
+  documentId: string,
+  parentDocumentId: string,
+  changedBy: string,
+  relationshipType = "amendment_of",
+): Promise<DetectedRelationship> {
+  const response = await apiFetch(
+    `/api/documents/${documentId}/relationship`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        parent_document_id: parentDocumentId,
+        relationship_type: relationshipType,
+        changed_by: changedBy,
+      }),
+    },
+  );
+
+  const result = await response.json();
+
+  if (!response.ok) {
+    throw new Error(
+      typeof result.detail === "string"
+        ? result.detail
+        : "Unable to assign this relationship.",
+    );
+  }
+
+  return result;
+}
+
+export async function removeRelationship(
+  documentId: string,
+  changedBy: string,
+): Promise<void> {
+  const response = await apiFetch(
+    `/api/documents/${documentId}/relationship`,
+    {
+      method: "DELETE",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ changed_by: changedBy }),
+    },
+  );
+
+  if (!response.ok) {
+    const result = await response.json();
+    throw new Error(
+      typeof result.detail === "string"
+        ? result.detail
+        : "Unable to remove this relationship.",
+    );
+  }
+}
+
+export async function updateClassification(
+  documentId: string,
+  update: ClassificationUpdate,
+): Promise<ContractClassification> {
+  const response = await apiFetch(
+    `/api/documents/${documentId}/classification`,
+    {
+      method: "PATCH",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(update),
+    },
+  );
+
+  const result = await response.json();
+
+  if (!response.ok) {
+    throw new Error(
+      typeof result.detail === "string"
+        ? result.detail
+        : "Unable to update the classification.",
+    );
+  }
+
+  return result;
+}
+
+export async function getClassificationHistory(
+  documentId: string,
+): Promise<ClassificationHistoryEntry[]> {
+  const response = await apiFetch(
+    `/api/documents/${documentId}/classification-history`,
+  );
+
+  const result = await response.json();
+
+  if (!response.ok) {
+    throw new Error(
+      typeof result.detail === "string"
+        ? result.detail
+        : "Unable to retrieve classification history.",
+    );
+  }
+
+  return result;
+}
+
+export async function getDocumentHierarchy(): Promise<DocumentHierarchyResult> {
+  const response = await apiFetch("/api/documents/hierarchy");
+
+  const result = await response.json();
+
+  if (!response.ok) {
+    throw new Error(
+      typeof result.detail === "string"
+        ? result.detail
+        : "Unable to retrieve the contract hierarchy.",
     );
   }
 
@@ -354,6 +496,34 @@ export async function approveDocument(
       typeof result.detail === "string"
         ? result.detail
         : "Unable to approve this document.",
+    );
+  }
+
+  return result;
+}
+
+export async function promoteDocument(
+  documentId: string,
+  changedBy: string,
+): Promise<PromoteDocumentResult> {
+  const response = await apiFetch(
+    `/api/documents/${documentId}/promote`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ changed_by: changedBy }),
+    },
+  );
+
+  const result = await response.json();
+
+  if (!response.ok) {
+    throw new Error(
+      typeof result.detail === "string"
+        ? result.detail
+        : "Unable to promote this document to the repository.",
     );
   }
 

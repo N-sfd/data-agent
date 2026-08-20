@@ -45,6 +45,15 @@ DocumentTypeLiteral = Literal[
 ]
 
 
+DocumentStatusLiteral = Literal[
+    "Original",
+    "Amendment",
+    "Renewal",
+    "Supporting Document",
+    "Unknown",
+]
+
+
 class ContractClassification(BaseModel):
     document_type: DocumentTypeLiteral = "Other"
 
@@ -58,11 +67,30 @@ class ContractClassification(BaseModel):
 
     language: str | None = None
 
+    document_status: DocumentStatusLiteral = "Unknown"
+
     confidence: float = Field(
         default=0.0,
         ge=0,
         le=1,
     )
+
+
+class ClassificationUpdateRequest(BaseModel):
+    document_type: DocumentTypeLiteral | None = None
+    contract_side: Literal["buy_side", "sell_side", "unknown"] | None = (
+        None
+    )
+    language: str | None = None
+    changed_by: str = Field(min_length=1, max_length=120)
+
+
+class ClassificationHistoryEntry(BaseModel):
+    field_changed: str
+    previous_value: str | None = None
+    new_value: str | None = None
+    changed_by: str
+    changed_at: datetime
 
 
 class MetadataFieldResult(BaseModel):
@@ -130,6 +158,14 @@ class GlobalAuditLogResponse(BaseModel):
     total: int
 
 
+RelationshipStatusLiteral = Literal[
+    "pending",
+    "confirmed",
+    "rejected",
+    "manual",
+]
+
+
 class DetectedRelationship(BaseModel):
     parent_document_id: str
     parent_document_title: str
@@ -144,11 +180,10 @@ class DetectedRelationship(BaseModel):
         "contract_title",
     ]
 
-    status: Literal[
-        "pending",
-        "confirmed",
-        "rejected",
-    ] = "pending"
+    status: RelationshipStatusLiteral = "pending"
+
+    reasons: list[str] = Field(default_factory=list)
+    detection_method: Literal["automatic", "manual"] = "automatic"
 
 
 class ContractAnalysisResponse(BaseModel):
@@ -169,12 +204,23 @@ class AnalyzeContractRequest(BaseModel):
 
 class ConfirmRelationshipRequest(BaseModel):
     action: Literal["confirm", "reject"]
+    changed_by: str = Field(default="Unknown", min_length=1, max_length=120)
 
 
 class ConfirmRelationshipResponse(BaseModel):
     document_id: str
     status: Literal["confirmed", "rejected"]
     relationship: DetectedRelationship | None = None
+
+
+class ManualRelationshipRequest(BaseModel):
+    parent_document_id: str
+    relationship_type: str = "amendment_of"
+    changed_by: str = Field(min_length=1, max_length=120)
+
+
+class RemoveRelationshipRequest(BaseModel):
+    changed_by: str = Field(min_length=1, max_length=120)
 
 
 class ChildRelationship(BaseModel):
@@ -186,11 +232,9 @@ class ChildRelationship(BaseModel):
 
     confidence: float = Field(ge=0, le=1)
 
-    status: Literal[
-        "pending",
-        "confirmed",
-        "rejected",
-    ]
+    status: RelationshipStatusLiteral
+
+    reasons: list[str] = Field(default_factory=list)
 
 
 class ChildRelationshipsResponse(BaseModel):
@@ -206,3 +250,13 @@ class ApproveDocumentResponse(BaseModel):
     document_id: str
     approved_by: str
     approved_at: datetime
+
+
+class PromoteDocumentRequest(BaseModel):
+    changed_by: str = Field(min_length=1, max_length=120)
+
+
+class PromoteDocumentResponse(BaseModel):
+    document_id: str
+    promoted_by: str
+    promoted_at: datetime

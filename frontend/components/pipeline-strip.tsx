@@ -11,6 +11,7 @@ interface PipelineStripProps {
   fieldsExtracted: boolean;
   humanReviewComplete: boolean;
   approved: boolean;
+  promoted: boolean;
 }
 
 export default function PipelineStrip({
@@ -18,6 +19,7 @@ export default function PipelineStrip({
   fieldsExtracted,
   humanReviewComplete,
   approved,
+  promoted,
 }: PipelineStripProps) {
   // Reaching the review workspace already implies upload, validation,
   // OCR, and page extraction succeeded — analyze-contract requires
@@ -42,7 +44,11 @@ export default function PipelineStrip({
       complete: approved,
       active: humanReviewComplete && !approved,
     },
-    { label: "Repository", complete: approved },
+    {
+      label: "Repository",
+      complete: promoted,
+      active: approved && !promoted,
+    },
   ];
 
   return (

@@ -1,3 +1,4 @@
+import re
 from dataclasses import dataclass
 
 
@@ -46,6 +47,7 @@ _RAW_FIELD_GROUPS: list[tuple[str, list[tuple[str, str]]]] = [
             ("renewal_date", "Renewal Date"),
             ("notice_date", "Notice Date"),
             ("termination_date", "Termination Date"),
+            ("award_date", "Award Date"),
         ],
     ),
     (
@@ -86,6 +88,7 @@ _RAW_FIELD_GROUPS: list[tuple[str, list[tuple[str, str]]]] = [
             ("minimum_commitment", "Minimum Commitment"),
             ("volume_commitment", "Volume Commitment"),
             ("service_credits", "Service Credits"),
+            ("fob", "FOB"),
         ],
     ),
     (
@@ -96,6 +99,22 @@ _RAW_FIELD_GROUPS: list[tuple[str, list[tuple[str, str]]]] = [
             ("audit_rights", "Audit Rights"),
             ("regulatory_requirements", "Regulatory Requirements"),
             ("certifications", "Certifications"),
+        ],
+    ),
+    (
+        "Government",
+        [
+            ("solicitation_number", "Solicitation No."),
+            ("purchase_request_number", "Purchase Request No."),
+            ("proposal_number", "Proposal No."),
+            ("facility_code", "Facility Code"),
+            ("project_number", "Project No."),
+            ("naics_code", "NAICS Code"),
+            ("psc_code", "PSC Code"),
+            ("contracting_officer", "Contracting Officer"),
+            ("calendar_days", "Calendar Days"),
+            ("zip_code", "ZIP Code"),
+            ("time_and_date", "Time and Date"),
         ],
     ),
 ]
@@ -118,11 +137,21 @@ DATE_FIELD_KEYS: frozenset[str] = frozenset(
         "renewal_date",
         "notice_date",
         "termination_date",
+        "award_date",
+        "time_and_date",
     }
 )
 
 # Fields whose extracted text should be normalized as a money amount.
 MONEY_FIELD_KEYS: frozenset[str] = frozenset({"contract_value"})
+
+# Fields whose extracted text should be normalized against a fixed code
+# pattern (e.g. NAICS/PSC/ZIP), analogous to MONEY_PATTERN for money fields.
+CODE_FIELD_PATTERNS: dict[str, re.Pattern] = {
+    "naics_code": re.compile(r"\b\d{6}\b"),
+    "psc_code": re.compile(r"\b[A-Z0-9]{4}\b"),
+    "zip_code": re.compile(r"\b\d{5}(?:-\d{4})?\b"),
+}
 
 # Fields whose value should be coerced to a number in structured output.
 NUMERIC_FIELD_KEYS: frozenset[str] = frozenset(
@@ -133,6 +162,7 @@ NUMERIC_FIELD_KEYS: frozenset[str] = frozenset(
         "late_fees",
         "minimum_commitment",
         "volume_commitment",
+        "calendar_days",
     }
 )
 

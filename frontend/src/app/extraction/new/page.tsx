@@ -210,6 +210,7 @@ export default function NewExtractionPage() {
       const result = await confirmRelationship(
         document.document_id,
         action,
+        "Consult America",
       );
 
       setContractAnalysis({
@@ -358,15 +359,22 @@ export default function NewExtractionPage() {
             />
           )}
 
-          {contractAnalysis?.relationship && (
+          {contractAnalysis && document && (
             <RelationshipCard
+              documentId={document.document_id}
               relationship={contractAnalysis.relationship}
+              reviewerName="Consult America"
               busy={relationshipBusy}
               onConfirm={() =>
                 handleRelationshipAction("confirm")
               }
               onReject={() =>
                 handleRelationshipAction("reject")
+              }
+              onRelationshipChange={(relationship) =>
+                setContractAnalysis((current) =>
+                  current ? { ...current, relationship } : current,
+                )
               }
             />
           )}

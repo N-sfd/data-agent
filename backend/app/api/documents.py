@@ -20,9 +20,11 @@ from app.schemas.contract_analysis import (
     GlobalAuditLogResponse,
 )
 from app.schemas.document import (
+    DocumentHierarchyResponse,
     DocumentSearchResponse,
     DocumentSummaryResponse,
     ExistingDocumentSummary,
+    HierarchyNode,
     ResolveDuplicateRequest,
     UploadedDocumentResponse,
 )
@@ -525,6 +527,19 @@ async def resolve_duplicate(
         ) from exc
 
 
+def _document_field_value(
+    database: Session, document_id: str, field_key: str
+) -> str | None:
+    row = database.scalar(
+        select(DocumentMetadataField.value).where(
+            DocumentMetadataField.document_id == document_id,
+            DocumentMetadataField.field_key == field_key,
+        )
+    )
+
+    return row or None
+
+
 def _build_document_summary(
     database: Session, document: Document
 ) -> DocumentSummaryResponse:
@@ -546,6 +561,38 @@ def _build_document_summary(
         else document.uploaded_at
     )
 
+    counterparty = _document_field_value(
+        database, document.id, "supplier"
+    ) or _document_field_value(database, document.id, "customer")
+
+    relationship: str | None = None
+
+    if (
+        document.parent_document_id
+        and document.parent_relationship_status
+        in {"confirmed", "manual"}
+    ):
+        parent_title = _document_field_value(
+            database, document.parent_document_id, "contract_title"
+        )
+        relationship = f"Child of {parent_title or 'parent document'}"
+    else:
+        has_children = database.scalar(
+            select(Document.id)
+            .where(Document.parent_document_id == document.id)
+            .limit(1)
+        )
+
+        if has_children is not None:
+            relationship = "Parent"
+
+    if document.promoted_at is not None:
+        repository_status = "repository"
+    elif document.approved_at is not None:
+        repository_status = "approved"
+    else:
+        repository_status = "not_approved"
+
     return DocumentSummaryResponse(
         document_id=document.id,
         original_filename=document.original_filename,
@@ -556,6 +603,18 @@ def _build_document_summary(
         page_count=document.page_count,
         fields_extracted=fields_extracted,
         last_updated=last_updated,
+        counterparty=counterparty,
+        effective_date=_document_field_value(
+            database, document.id, "effective_date"
+        ),
+        expiration_date=_document_field_value(
+            database, document.id, "expiration_date"
+        ),
+        contract_value=_document_field_value(
+            database, document.id, "contract_value"
+        ),
+        relationship=relationship,
+        repository_status=repository_status,
     )
 
 
@@ -589,6 +648,9 @@ async def search_documents(
     q: str = "",
     status: str | None = None,
     document_type: str | None = None,
+    confidence_min: float | None = None,
+    confidence_max: float | None = None,
+    repository_status: str | None = None,
     limit: int = 25,
     offset: int = 0,
     database: Session = Depends(get_database),
@@ -610,7 +672,12 @@ async def search_documents(
             select(DocumentMetadataField.document_id)
             .where(
                 DocumentMetadataField.field_key.in_(
-                    ["contract_number", "contract_title"]
+                    [
+                        "contract_number",
+                        "contract_title",
+                        "supplier",
+                        "customer",
+                    ]
                 ),
                 DocumentMetadataField.value.ilike(like),
             )
@@ -657,10 +724,84 @@ async def search_documents(
             summary for summary in summaries if summary.status == status
         ]
 
+    if confidence_min is not None:
+        summaries = [
+            summary
+            for summary in summaries
+            if summary.confidence is not None
+            and summary.confidence >= confidence_min
+        ]
+
+    if confidence_max is not None:
+        summaries = [
+            summary
+            for summary in summaries
+            if summary.confidence is not None
+            and summary.confidence <= confidence_max
+        ]
+
+    if repository_status:
+        summaries = [
+            summary
+            for summary in summaries
+            if summary.repository_status == repository_status
+        ]
+
     total = len(summaries)
     page = summaries[offset : offset + limit]
 
     return DocumentSearchResponse(documents=page, total=total)
+
+
+@router.get(
+    "/hierarchy",
+    response_model=DocumentHierarchyResponse,
+)
+async def get_document_hierarchy(
+    database: Session = Depends(get_database),
+) -> DocumentHierarchyResponse:
+    all_documents = list(database.scalars(select(Document)))
+
+    children_by_parent: dict[str, list[Document]] = {}
+
+    for document in all_documents:
+        if document.parent_document_id is not None:
+            children_by_parent.setdefault(
+                document.parent_document_id, []
+            ).append(document)
+
+    def build_node(document: Document) -> HierarchyNode:
+        title = (
+            _document_field_value(
+                database, document.id, "contract_title"
+            )
+            or document.original_filename
+        )
+        number = _document_field_value(
+            database, document.id, "contract_number"
+        )
+
+        return HierarchyNode(
+            document_id=document.id,
+            title=title,
+            document_number=number,
+            document_type=document.document_type,
+            relationship_type=document.parent_relationship_type,
+            relationship_status=document.parent_relationship_status,
+            children=[
+                build_node(child)
+                for child in children_by_parent.get(document.id, [])
+            ],
+        )
+
+    roots = [
+        build_node(document)
+        for document in all_documents
+        if document.parent_document_id is None
+        and document.id in children_by_parent
+    ]
+
+    return DocumentHierarchyResponse(roots=roots)
 
 
 @router.get(
@@ -743,4 +884,6 @@ async def get_document(
         message="",
         approved_by=document.approved_by,
         approved_at=document.approved_at,
+        promoted_by=document.promoted_by,
+        promoted_at=document.promoted_at,
     )

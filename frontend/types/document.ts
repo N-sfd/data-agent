@@ -21,6 +21,8 @@ export interface UploadedDocument {
   pipeline_log?: string[];
   approved_by?: string | null;
   approved_at?: string | null;
+  promoted_by?: string | null;
+  promoted_at?: string | null;
 }
 
 export type DuplicateResolution = "use_existing" | "upload_anyway";
@@ -29,6 +31,11 @@ export type DocumentStatus =
   | "processing"
   | "review_required"
   | "completed";
+
+export type RepositoryStatus =
+  | "not_approved"
+  | "approved"
+  | "repository";
 
 export interface DocumentSummary {
   document_id: string;
@@ -40,6 +47,26 @@ export interface DocumentSummary {
   page_count: number;
   fields_extracted: number;
   last_updated: string;
+  counterparty?: string | null;
+  effective_date?: string | null;
+  expiration_date?: string | null;
+  contract_value?: string | null;
+  relationship?: string | null;
+  repository_status?: RepositoryStatus;
+}
+
+export interface HierarchyNode {
+  document_id: string;
+  title: string;
+  document_number: string | null;
+  document_type: string | null;
+  relationship_type: string | null;
+  relationship_status: string | null;
+  children: HierarchyNode[];
+}
+
+export interface DocumentHierarchyResult {
+  roots: HierarchyNode[];
 }
 
 export interface DashboardStats {
@@ -240,12 +267,57 @@ export interface UniversalExtractionResult {
 
 export type ContractSide = "buy_side" | "sell_side" | "unknown";
 
+export type DocumentStatusLabel =
+  | "Original"
+  | "Amendment"
+  | "Renewal"
+  | "Supporting Document"
+  | "Unknown";
+
+export const DOCUMENT_TYPE_OPTIONS = [
+  "Master Services Agreement",
+  "NDA",
+  "Supplier Agreement",
+  "Purchase Agreement",
+  "Professional Services Agreement",
+  "Software Agreement",
+  "SaaS Agreement",
+  "Lease",
+  "Statement of Work",
+  "Amendment",
+  "Change Order",
+  "Purchase Order",
+  "Service Level Agreement",
+  "License Agreement",
+  "Consulting Agreement",
+  "Construction Agreement",
+  "Government Contract",
+  "Subcontract",
+  "Other",
+] as const;
+
 export interface ContractClassification {
   document_type: string;
   industry: string | null;
   contract_side: ContractSide;
   language: string | null;
+  document_status: DocumentStatusLabel;
   confidence: number;
+}
+
+export interface ClassificationUpdate {
+  document_type?: string;
+  contract_side?: ContractSide;
+  language?: string;
+  changed_by: string;
+}
+
+export interface ClassificationHistoryEntry {
+  field_changed: string;
+  previous_value: string | null;
+  new_value: string | null;
+  changed_by: string;
+  changed_at: string;
 }
 
 export type ReviewStatus =
@@ -287,7 +359,11 @@ export interface FieldAuditEntry {
   changed_at: string;
 }
 
-export type RelationshipStatus = "pending" | "confirmed" | "rejected";
+export type RelationshipStatus =
+  | "pending"
+  | "confirmed"
+  | "rejected"
+  | "manual";
 
 export interface DetectedRelationship {
   parent_document_id: string;
@@ -301,6 +377,9 @@ export interface DetectedRelationship {
   matched_on: "contract_number" | "contract_title";
 
   status: RelationshipStatus;
+
+  reasons: string[];
+  detection_method: "automatic" | "manual";
 }
 
 export interface ChildRelationship {
@@ -313,6 +392,8 @@ export interface ChildRelationship {
   confidence: number;
 
   status: RelationshipStatus;
+
+  reasons: string[];
 }
 
 export interface ChildRelationshipsResult {
@@ -324,6 +405,12 @@ export interface ApproveDocumentResult {
   document_id: string;
   approved_by: string;
   approved_at: string;
+}
+
+export interface PromoteDocumentResult {
+  document_id: string;
+  promoted_by: string;
+  promoted_at: string;
 }
 
 export interface ContractAnalysisResult {

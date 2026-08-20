@@ -1,5 +1,6 @@
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from datetime import date
 from difflib import SequenceMatcher
 from typing import Literal
 
@@ -34,7 +35,18 @@ PARENT_RELATIONSHIP_TYPES: dict[str, str] = {
 }
 
 TITLE_MATCH_THRESHOLD = 0.6
-EXACT_NUMBER_CONFIDENCE = 0.95
+
+# Weighted signal points, normalized to a 0-100 (0-1.0) confidence
+# score. An exact contract-number match is weighted highest since a
+# contract number is effectively a unique identifier; the others
+# corroborate rather than independently establish the relationship.
+POINTS_CONTRACT_NUMBER = 70
+POINTS_EXPLICIT_REFERENCE = 15
+POINTS_COUNTERPARTY = 7
+POINTS_COMPATIBLE_TYPE = 5
+POINTS_DATE_RANGE = 3
+
+BONUS_SIGNAL_FIELD_KEYS = ("supplier", "customer", "effective_date")
 
 
 @dataclass(frozen=True)
@@ -43,6 +55,8 @@ class DetectedRelationshipMatch:
     relationship_type: str
     confidence: float
     matched_on: Literal["contract_number", "contract_title"]
+    reasons: list[str] = field(default_factory=list)
+    detection_method: str = "automatic"
 
 
 def _candidate_numbers(text: str) -> list[str]:
@@ -56,6 +70,16 @@ def _candidate_title_phrases(text: str) -> list[str]:
             for match in REFERENCE_PHRASE_PATTERN.findall(text)
         )
     )
+
+
+def _parse_date(value: str | None) -> date | None:
+    if not value:
+        return None
+
+    try:
+        return date.fromisoformat(value[:10])
+    except ValueError:
+        return None
 
 
 def detect_relationship(
@@ -76,72 +100,186 @@ def detect_relationship(
     )
 
     number_candidates = _candidate_numbers(full_text)
-
-    if number_candidates:
-        other_number_fields = list(
-            database.scalars(
-                select(DocumentMetadataField).where(
-                    DocumentMetadataField.field_key
-                    == "contract_number",
-                    DocumentMetadataField.document_id != document.id,
-                )
-            )
-        )
-
-        for candidate in number_candidates:
-            for field in other_number_fields:
-                if (
-                    field.value.strip().upper()
-                    == candidate.strip().upper()
-                ):
-                    return DetectedRelationshipMatch(
-                        parent_document_id=field.document_id,
-                        relationship_type=relationship_type,
-                        confidence=EXACT_NUMBER_CONFIDENCE,
-                        matched_on="contract_number",
-                    )
-
     title_candidates = _candidate_title_phrases(full_text)
 
-    if not title_candidates:
+    if not number_candidates and not title_candidates:
         return None
 
-    other_title_fields = list(
-        database.scalars(
-            select(DocumentMetadataField).where(
+    # Find candidates via targeted SQL first — a handful of documents
+    # at most — rather than scoring every document in the database.
+    candidate_ids: set[str] = set()
+
+    if number_candidates:
+        number_matches = database.execute(
+            select(
+                DocumentMetadataField.document_id,
+                DocumentMetadataField.value,
+            ).where(
+                DocumentMetadataField.field_key == "contract_number",
+                DocumentMetadataField.document_id != document.id,
+            )
+        ).all()
+
+        matched_numbers = {n.upper() for n in number_candidates}
+        candidate_ids.update(
+            doc_id
+            for doc_id, value in number_matches
+            if value and value.strip().upper() in matched_numbers
+        )
+
+    if title_candidates:
+        title_matches = database.execute(
+            select(
+                DocumentMetadataField.document_id,
+                DocumentMetadataField.value,
+            ).where(
                 DocumentMetadataField.field_key == "contract_title",
                 DocumentMetadataField.document_id != document.id,
             )
-        )
-    )
+        ).all()
 
-    best_score = 0.0
-    best_field: DocumentMetadataField | None = None
+        for doc_id, title in title_matches:
+            if not title:
+                continue
 
-    for field in other_title_fields:
-        for candidate in title_candidates:
-            score = SequenceMatcher(
-                None,
-                candidate.lower(),
-                field.value.lower(),
-            ).ratio()
+            for phrase in title_candidates:
+                ratio = SequenceMatcher(
+                    None, phrase.lower(), title.lower()
+                ).ratio()
 
-            if score > best_score:
-                best_score = score
-                best_field = field
+                if ratio >= TITLE_MATCH_THRESHOLD:
+                    candidate_ids.add(doc_id)
+                    break
 
-    if best_field is None or best_score < TITLE_MATCH_THRESHOLD:
+    if not candidate_ids:
         return None
 
-    # Map the [threshold, 1.0] similarity range onto a [0.5, 0.85]
-    # confidence band — fuzzy title matches are never as certain as an
-    # exact contract-number match.
-    span = 1 - TITLE_MATCH_THRESHOLD
-    confidence = 0.5 + (best_score - TITLE_MATCH_THRESHOLD) / span * 0.35
+    candidates = {
+        c.id: c
+        for c in database.scalars(
+            select(Document).where(Document.id.in_(candidate_ids))
+        )
+    }
+
+    # Batch-fetch bonus-signal fields for the child document plus every
+    # remaining candidate in one query instead of per-candidate calls.
+    field_rows = database.execute(
+        select(
+            DocumentMetadataField.document_id,
+            DocumentMetadataField.field_key,
+            DocumentMetadataField.value,
+        ).where(
+            DocumentMetadataField.document_id.in_(
+                candidate_ids | {document.id}
+            ),
+            DocumentMetadataField.field_key.in_(
+                BONUS_SIGNAL_FIELD_KEYS
+                + ("contract_number", "contract_title")
+            ),
+        )
+    ).all()
+
+    field_values: dict[tuple[str, str], str] = {
+        (doc_id, key): value
+        for doc_id, key, value in field_rows
+        if value
+    }
+
+    def value_for(doc_id: str, key: str) -> str | None:
+        return field_values.get((doc_id, key))
+
+    matched_numbers = {n.upper() for n in number_candidates}
+    child_date = _parse_date(value_for(document.id, "effective_date"))
+
+    best_score = 0.0
+    best_candidate_id: str | None = None
+    best_reasons: list[str] = []
+    best_matched_on: Literal["contract_number", "contract_title"] = (
+        "contract_title"
+    )
+
+    for candidate_id, candidate in candidates.items():
+        score = 0.0
+        reasons: list[str] = []
+        matched_on: Literal["contract_number", "contract_title"] = (
+            "contract_title"
+        )
+
+        candidate_number = value_for(candidate_id, "contract_number")
+        candidate_title = value_for(candidate_id, "contract_title")
+
+        number_matched = bool(
+            candidate_number
+            and candidate_number.strip().upper() in matched_numbers
+        )
+
+        if number_matched:
+            score += POINTS_CONTRACT_NUMBER
+            reasons.append("Matching contract number")
+            matched_on = "contract_number"
+
+        reference_matched = False
+
+        if candidate_title:
+            for phrase in title_candidates:
+                ratio = SequenceMatcher(
+                    None, phrase.lower(), candidate_title.lower()
+                ).ratio()
+
+                if ratio >= TITLE_MATCH_THRESHOLD:
+                    reference_matched = True
+                    break
+
+        if reference_matched:
+            score += POINTS_EXPLICIT_REFERENCE
+            reasons.append("Explicit agreement reference")
+
+            if not number_matched:
+                matched_on = "contract_title"
+
+        if not number_matched and not reference_matched:
+            continue
+
+        child_supplier = value_for(document.id, "supplier")
+        child_customer = value_for(document.id, "customer")
+        parent_supplier = value_for(candidate_id, "supplier")
+        parent_customer = value_for(candidate_id, "customer")
+
+        counterparty_matched = bool(
+            (child_supplier and child_supplier == parent_supplier)
+            or (child_customer and child_customer == parent_customer)
+        )
+
+        if counterparty_matched:
+            score += POINTS_COUNTERPARTY
+            reasons.append("Same counterparty")
+
+        # The candidate looks like a "base" agreement rather than
+        # another supporting document — a plausible parent type.
+        if candidate.document_type not in PARENT_RELATIONSHIP_TYPES:
+            score += POINTS_COMPATIBLE_TYPE
+            reasons.append("Compatible document type")
+
+        parent_date = _parse_date(value_for(candidate_id, "effective_date"))
+
+        if child_date and parent_date and child_date >= parent_date:
+            score += POINTS_DATE_RANGE
+            reasons.append("Compatible date range")
+
+        if score > best_score:
+            best_score = score
+            best_candidate_id = candidate_id
+            best_reasons = reasons
+            best_matched_on = matched_on
+
+    if best_candidate_id is None or best_score <= 0:
+        return None
 
     return DetectedRelationshipMatch(
-        parent_document_id=best_field.document_id,
+        parent_document_id=best_candidate_id,
         relationship_type=relationship_type,
-        confidence=round(confidence, 2),
-        matched_on="contract_title",
+        confidence=round(min(best_score, 100.0) / 100, 2),
+        matched_on=best_matched_on,
+        reasons=best_reasons,
+        detection_method="automatic",
     )

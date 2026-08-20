@@ -2,7 +2,11 @@
 
 import { use, useEffect, useState } from "react";
 import Link from "next/link";
-import { ArrowLeft, BadgeCheck } from "lucide-react";
+import {
+  Archive as ArchiveIcon,
+  ArrowLeft,
+  BadgeCheck,
+} from "lucide-react";
 
 import ContractRelationshipsTree from "@/components/contract-relationships-tree";
 import DocumentProfileCard from "@/components/document-profile-card";
@@ -27,12 +31,15 @@ import {
   getDocumentPages,
   getPageRender,
   getSignatures,
+  promoteDocument,
   reviewMetadataField,
 } from "@/lib/documents";
 import type {
   ChildRelationship,
   ClauseResult,
   ContractAnalysisResult,
+  ContractClassification,
+  DetectedRelationship,
   DocumentPage,
   MetadataField,
   NormalizedTable,
@@ -93,6 +100,9 @@ export default function ReviewWorkspacePage({
 
   const [approving, setApproving] = useState(false);
   const [approveError, setApproveError] = useState("");
+
+  const [promoting, setPromoting] = useState(false);
+  const [promoteError, setPromoteError] = useState("");
 
   const [clauses, setClauses] = useState<ClauseResult[]>([]);
   const [extractingClauses, setExtractingClauses] =
@@ -369,7 +379,11 @@ export default function ReviewWorkspacePage({
     setRelationshipBusy(true);
 
     try {
-      const result = await confirmRelationship(documentId, action);
+      const result = await confirmRelationship(
+        documentId,
+        action,
+        reviewerName,
+      );
 
       setAnalysis((current) => {
         if (!current) return current;
@@ -388,6 +402,22 @@ export default function ReviewWorkspacePage({
 
   function handleChildrenChanged(updated: ChildRelationship[]) {
     setChildren(updated);
+  }
+
+  function handleRelationshipChange(
+    relationship: DetectedRelationship | null,
+  ) {
+    setAnalysis((current) =>
+      current ? { ...current, relationship } : current,
+    );
+  }
+
+  function handleClassificationChange(
+    updated: ContractClassification,
+  ) {
+    setAnalysis((current) =>
+      current ? { ...current, classification: updated } : current,
+    );
   }
 
   async function handleApprove() {
@@ -421,6 +451,40 @@ export default function ReviewWorkspacePage({
       );
     } finally {
       setApproving(false);
+    }
+  }
+
+  async function handlePromote() {
+    if (!reviewerName.trim()) {
+      return;
+    }
+
+    setPromoting(true);
+    setPromoteError("");
+
+    try {
+      const result = await promoteDocument(
+        documentId,
+        reviewerName.trim(),
+      );
+
+      setDocument((current) =>
+        current
+          ? {
+              ...current,
+              promoted_by: result.promoted_by,
+              promoted_at: result.promoted_at,
+            }
+          : current,
+      );
+    } catch (error) {
+      setPromoteError(
+        error instanceof Error
+          ? error.message
+          : "Unable to promote this document to the repository.",
+      );
+    } finally {
+      setPromoting(false);
     }
   }
 
@@ -515,6 +579,7 @@ export default function ReviewWorkspacePage({
       (field) => field.review_status !== "pending",
     );
   const approved = Boolean(document.approved_at);
+  const promoted = Boolean(document.promoted_at);
 
   return (
     <div className="flex h-[calc(100vh-4rem)] flex-col">
@@ -538,6 +603,7 @@ export default function ReviewWorkspacePage({
           fieldsExtracted={fieldsExtracted}
           humanReviewComplete={humanReviewComplete}
           approved={approved}
+          promoted={promoted}
         />
 
         <div className="flex items-center gap-4">
@@ -562,12 +628,7 @@ export default function ReviewWorkspacePage({
             />
           </label>
 
-          {approved ? (
-            <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700">
-              <BadgeCheck className="h-3.5 w-3.5" />
-              Approved by {document.approved_by}
-            </span>
-          ) : (
+          {!approved && (
             <button
               type="button"
               onClick={handleApprove}
@@ -583,12 +644,45 @@ export default function ReviewWorkspacePage({
               {approving ? "Approving..." : "Approve Document"}
             </button>
           )}
+
+          {approved && !promoted && (
+            <>
+              <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700">
+                <BadgeCheck className="h-3.5 w-3.5" />
+                Approved by {document.approved_by}
+              </span>
+
+              <button
+                type="button"
+                onClick={handlePromote}
+                disabled={promoting}
+                title="Approval alone doesn't add a document to the repository — promotion is a separate, explicit step."
+                className="inline-flex items-center gap-1.5 rounded-full bg-violet-600 px-3 py-1 text-xs font-semibold text-white transition hover:bg-violet-700 disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-400"
+              >
+                <ArchiveIcon className="h-3.5 w-3.5" />
+                {promoting ? "Promoting..." : "Promote to Repository"}
+              </button>
+            </>
+          )}
+
+          {promoted && (
+            <span className="inline-flex items-center gap-1.5 rounded-full bg-violet-50 px-3 py-1 text-xs font-semibold text-violet-700">
+              <ArchiveIcon className="h-3.5 w-3.5" />
+              In Repository (promoted by {document.promoted_by})
+            </span>
+          )}
         </div>
       </div>
 
       {approveError && (
         <p className="shrink-0 border-b border-red-100 bg-red-50 px-6 py-1.5 text-xs text-red-700">
           {approveError}
+        </p>
+      )}
+
+      {promoteError && (
+        <p className="shrink-0 border-b border-red-100 bg-red-50 px-6 py-1.5 text-xs text-red-700">
+          {promoteError}
         </p>
       )}
 
@@ -640,25 +734,28 @@ export default function ReviewWorkspacePage({
         <div className="flex h-full flex-col overflow-hidden">
           <div className="max-h-[45vh] shrink-0 space-y-4 overflow-y-auto p-4 pb-0">
             <DocumentProfileCard
+              documentId={documentId}
               classification={analysis.classification}
+              reviewerName={reviewerName}
+              onClassificationChange={handleClassificationChange}
             />
 
-            {analysis.relationship && (
-              <RelationshipCard
-                relationship={analysis.relationship}
-                onConfirm={() =>
-                  handleRelationshipAction("confirm")
-                }
-                onReject={() => handleRelationshipAction("reject")}
-                busy={relationshipBusy}
-              />
-            )}
+            <RelationshipCard
+              documentId={documentId}
+              relationship={analysis.relationship}
+              reviewerName={reviewerName}
+              onConfirm={() => handleRelationshipAction("confirm")}
+              onReject={() => handleRelationshipAction("reject")}
+              onRelationshipChange={handleRelationshipChange}
+              busy={relationshipBusy}
+            />
 
             {children.length > 0 && (
               <ContractRelationshipsTree
                 rootLabel={contractNumber ?? document.original_filename}
                 childRelationships={children}
                 onChanged={handleChildrenChanged}
+                reviewerName={reviewerName}
               />
             )}
           </div>

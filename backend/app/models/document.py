@@ -1,6 +1,7 @@
 from datetime import datetime, timezone
 
 from sqlalchemy import (
+    JSON,
     BigInteger,
     Boolean,
     DateTime,
@@ -123,6 +124,13 @@ class Document(Base):
         nullable=True,
     )
 
+    # Computed (not AI-classified) — derived from document_type and the
+    # confirmed parent relationship. See services/document_status.py.
+    document_status: Mapped[str | None] = mapped_column(
+        String(30),
+        nullable=True,
+    )
+
     # Parent/child relationship (Step 3).
     parent_document_id: Mapped[str | None] = mapped_column(
         String(36),
@@ -150,6 +158,18 @@ class Document(Base):
         nullable=True,
     )
 
+    parent_relationship_reasons: Mapped[list | None] = mapped_column(
+        JSON,
+        nullable=True,
+    )
+
+    parent_relationship_detection_method: Mapped[
+        str | None
+    ] = mapped_column(
+        String(20),
+        nullable=True,
+    )
+
     # Dashboard stats (Step 16).
     processing_duration_seconds: Mapped[float | None] = mapped_column(
         Float,
@@ -164,5 +184,31 @@ class Document(Base):
 
     approved_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True),
+        nullable=True,
+    )
+
+    # Repository promotion — deliberately separate from Approve; see
+    # services/document_status.py's compute_repository_status.
+    promoted_by: Mapped[str | None] = mapped_column(
+        String(120),
+        nullable=True,
+    )
+
+    promoted_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+
+    # Schema prep only — not read or written anywhere yet. Exists so a
+    # future auth/tenant model doesn't require a second migration on
+    # top of this one. Do not add logic against these until a real
+    # organization/user model exists.
+    organization_id: Mapped[str | None] = mapped_column(
+        String(36),
+        nullable=True,
+    )
+
+    owner_id: Mapped[str | None] = mapped_column(
+        String(36),
         nullable=True,
     )

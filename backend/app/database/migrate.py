@@ -33,6 +33,13 @@ DOCUMENT_COLUMNS: dict[str, str] = {
     "processing_duration_seconds": "FLOAT",
     "approved_by": "VARCHAR(120)",
     "approved_at": "DATETIME",
+    "document_status": "VARCHAR(30)",
+    "parent_relationship_reasons": "JSON",
+    "parent_relationship_detection_method": "VARCHAR(20)",
+    "promoted_by": "VARCHAR(120)",
+    "promoted_at": "DATETIME",
+    "organization_id": "VARCHAR(36)",
+    "owner_id": "VARCHAR(36)",
 }
 
 

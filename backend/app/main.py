@@ -8,6 +8,7 @@ from app.api import (
     extraction_models,
     financial_analysis,
     page_extraction,
+    system,
     universal_extraction,
 )
 from app.core.config import get_settings
@@ -18,14 +19,45 @@ from app.database.migrate import (
     ensure_documents_columns,
 )
 from app.database.session import engine
+from app.models import (  # noqa: F401
+    classification_audit_log as classification_audit_log_model,
+)
 from app.models import document as document_model  # noqa: F401
+from app.models import document_address as document_address_model  # noqa: F401
+from app.models import (  # noqa: F401
+    document_amendment_history as document_amendment_history_model,
+)
 from app.models import document_clause as document_clause_model  # noqa: F401
+from app.models import (  # noqa: F401
+    document_clause_reference as document_clause_reference_model,
+)
+from app.models import document_contact as document_contact_model  # noqa: F401
+from app.models import (  # noqa: F401
+    document_delivery_schedule as document_delivery_schedule_model,
+)
+from app.models import (  # noqa: F401
+    document_funding_line as document_funding_line_model,
+)
+from app.models import (  # noqa: F401
+    document_insurance_requirement as document_insurance_requirement_model,
+)
+from app.models import (  # noqa: F401
+    document_key_position as document_key_position_model,
+)
+from app.models import document_line_item as document_line_item_model  # noqa: F401
 from app.models import (  # noqa: F401
     document_metadata_field as document_metadata_field_model,
 )
+from app.models import document_order_range as document_order_range_model  # noqa: F401
 from app.models import document_page as document_page_model  # noqa: F401
 from app.models import (  # noqa: F401
+    document_performance_period as document_performance_period_model,
+)
+from app.models import (  # noqa: F401
     document_signature as document_signature_model,
+)
+from app.models import (  # noqa: F401
+    document_wawf_instruction as document_wawf_instruction_model,
 )
 from app.models import (  # noqa: F401
     extraction_model as extraction_model_model,
@@ -34,6 +66,9 @@ from app.models import (  # noqa: F401
     metadata_field_audit_log as metadata_field_audit_log_model,
 )
 from app.models import page_text_block as page_text_block_model  # noqa: F401
+from app.models import (  # noqa: F401
+    relationship_audit_log as relationship_audit_log_model,
+)
 
 settings = get_settings()
 
@@ -107,6 +142,12 @@ app.include_router(
     tags=["Dashboard"],
 )
 
+app.include_router(
+    system.router,
+    prefix="/api/system",
+    tags=["System"],
+)
+
 
 @app.on_event("startup")
 async def create_database_tables() -> None:
@@ -140,10 +181,33 @@ async def health_check() -> dict[str, object]:
         and provider_mode == "development"
     )
 
+    documents_via_convera = (
+        settings.convera_enabled
+        and settings.convera_documents_enabled
+    )
+    ai_via_convera = (
+        settings.convera_enabled
+        and settings.convera_ai_enabled
+    )
+
     return {
         "status": "healthy",
         "environment": settings.app_env,
         "oracle_dry_run": settings.oracle_dry_run,
+        "convera": {
+            "enabled": settings.convera_enabled,
+            "documents": (
+                "convera" if documents_via_convera else "local"
+            ),
+            "ai": (
+                "convera"
+                if ai_via_convera
+                else provider or "disabled"
+            ),
+            "migration_mode": (
+                documents_via_convera and not ai_via_convera
+            ),
+        },
         "ai": {
             "provider": provider or "disabled",
             "fallback_enabled": fallback_enabled,
