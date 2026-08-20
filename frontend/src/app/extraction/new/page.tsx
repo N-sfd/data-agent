@@ -2,26 +2,20 @@
 
 import { useEffect, useState } from "react";
 
-import Link from "next/link";
 
-import { SplitSquareHorizontal, Sparkles } from "lucide-react";
+import { Sparkles } from "lucide-react";
 
 import ContentSection from "@/components/layout/ContentSection";
 import PageHero from "@/components/layout/PageHero";
 import ExtractionStatusPanel from "@/components/extraction-status-panel";
 import WorkflowBreadcrumb from "@/components/workflow-breadcrumb";
+import ExtractionResultsWorkspace from "@/components/extraction/extraction-results-workspace";
 import AnalysisRequest from "@/components/analysis-request";
-import ClassificationCard from "@/components/classification-card";
 import DocumentCard from "@/components/document-card";
 import DocumentUploader from "@/components/document-uploader";
-import ExtractedPages from "@/components/extracted-pages";
 import ImportSourceTabs from "@/components/import-source-tabs";
 import IngestionChecklist from "@/components/ingestion-checklist";
-import MetadataGrid from "@/components/metadata-grid";
 import ProcessingStatus from "@/components/processing-status";
-import RelationshipCard from "@/components/relationship-card";
-import StructuredOutputPanel from "@/components/structured-output-panel";
-import UniversalResults from "@/components/universal-results";
 import {
   analyzeContract,
   confirmRelationship,
@@ -283,7 +277,7 @@ export default function NewExtractionPage() {
             />
           )}
 
-          {document && extraction && (
+          {document && extraction && !contractAnalysis && (
             <div className="editorial-card p-8">
               <p className="text-base font-medium text-foreground">
                 Contract Intelligence
@@ -332,16 +326,6 @@ export default function NewExtractionPage() {
                   {contractAnalysisError}
                 </div>
               )}
-
-              {contractAnalysis && (
-                <Link
-                  href={`/documents/${document.document_id}/review`}
-                  className="btn-secondary mt-4"
-                >
-                  <SplitSquareHorizontal className="h-4 w-4" />
-                  Open Review Workspace
-                </Link>
-              )}
             </div>
           )}
 
@@ -351,60 +335,27 @@ export default function NewExtractionPage() {
             </div>
           )}
         </section>
-
-        <section className="space-y-6 lg:col-span-2">
-          {contractAnalysis && (
-            <ClassificationCard
-              classification={contractAnalysis.classification}
-            />
-          )}
-
-          {contractAnalysis && document && (
-            <RelationshipCard
-              documentId={document.document_id}
-              relationship={contractAnalysis.relationship}
-              reviewerName="Consult America"
-              busy={relationshipBusy}
-              onConfirm={() =>
-                handleRelationshipAction("confirm")
-              }
-              onReject={() =>
-                handleRelationshipAction("reject")
-              }
-              onRelationshipChange={(relationship) =>
-                setContractAnalysis((current) =>
-                  current ? { ...current, relationship } : current,
-                )
-              }
-            />
-          )}
-
-          {contractAnalysis && (
-            <MetadataGrid
-              fields={contractAnalysis.metadata_fields}
-            />
-          )}
-
-          {structuredOutput && (
-            <StructuredOutputPanel data={structuredOutput} />
-          )}
-
-          {universalResult && (
-            <UniversalResults result={universalResult} />
-          )}
-
-          {document && (
-            <ExtractedPages
-              pages={pages}
-              extracting={extracting}
-              error={workflowError}
-              onRetry={() =>
-                handleUploadComplete(document)
-              }
-            />
-          )}
-        </section>
       </div>
+
+      {contractAnalysis && document && (
+        <ExtractionResultsWorkspace
+          document={document}
+          analysis={contractAnalysis}
+          pages={pages}
+          structuredOutput={structuredOutput}
+          universalResult={universalResult}
+          extractingPages={extracting}
+          pagesError={workflowError}
+          onRetryPages={() => handleUploadComplete(document)}
+          relationshipBusy={relationshipBusy}
+          onRelationshipAction={handleRelationshipAction}
+          onRelationshipChange={(relationship) =>
+            setContractAnalysis((current) =>
+              current ? { ...current, relationship } : current,
+            )
+          }
+        />
+      )}
       </ContentSection>
     </>
   );
