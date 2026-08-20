@@ -82,12 +82,12 @@ export default function ExtractedPages({
         <FileSearch className="mx-auto h-8 w-8 text-slate-300" />
 
         <p className="mt-3 font-medium text-slate-700">
-          Waiting for a document
+          Your document is ready to analyze
         </p>
 
         <p className="mt-1 text-sm text-slate-500">
-          Upload a file and page text will appear here
-          automatically.
+          Run extraction to identify fields, clauses, tables, and contract
+          relationships.
         </p>
       </div>
     );

@@ -7,7 +7,7 @@ export const STATUS_LABELS: Record<DocumentStatus, string> = {
 };
 
 export const STATUS_STYLES: Record<DocumentStatus, string> = {
-  completed: "bg-emerald-50 text-emerald-700",
-  review_required: "bg-amber-50 text-amber-700",
-  processing: "bg-slate-100 text-slate-600",
+  completed: "bg-success/10 text-success",
+  review_required: "bg-warning/10 text-warning",
+  processing: "bg-surface-soft text-text-secondary",
 };

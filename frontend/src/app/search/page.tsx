@@ -1,9 +1,10 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Search as SearchIcon } from "lucide-react";
+import { Loader2, Search as SearchIcon } from "lucide-react";
 
 import DocumentResultsTable from "@/components/document-results-table";
+import PageHeader from "@/components/page-header";
 import { searchDocuments } from "@/lib/documents";
 import type { DocumentSummary } from "@/types/document";
 
@@ -16,9 +17,7 @@ export default function SearchPage() {
   const [error, setError] = useState("");
 
   useEffect(() => {
-    if (!submittedQuery) {
-      return;
-    }
+    if (!submittedQuery) return;
 
     let active = true;
 
@@ -33,22 +32,18 @@ export default function SearchPage() {
         });
 
         if (!active) return;
-
         setDocuments(result.documents);
         setTotal(result.total);
       } catch (err) {
-        if (!active) return;
-
-        setError(
-          err instanceof Error ? err.message : "Search failed.",
-        );
+        if (active) {
+          setError(err instanceof Error ? err.message : "Search failed.");
+        }
       } finally {
         if (active) setLoading(false);
       }
     }
 
     run();
-
     return () => {
       active = false;
     };
@@ -56,7 +51,6 @@ export default function SearchPage() {
 
   function handleSubmit(event: React.FormEvent) {
     event.preventDefault();
-
     const trimmed = query.trim();
     setSubmittedQuery(trimmed);
 
@@ -67,63 +61,63 @@ export default function SearchPage() {
   }
 
   return (
-    <div className="mx-auto max-w-4xl px-6 py-8">
-      <div className="mb-8 flex items-center gap-2">
-        <SearchIcon className="h-5 w-5 text-blue-600" />
-        <div>
-          <p className="text-sm font-semibold text-blue-600">
-            Contract Extraction
-          </p>
-          <h1 className="mt-1 text-2xl font-semibold text-slate-950">
-            Search
-          </h1>
-        </div>
-      </div>
+    <div className="mx-auto max-w-5xl px-6 py-8">
+      <PageHeader
+        title="Search"
+        description="Search across contracts, counterparties, clauses, and extracted fields."
+      />
 
       <form onSubmit={handleSubmit} className="mb-6">
         <div className="relative">
-          <SearchIcon className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+          <SearchIcon className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-text-secondary" />
           <input
             type="text"
             value={query}
             onChange={(event) => setQuery(event.target.value)}
-            placeholder="Search filenames, contract numbers, or contract text..."
+            placeholder="Search contracts, suppliers, clauses, fields..."
             autoFocus
-            className="w-full rounded-2xl border border-slate-300 py-3 pl-11 pr-4 text-sm text-slate-800 shadow-sm"
+            className="w-full rounded-xl border border-border bg-surface py-3 pl-11 pr-4 text-sm outline-none focus:border-brand-blue"
           />
         </div>
       </form>
 
       {error && (
-        <div className="mb-6 rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+        <div className="mb-4 rounded-xl border border-error/20 bg-error/5 p-3 text-sm text-error">
           {error}
         </div>
       )}
 
       {loading && (
-        <p className="text-sm text-slate-500">Searching...</p>
+        <div className="flex items-center gap-2 text-sm text-text-secondary">
+          <Loader2 className="h-4 w-4 animate-spin" />
+          Searching repository...
+        </div>
       )}
 
       {!loading && submittedQuery && (
-        <p className="mb-3 text-xs text-slate-500">
-          {total} result{total === 1 ? "" : "s"} for &ldquo;
-          {submittedQuery}&rdquo;
+        <p className="mb-3 text-xs text-text-secondary">
+          {total} result{total === 1 ? "" : "s"} for &ldquo;{submittedQuery}
+          &rdquo;
         </p>
       )}
 
       {!loading && submittedQuery && (
-        <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+        <div className="overflow-hidden rounded-xl border border-border bg-surface">
           <DocumentResultsTable
             documents={documents}
             emptyMessage="No documents matched your search."
+            showExtendedColumns
           />
         </div>
       )}
 
       {!submittedQuery && !loading && (
-        <p className="text-sm text-slate-400">
-          Search across filenames, contract numbers, and extracted
-          contract text.
+        <p className="text-sm text-text-secondary">
+          Use global search with{" "}
+          <kbd className="rounded border border-border px-1.5 py-0.5 text-xs">
+            Ctrl K
+          </kbd>{" "}
+          from anywhere in the app.
         </p>
       )}
     </div>

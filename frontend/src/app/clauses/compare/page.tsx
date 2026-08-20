@@ -1,0 +1,149 @@
+"use client";
+
+import { useState } from "react";
+import Link from "next/link";
+import { Loader2, Search } from "lucide-react";
+
+import ConfidenceIndicator from "@/components/confidence-indicator";
+import PageHeader from "@/components/page-header";
+import { getClauses, searchDocuments } from "@/lib/documents";
+import type { ClauseResult } from "@/types/document";
+
+interface ComparedClause {
+  documentId: string;
+  contractTitle: string;
+  clause: ClauseResult | null;
+}
+
+export default function ClauseComparePage() {
+  const [query, setQuery] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [results, setResults] = useState<ComparedClause[]>([]);
+
+  async function handleCompare(event: React.FormEvent) {
+    event.preventDefault();
+    const trimmed = query.trim();
+    if (!trimmed) return;
+
+    setLoading(true);
+    setError("");
+    setResults([]);
+
+    try {
+      const search = await searchDocuments({ q: trimmed, limit: 5 });
+      const compared = await Promise.all(
+        search.documents.map(async (doc) => {
+          try {
+            const extraction = await getClauses(doc.document_id);
+            const match =
+              extraction.clauses.find(
+                (clause) =>
+                  clause.clause_type.includes(trimmed) ||
+                  clause.extracted_text.includes(trimmed) ||
+                  clause.value_summary.includes(trimmed),
+              ) ?? extraction.clauses[0] ?? null;
+
+            return {
+              documentId: doc.document_id,
+              contractTitle: doc.original_filename.replace(/\.[^.]+$/, ""),
+              clause: match,
+            };
+          } catch {
+            return {
+              documentId: doc.document_id,
+              contractTitle: doc.original_filename.replace(/\.[^.]+$/, ""),
+              clause: null,
+            };
+          }
+        }),
+      );
+
+      setResults(compared.filter((item) => item.clause));
+    } catch (err) {
+      setError(
+        err instanceof Error ? err.message : "Unable to compare clauses.",
+      );
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <div className="page-container-wide">
+      <PageHeader
+        title="Compare Clause"
+        description="Compare the same clause provision across multiple contracts."
+      />
+
+      <form onSubmit={handleCompare} className="max-w-2xl">
+        <div className="relative">
+          <Search className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-text-secondary" />
+          <input
+            type="text"
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            placeholder="FAR 52.232-7"
+            className="w-full rounded-2xl border border-border bg-surface py-3.5 pl-11 pr-4 text-[15px] outline-none focus:border-primary/30"
+          />
+        </div>
+        <button type="submit" disabled={loading} className="btn-primary mt-4">
+          {loading ? "Comparing..." : "Compare Across Contracts"}
+        </button>
+      </form>
+
+      {error && (
+        <div className="mt-6 rounded-2xl border border-danger/20 bg-danger/5 p-4 text-sm text-danger">
+          {error}
+        </div>
+      )}
+
+      {loading && (
+        <div className="mt-10 flex items-center gap-2 text-sm text-text-secondary">
+          <Loader2 className="h-4 w-4 animate-spin" />
+          Detecting FAR / DFARS clauses...
+        </div>
+      )}
+
+      {results.length > 0 && (
+        <div className="mt-10 overflow-x-auto">
+          <div
+            className="grid gap-4"
+            style={{
+              gridTemplateColumns: `repeat(${results.length}, minmax(280px, 1fr))`,
+            }}
+          >
+            {results.map((item) => (
+              <div key={item.documentId} className="editorial-card p-6">
+                <Link
+                  href={`/documents/${item.documentId}/review`}
+                  className="text-sm font-medium text-primary hover:underline"
+                >
+                  {item.contractTitle}
+                </Link>
+                {item.clause ? (
+                  <>
+                    <p className="mt-3 text-xs text-text-secondary">
+                      {item.clause.clause_type}
+                    </p>
+                    <p className="mt-2 text-sm leading-6 text-foreground">
+                      {item.clause.extracted_text}
+                    </p>
+                    <div className="mt-4 flex items-center justify-between text-xs text-text-secondary">
+                      <span>Page {item.clause.evidence.page_number}</span>
+                      <ConfidenceIndicator confidence={item.clause.confidence} />
+                    </div>
+                  </>
+                ) : (
+                  <p className="mt-3 text-sm text-text-secondary">
+                    Clause not found in this contract.
+                  </p>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}

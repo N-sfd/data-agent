@@ -9,6 +9,7 @@ import {
 } from "lucide-react";
 
 import ContractRelationshipsTree from "@/components/contract-relationships-tree";
+import ContractTabs, { type ContractTab } from "@/components/contract-tabs";
 import DocumentProfileCard from "@/components/document-profile-card";
 import ExportMenu from "@/components/export-menu";
 import ExtractionWorkspace from "@/components/extraction-workspace";
@@ -120,6 +121,11 @@ export default function ReviewWorkspacePage({
   const [extractingSignatures, setExtractingSignatures] =
     useState(false);
   const [signaturesError, setSignaturesError] = useState("");
+
+  const [activeTab, setActiveTab] = useState<ContractTab>("Data");
+  const [mobilePanel, setMobilePanel] = useState<"document" | "data">(
+    "document",
+  );
 
   useEffect(() => {
     let active = true;
@@ -551,7 +557,7 @@ export default function ReviewWorkspacePage({
 
         <Link
           href="/"
-          className="mt-4 inline-flex items-center gap-1.5 text-sm font-semibold text-blue-700 hover:text-blue-800"
+          className="mt-4 inline-flex items-center gap-1.5 text-sm font-medium text-primary hover:underline"
         >
           <ArrowLeft className="h-4 w-4" />
           Back to dashboard
@@ -572,6 +578,35 @@ export default function ReviewWorkspacePage({
     (field) => field.field_key === "contract_number",
   )?.value;
 
+  const contractTitle = analysis.metadata_fields.find(
+    (field) => field.field_key === "contract_title",
+  )?.value;
+
+  const counterparty = analysis.metadata_fields.find(
+    (field) =>
+      field.field_key === "counterparty" || field.field_key === "supplier",
+  )?.value;
+
+  const effectiveDate = analysis.metadata_fields.find(
+    (field) => field.field_key === "effective_date",
+  )?.value;
+
+  const expirationDate = analysis.metadata_fields.find(
+    (field) => field.field_key === "expiration_date",
+  )?.value;
+
+  const contractValue = analysis.metadata_fields.find(
+    (field) => field.field_key === "contract_value",
+  )?.value;
+
+  const avgConfidence =
+    analysis.metadata_fields.length > 0
+      ? analysis.metadata_fields.reduce(
+          (sum, field) => sum + field.confidence,
+          0,
+        ) / analysis.metadata_fields.length
+      : null;
+
   const fieldsExtracted = analysis.metadata_fields.length > 0;
   const humanReviewComplete =
     fieldsExtracted &&
@@ -582,96 +617,132 @@ export default function ReviewWorkspacePage({
   const promoted = Boolean(document.promoted_at);
 
   return (
-    <div className="flex h-[calc(100vh-4rem)] flex-col">
-      <div className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-b border-slate-200 bg-white px-6 py-3">
-        <div className="flex items-center gap-3">
-          <Link
-            href="/"
-            className="text-slate-400 hover:text-slate-700"
-            aria-label="Back to dashboard"
-          >
-            <ArrowLeft className="h-4 w-4" />
-          </Link>
-
-          <p className="text-sm font-semibold text-slate-950">
-            {contractNumber ?? document.original_filename}
-          </p>
-        </div>
-
-        <PipelineStrip
-          classified={Boolean(analysis.classification?.document_type)}
-          fieldsExtracted={fieldsExtracted}
-          humanReviewComplete={humanReviewComplete}
-          approved={approved}
-          promoted={promoted}
-        />
-
-        <div className="flex items-center gap-4">
-          <ExportMenu
-            documentId={documentId}
-            filename={document.original_filename.replace(
-              /\.[^.]+$/,
-              "",
-            )}
-            fields={analysis.metadata_fields}
-          />
-
-          <label className="flex items-center gap-2 text-xs text-slate-500">
-            Reviewing as
-            <input
-              type="text"
-              value={reviewerName}
-              onChange={(event) =>
-                setReviewerName(event.target.value)
-              }
-              className="w-36 rounded-lg border border-slate-300 px-2 py-1 text-xs text-slate-800"
-            />
-          </label>
-
-          {!approved && (
-            <button
-              type="button"
-              onClick={handleApprove}
-              disabled={!humanReviewComplete || approving}
-              title={
-                humanReviewComplete
-                  ? undefined
-                  : "Every extracted field must be reviewed before this document can be approved."
-              }
-              className="inline-flex items-center gap-1.5 rounded-full bg-blue-600 px-3 py-1 text-xs font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-400"
+    <div className="flex h-[calc(100vh-3.5rem)] flex-col">
+      <div className="shrink-0 border-b border-border bg-surface px-6 py-4">
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div className="flex items-start gap-3">
+            <Link
+              href="/repository"
+              className="mt-1 text-text-secondary hover:text-foreground"
+              aria-label="Back to repository"
             >
-              <BadgeCheck className="h-3.5 w-3.5" />
-              {approving ? "Approving..." : "Approve Document"}
-            </button>
-          )}
+              <ArrowLeft className="h-4 w-4" />
+            </Link>
+            <div>
+              <h1 className="text-lg font-semibold text-foreground">
+                {contractTitle ??
+                  document.original_filename.replace(/\.[^.]+$/, "")}
+              </h1>
+              <p className="mt-0.5 text-sm text-text-secondary">
+                {contractNumber ?? "—"}
+                {counterparty ? ` · ${counterparty}` : ""}
+              </p>
+              <div className="mt-2 flex flex-wrap gap-4 text-xs text-text-secondary">
+                {effectiveDate && (
+                  <span>
+                    Effective{" "}
+                    <strong className="text-foreground">{effectiveDate}</strong>
+                  </span>
+                )}
+                {expirationDate && (
+                  <span>
+                    Expires{" "}
+                    <strong className="text-foreground">{expirationDate}</strong>
+                  </span>
+                )}
+                {contractValue && (
+                  <span>
+                    Value{" "}
+                    <strong className="text-foreground">{contractValue}</strong>
+                  </span>
+                )}
+                {avgConfidence !== null && (
+                  <span>
+                    Confidence{" "}
+                    <strong className="text-foreground">
+                      {Math.round(avgConfidence * 100)}%
+                    </strong>
+                  </span>
+                )}
+              </div>
+            </div>
+          </div>
 
-          {approved && !promoted && (
-            <>
-              <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700">
+          <div className="flex flex-wrap items-center gap-3">
+            <PipelineStrip
+              classified={Boolean(analysis.classification?.document_type)}
+              fieldsExtracted={fieldsExtracted}
+              humanReviewComplete={humanReviewComplete}
+              approved={approved}
+              promoted={promoted}
+            />
+            <ExportMenu
+              documentId={documentId}
+              filename={document.original_filename.replace(/\.[^.]+$/, "")}
+              fields={analysis.metadata_fields}
+            />
+            <label className="flex items-center gap-2 text-xs text-text-secondary">
+              Reviewed by
+              <input
+                type="text"
+                value={reviewerName}
+                onChange={(event) => setReviewerName(event.target.value)}
+                className="w-36 rounded-lg border border-border px-2 py-1 text-xs text-foreground"
+              />
+            </label>
+            {!approved && (
+              <button
+                type="button"
+                onClick={handleApprove}
+                disabled={!humanReviewComplete || approving}
+                className="btn-primary px-3 py-1.5 text-xs disabled:cursor-not-allowed disabled:opacity-40"
+              >
                 <BadgeCheck className="h-3.5 w-3.5" />
-                Approved by {document.approved_by}
-              </span>
-
+                {approving ? "Approving..." : "Approve"}
+              </button>
+            )}
+            {approved && !promoted && (
               <button
                 type="button"
                 onClick={handlePromote}
                 disabled={promoting}
-                title="Approval alone doesn't add a document to the repository — promotion is a separate, explicit step."
-                className="inline-flex items-center gap-1.5 rounded-full bg-violet-600 px-3 py-1 text-xs font-semibold text-white transition hover:bg-violet-700 disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-400"
+                className="btn-secondary px-3 py-1.5 text-xs disabled:opacity-40"
               >
                 <ArchiveIcon className="h-3.5 w-3.5" />
                 {promoting ? "Promoting..." : "Promote to Repository"}
               </button>
-            </>
-          )}
-
-          {promoted && (
-            <span className="inline-flex items-center gap-1.5 rounded-full bg-violet-50 px-3 py-1 text-xs font-semibold text-violet-700">
-              <ArchiveIcon className="h-3.5 w-3.5" />
-              In Repository (promoted by {document.promoted_by})
-            </span>
-          )}
+            )}
+          </div>
         </div>
+      </div>
+
+      <ContractTabs active={activeTab} onChange={setActiveTab} />
+
+      <div className="flex shrink-0 gap-1 border-b border-border bg-background px-4 py-2 lg:hidden">
+        <button
+          type="button"
+          onClick={() => setMobilePanel("document")}
+          className={[
+            "rounded-md px-3 py-1.5 text-xs font-semibold",
+            mobilePanel === "document"
+              ? "bg-surface text-brand-blue"
+              : "text-text-secondary",
+          ].join(" ")}
+        >
+          Document
+        </button>
+        <button
+          type="button"
+          onClick={() => setMobilePanel("data")}
+          className={[
+            "rounded-md px-3 py-1.5 text-xs font-semibold",
+            mobilePanel === "data"
+              ? "bg-surface text-brand-blue"
+              : "text-text-secondary",
+          ].join(" ")}
+        >
+          Extracted intelligence
+        </button>
       </div>
 
       {approveError && (
@@ -686,8 +757,13 @@ export default function ReviewWorkspacePage({
         </p>
       )}
 
-      <div className="grid flex-1 grid-cols-2 overflow-hidden">
-        <div className="flex flex-col overflow-hidden border-r border-slate-200">
+      <div className="grid flex-1 overflow-hidden lg:grid-cols-2">
+        <div
+          className={[
+            "flex flex-col overflow-hidden border-r border-border",
+            mobilePanel === "document" ? "flex" : "hidden lg:flex",
+          ].join(" ")}
+        >
           <PdfToolbar
             currentPage={currentPage}
             pageCount={document.page_count}
@@ -711,67 +787,138 @@ export default function ReviewWorkspacePage({
             />
           </div>
 
-          <div className="shrink-0 max-h-[45vh] overflow-y-auto border-t border-slate-200 bg-slate-50 p-4">
-            <ExtractionWorkspace
-              clauses={clauses}
-              extractingClauses={extractingClauses}
-              clausesError={clausesError}
-              onExtractClauses={handleExtractClauses}
-              onViewClauseSource={handleViewClauseSource}
-              tables={tables}
-              extractingTables={extractingTables}
-              tablesError={tablesError}
-              onExtractTables={handleExtractTables}
-              signatures={signatures}
-              extractingSignatures={extractingSignatures}
-              signaturesError={signaturesError}
-              onExtractSignatures={handleExtractSignatures}
-              onViewSignatureSource={handleViewSignatureSource}
-            />
-          </div>
+          {(activeTab === "Clauses" || activeTab === "Documents") && (
+            <div className="shrink-0 max-h-[45vh] overflow-y-auto border-t border-border bg-background p-4">
+              <ExtractionWorkspace
+                clauses={clauses}
+                extractingClauses={extractingClauses}
+                clausesError={clausesError}
+                onExtractClauses={handleExtractClauses}
+                onViewClauseSource={handleViewClauseSource}
+                tables={tables}
+                extractingTables={extractingTables}
+                tablesError={tablesError}
+                onExtractTables={handleExtractTables}
+                signatures={signatures}
+                extractingSignatures={extractingSignatures}
+                signaturesError={signaturesError}
+                onExtractSignatures={handleExtractSignatures}
+                onViewSignatureSource={handleViewSignatureSource}
+              />
+            </div>
+          )}
         </div>
 
-        <div className="flex h-full flex-col overflow-hidden">
-          <div className="max-h-[45vh] shrink-0 space-y-4 overflow-y-auto p-4 pb-0">
-            <DocumentProfileCard
-              documentId={documentId}
-              classification={analysis.classification}
-              reviewerName={reviewerName}
-              onClassificationChange={handleClassificationChange}
-            />
-
-            <RelationshipCard
-              documentId={documentId}
-              relationship={analysis.relationship}
-              reviewerName={reviewerName}
-              onConfirm={() => handleRelationshipAction("confirm")}
-              onReject={() => handleRelationshipAction("reject")}
-              onRelationshipChange={handleRelationshipChange}
-              busy={relationshipBusy}
-            />
-
-            {children.length > 0 && (
-              <ContractRelationshipsTree
-                rootLabel={contractNumber ?? document.original_filename}
-                childRelationships={children}
-                onChanged={handleChildrenChanged}
+        <div
+          className={[
+            "flex h-full flex-col overflow-hidden",
+            mobilePanel === "data" ? "flex" : "hidden lg:flex",
+          ].join(" ")}
+        >
+          {activeTab === "Overview" && (
+            <div className="space-y-4 overflow-y-auto p-4">
+              <DocumentProfileCard
+                documentId={documentId}
+                classification={analysis.classification}
                 reviewerName={reviewerName}
+                onClassificationChange={handleClassificationChange}
               />
-            )}
-          </div>
+              <RelationshipCard
+                documentId={documentId}
+                relationship={analysis.relationship}
+                reviewerName={reviewerName}
+                onConfirm={() => handleRelationshipAction("confirm")}
+                onReject={() => handleRelationshipAction("reject")}
+                onRelationshipChange={handleRelationshipChange}
+                busy={relationshipBusy}
+              />
+              {children.length > 0 && (
+                <ContractRelationshipsTree
+                  rootLabel={
+                    contractNumber ?? document.original_filename
+                  }
+                  childRelationships={children}
+                  onChanged={handleChildrenChanged}
+                  reviewerName={reviewerName}
+                />
+              )}
+            </div>
+          )}
 
-          <div className="min-h-0 flex-1">
-            <ReviewFieldList
-              documentId={documentId}
-              fields={analysis.metadata_fields}
-              activeFieldKey={activeFieldKey}
-              onSelectField={handleSelectField}
-              onReviewField={handleReviewField}
-              onAcceptAll={handleAcceptAll}
-              reviewingKey={reviewingKey}
-              acceptingAll={acceptingAll}
-            />
-          </div>
+          {(activeTab === "Data" || activeTab === "Documents") && (
+            <div className="min-h-0 flex-1">
+              <ReviewFieldList
+                documentId={documentId}
+                fields={analysis.metadata_fields}
+                activeFieldKey={activeFieldKey}
+                onSelectField={handleSelectField}
+                onReviewField={handleReviewField}
+                onAcceptAll={handleAcceptAll}
+                reviewingKey={reviewingKey}
+                acceptingAll={acceptingAll}
+              />
+            </div>
+          )}
+
+          {activeTab === "Relationships" && (
+            <div className="space-y-4 overflow-y-auto p-4">
+              <RelationshipCard
+                documentId={documentId}
+                relationship={analysis.relationship}
+                reviewerName={reviewerName}
+                onConfirm={() => handleRelationshipAction("confirm")}
+                onReject={() => handleRelationshipAction("reject")}
+                onRelationshipChange={handleRelationshipChange}
+                busy={relationshipBusy}
+              />
+              {children.length > 0 ? (
+                <ContractRelationshipsTree
+                  rootLabel={
+                    contractNumber ?? document.original_filename
+                  }
+                  childRelationships={children}
+                  onChanged={handleChildrenChanged}
+                  reviewerName={reviewerName}
+                />
+              ) : (
+                <p className="text-sm text-text-secondary">
+                  No related documents detected yet.
+                </p>
+              )}
+            </div>
+          )}
+
+          {activeTab === "Clauses" && (
+            <div className="overflow-y-auto p-4">
+              <ExtractionWorkspace
+                clauses={clauses}
+                extractingClauses={extractingClauses}
+                clausesError={clausesError}
+                onExtractClauses={handleExtractClauses}
+                onViewClauseSource={handleViewClauseSource}
+                tables={tables}
+                extractingTables={extractingTables}
+                tablesError={tablesError}
+                onExtractTables={handleExtractTables}
+                signatures={signatures}
+                extractingSignatures={extractingSignatures}
+                signaturesError={signaturesError}
+                onExtractSignatures={handleExtractSignatures}
+                onViewSignatureSource={handleViewSignatureSource}
+              />
+            </div>
+          )}
+
+          {activeTab === "Activity" && (
+            <div className="p-4 text-sm text-text-secondary">
+              Field-level activity is available from each field&apos;s action
+              menu. Portfolio-wide activity is on the{" "}
+              <Link href="/activity" className="text-brand-blue hover:underline">
+                Activity
+              </Link>{" "}
+              page.
+            </div>
+          )}
         </div>
       </div>
     </div>

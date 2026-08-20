@@ -6,7 +6,10 @@ import Link from "next/link";
 
 import { SplitSquareHorizontal, Sparkles } from "lucide-react";
 
-import AiProviderNotice from "@/components/ai-provider-notice";
+import ContentSection from "@/components/layout/ContentSection";
+import PageHero from "@/components/layout/PageHero";
+import ExtractionStatusPanel from "@/components/extraction-status-panel";
+import WorkflowBreadcrumb from "@/components/workflow-breadcrumb";
 import AnalysisRequest from "@/components/analysis-request";
 import ClassificationCard from "@/components/classification-card";
 import DocumentCard from "@/components/document-card";
@@ -19,10 +22,6 @@ import ProcessingStatus from "@/components/processing-status";
 import RelationshipCard from "@/components/relationship-card";
 import StructuredOutputPanel from "@/components/structured-output-panel";
 import UniversalResults from "@/components/universal-results";
-import {
-  type AiStatus,
-  getAiStatus,
-} from "@/lib/ai-status";
 import {
   analyzeContract,
   confirmRelationship,
@@ -74,10 +73,6 @@ export default function NewExtractionPage() {
   const [structuredOutput, setStructuredOutput] =
     useState<StructuredContractOutput | null>(null);
 
-  const [aiStatus, setAiStatus] = useState<AiStatus | null>(
-    null,
-  );
-
   const [extractionModels, setExtractionModels] = useState<
     ExtractionModel[]
   >([]);
@@ -87,12 +82,6 @@ export default function NewExtractionPage() {
 
   useEffect(() => {
     let active = true;
-
-    getAiStatus().then((status) => {
-      if (active) {
-        setAiStatus(status);
-      }
-    });
 
     listExtractionModels()
       .then((models) => {
@@ -229,50 +218,63 @@ export default function NewExtractionPage() {
   }
 
   return (
-    <div className="mx-auto max-w-6xl px-6 py-8">
-      <div className="mb-8">
-        <p className="text-sm font-semibold text-blue-600">
-          Contract Data Extraction
-        </p>
-        <h1 className="mt-1 text-2xl font-semibold text-slate-950">
-          Turn agreements into structured intelligence
-        </h1>
-        <p className="mt-2 text-sm text-slate-500">
-          Upload → extract → ask anything → review
-        </p>
-      </div>
+    <>
+      <PageHero
+        eyebrow="Store / Extraction Agent"
+        title={
+          <>
+            Turn agreements into
+            <br />
+            structured intelligence
+          </>
+        }
+        description="Convert contracts and financial documents into structured, searchable intelligence with source-level traceability."
+      />
 
-      <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)]">
-        <section className="space-y-6">
-          <AiProviderNotice
-            show={Boolean(aiStatus?.show_dev_warning)}
-            provider={aiStatus?.provider}
-            model={aiStatus?.model}
-            fallbackEnabled={aiStatus?.fallback_enabled}
-            mode={aiStatus?.mode}
+      <ContentSection>
+        <div className="mb-8">
+          <WorkflowBreadcrumb
+            activeStep={
+              contractAnalysis
+                ? "review"
+                : extraction
+                  ? "extract"
+                  : document
+                    ? "upload"
+                    : "upload"
+            }
           />
+        </div>
 
-          <DocumentUploader onUploadComplete={handleUploadComplete} />
+        <div className="grid gap-8 lg:grid-cols-2">
+          <section className="space-y-8">
+            <DocumentUploader onUploadComplete={handleUploadComplete} />
 
-          <ImportSourceTabs />
+            <ImportSourceTabs />
 
-          {document && (
-            <DocumentCard document={document} />
-          )}
+            {document && <DocumentCard document={document} />}
+          </section>
 
-          {document && (
-            <IngestionChecklist
-              steps={document.pipeline_log ?? []}
-            />
-          )}
+          <section className="space-y-8">
+            <div className="editorial-card p-8">
+              <ExtractionStatusPanel
+                document={document}
+                extraction={extraction}
+                extracting={extracting}
+                contractAnalyzed={Boolean(contractAnalysis)}
+              />
 
-          {document && (
-            <ProcessingStatus
-              document={document}
-              extraction={extraction}
-              extracting={extracting}
-            />
-          )}
+              {document && (
+                <>
+                  <IngestionChecklist steps={document.pipeline_log ?? []} />
+                  <ProcessingStatus
+                    document={document}
+                    extraction={extraction}
+                    extracting={extracting}
+                  />
+                </>
+              )}
+            </div>
 
           {document && (
             <AnalysisRequest
@@ -282,17 +284,17 @@ export default function NewExtractionPage() {
           )}
 
           {document && extraction && (
-            <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-              <p className="text-sm font-semibold text-slate-950">
+            <div className="editorial-card p-8">
+              <p className="text-base font-medium text-foreground">
                 Contract Intelligence
               </p>
-              <p className="mt-1 text-sm text-slate-500">
-                Classify this document, extract its structured
-                metadata, and detect any parent contract.
+              <p className="mt-2 text-sm leading-6 text-text-secondary">
+                Classify this document, extract its structured metadata, and
+                detect any parent contract.
               </p>
 
               {extractionModels.length > 0 && (
-                <label className="mt-4 block text-xs text-slate-500">
+                <label className="mt-5 block text-xs text-text-secondary">
                   Extraction Model (optional)
                   <select
                     value={selectedModelId ?? ""}
@@ -303,7 +305,7 @@ export default function NewExtractionPage() {
                           : null,
                       )
                     }
-                    className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-800"
+                    className="mt-1.5 w-full rounded-xl border border-border bg-surface px-3 py-2.5 text-sm text-foreground outline-none focus:border-primary/30"
                   >
                     <option value="">None</option>
                     {extractionModels.map((model) => (
@@ -319,16 +321,14 @@ export default function NewExtractionPage() {
                 type="button"
                 onClick={handleAnalyzeContract}
                 disabled={analyzingContract}
-                className="mt-4 inline-flex items-center gap-2 rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
+                className="btn-primary mt-5 disabled:cursor-not-allowed disabled:opacity-60"
               >
                 <Sparkles className="h-4 w-4" />
-                {analyzingContract
-                  ? "Analyzing..."
-                  : "Analyze Contract"}
+                {analyzingContract ? "Analyzing..." : "Run Extraction"}
               </button>
 
               {contractAnalysisError && (
-                <div className="mt-3 rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+                <div className="mt-4 rounded-xl border border-danger/20 bg-danger/5 p-3 text-sm text-danger">
                   {contractAnalysisError}
                 </div>
               )}
@@ -336,7 +336,7 @@ export default function NewExtractionPage() {
               {contractAnalysis && (
                 <Link
                   href={`/documents/${document.document_id}/review`}
-                  className="mt-3 inline-flex items-center gap-2 rounded-xl border border-blue-200 bg-blue-50 px-4 py-2.5 text-sm font-semibold text-blue-700 transition hover:bg-blue-100"
+                  className="btn-secondary mt-4"
                 >
                   <SplitSquareHorizontal className="h-4 w-4" />
                   Open Review Workspace
@@ -346,13 +346,13 @@ export default function NewExtractionPage() {
           )}
 
           {workflowError && (
-            <div className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+            <div className="rounded-xl border border-danger/20 bg-danger/5 p-3 text-sm text-danger">
               {workflowError}
             </div>
           )}
         </section>
 
-        <section className="space-y-6">
+        <section className="space-y-6 lg:col-span-2">
           {contractAnalysis && (
             <ClassificationCard
               classification={contractAnalysis.classification}
@@ -405,6 +405,7 @@ export default function NewExtractionPage() {
           )}
         </section>
       </div>
-    </div>
+      </ContentSection>
+    </>
   );
 }

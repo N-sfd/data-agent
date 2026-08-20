@@ -1,66 +1,38 @@
 "use client";
 
-import { useEffect, useState } from "react";
 import Link from "next/link";
-import {
-  CalendarClock,
-  FileStack,
-  Gauge,
-  ListChecks,
-  Plus,
-  ScanText,
-  ScrollText,
-  ShieldAlert,
-} from "lucide-react";
+import { useEffect, useState } from "react";
+import { ArrowRight, Loader2, Sparkles, Upload } from "lucide-react";
 
 import DocumentResultsTable from "@/components/document-results-table";
+import ContentSection from "@/components/layout/ContentSection";
+import PageHero from "@/components/layout/PageHero";
 import { getDashboardStats, listDocuments } from "@/lib/documents";
-import type {
-  DashboardStats,
-  DocumentSummary,
-} from "@/types/document";
+import type { DashboardStats, DocumentSummary } from "@/types/document";
 
-export default function DashboardPage() {
-  const [stats, setStats] = useState<DashboardStats | null>(
-    null,
-  );
-  const [documents, setDocuments] = useState<DocumentSummary[]>(
-    [],
-  );
+export default function HomePage() {
+  const [stats, setStats] = useState<DashboardStats | null>(null);
+  const [recent, setRecent] = useState<DocumentSummary[]>([]);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
 
   useEffect(() => {
     let active = true;
 
-    async function load() {
-      setLoading(true);
-      setError("");
-
-      try {
-        const [statsResult, documentsResult] = await Promise.all([
-          getDashboardStats(),
-          listDocuments(10),
-        ]);
-
+    Promise.all([getDashboardStats(), listDocuments(10)])
+      .then(([statsResult, docs]) => {
         if (!active) return;
-
         setStats(statsResult);
-        setDocuments(documentsResult);
-      } catch (err) {
-        if (!active) return;
-
-        setError(
-          err instanceof Error
-            ? err.message
-            : "Unable to load the dashboard.",
-        );
-      } finally {
+        setRecent(docs);
+      })
+      .catch(() => {
+        if (active) {
+          setStats(null);
+          setRecent([]);
+        }
+      })
+      .finally(() => {
         if (active) setLoading(false);
-      }
-    }
-
-    load();
+      });
 
     return () => {
       active = false;
@@ -68,167 +40,153 @@ export default function DashboardPage() {
   }, []);
 
   return (
-    <div className="mx-auto max-w-6xl px-6 py-8">
-      <div className="mb-8 flex flex-wrap items-center justify-between gap-4">
-        <div>
-          <p className="text-sm font-semibold text-blue-600">
-            Contract Extraction
-          </p>
-          <h1 className="mt-1 text-2xl font-semibold text-slate-950">
-            Dashboard
-          </h1>
-        </div>
-
-        <Link
-          href="/extraction/new"
-          className="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-blue-700"
-        >
-          <Plus className="h-4 w-4" />
-          New Extraction
-        </Link>
-      </div>
-
-      {error && (
-        <div className="mb-6 rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">
-          {error}
-        </div>
-      )}
-
-      {loading && !stats && (
-        <p className="text-sm text-slate-500">Loading...</p>
-      )}
-
-      {stats && (
-        <>
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-            <StatCard
-              icon={FileStack}
-              label="Documents Processed"
-              value={stats.total_documents.toLocaleString()}
-            />
-            <StatCard
-              icon={ShieldAlert}
-              label="Contracts Pending Review"
-              value={stats.review_required.toLocaleString()}
-              tone="amber"
-            />
-            <StatCard
-              icon={Gauge}
-              label="Average Confidence"
-              value={
-                stats.extraction_accuracy !== null
-                  ? `${(stats.extraction_accuracy * 100).toFixed(1)}%`
-                  : "—"
-              }
-              tone="emerald"
-            />
-            <StatCard
-              icon={ListChecks}
-              label="Review Completion Rate"
-              value={
-                stats.review_completion_rate !== null
-                  ? `${stats.review_completion_rate.toFixed(1)}%`
-                  : "—"
-              }
-            />
-          </div>
-
-          <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-            <StatCard
-              icon={ScanText}
-              label="OCR Accuracy"
-              value={
-                stats.ocr_accuracy !== null
-                  ? `${stats.ocr_accuracy.toFixed(1)}%`
-                  : "—"
-              }
-            />
-            <StatCard
-              icon={ScrollText}
-              label="Clause Extraction Accuracy"
-              value={
-                stats.clause_extraction_accuracy !== null
-                  ? `${(stats.clause_extraction_accuracy * 100).toFixed(1)}%`
-                  : "—"
-              }
-            />
-            <StatCard
-              icon={CalendarClock}
-              label="Fields Extracted Today"
-              value={stats.fields_extracted_today.toLocaleString()}
-            />
-            <StatCard
-              icon={ShieldAlert}
-              label="Documents Requiring Manual Review"
-              value={stats.documents_requiring_manual_review.toLocaleString()}
-              tone="amber"
-            />
-          </div>
-        </>
-      )}
-
-      <div className="mt-8 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-        <div className="border-b border-slate-200 px-6 py-4">
-          <p className="text-sm font-semibold text-slate-900">
-            Recent Extractions
-          </p>
-        </div>
-
-        {documents.length === 0 && !loading ? (
-          <div className="p-10 text-center text-sm text-slate-500">
-            No documents yet.{" "}
-            <Link
-              href="/extraction/new"
-              className="font-semibold text-blue-700 hover:text-blue-800"
-            >
-              Upload your first contract
+    <>
+      <PageHero
+        eyebrow="Consult America Data Agent"
+        title={
+          <>
+            Contract Intelligence
+            <br />
+            with confidence and precision
+          </>
+        }
+        description="Extract, search, compare and understand every agreement across your contract repository."
+        actions={
+          <>
+            <Link href="/extraction/new" className="btn-hero-primary">
+              <Upload className="h-4 w-4" />
+              New Extraction
             </Link>
-            .
+            <Link href="/ask" className="btn-hero-secondary">
+              <Sparkles className="h-4 w-4" />
+              Ask Data Agent
+              <ArrowRight className="h-4 w-4" />
+            </Link>
+          </>
+        }
+      />
+
+      <ContentSection>
+        {loading ? (
+          <div className="flex items-center gap-2 text-sm text-text-secondary">
+            <Loader2 className="h-4 w-4 animate-spin" />
+            Building contract intelligence...
           </div>
-        ) : (
-          <DocumentResultsTable
-            documents={documents}
-            emptyMessage="No documents yet."
-          />
-        )}
-      </div>
-    </div>
+        ) : stats ? (
+          <>
+            <section>
+              <h2 className="mb-4 text-lg font-medium text-foreground">
+                Operational metrics
+              </h2>
+              <div className="metric-grid">
+                <MetricCell label="Documents" value={stats.total_documents} />
+                <MetricCell label="Completed" value={stats.completed} />
+                <MetricCell
+                  label="Review Required"
+                  value={stats.review_required}
+                  highlight
+                />
+                <MetricCell label="Processing" value={stats.processing} />
+                <MetricCell
+                  label="Extraction Accuracy"
+                  value={
+                    stats.extraction_accuracy !== null
+                      ? `${Math.round(stats.extraction_accuracy * 100)}%`
+                      : "—"
+                  }
+                />
+                <MetricCell
+                  label="Avg Processing"
+                  value={
+                    stats.average_processing_seconds !== null
+                      ? `${Math.round(stats.average_processing_seconds)}s`
+                      : "—"
+                  }
+                />
+                <MetricCell
+                  label="Human Review Rate"
+                  value={
+                    stats.human_review_rate !== null
+                      ? `${stats.human_review_rate.toFixed(1)}%`
+                      : "—"
+                  }
+                />
+                <MetricCell
+                  label="Fields Extracted"
+                  value={stats.fields_extracted}
+                />
+              </div>
+            </section>
+
+            <section id="recent-extractions" className="mt-14 scroll-mt-24">
+              <div className="mb-4 flex items-end justify-between gap-4">
+                <h2 className="text-lg font-medium text-foreground">
+                  Recent extractions
+                </h2>
+                <Link
+                  href="/repository"
+                  className="inline-flex items-center gap-1 text-sm text-text-secondary hover:text-foreground"
+                >
+                  View repository
+                  <ArrowRight className="h-3.5 w-3.5" />
+                </Link>
+              </div>
+              <div className="editorial-card overflow-hidden">
+                <DocumentResultsTable
+                  documents={recent}
+                  emptyMessage="No documents yet. Upload a contract to begin extraction."
+                  dashboardMode
+                />
+              </div>
+            </section>
+
+            {stats.review_required > 0 && (
+              <section className="mt-14">
+                <h2 className="mb-4 text-lg font-medium text-foreground">
+                  Needs your attention
+                </h2>
+                <div className="editorial-card editorial-card-interactive flex flex-wrap items-center justify-between gap-6 p-8">
+                  <div>
+                    <p className="text-3xl font-medium text-foreground">
+                      {stats.review_required}
+                    </p>
+                    <p className="mt-1 text-sm text-text-secondary">
+                      contracts in the review queue
+                    </p>
+                  </div>
+                  <Link href="/review-queue" className="btn-primary">
+                    Open Review Queue
+                  </Link>
+                </div>
+              </section>
+            )}
+          </>
+        ) : null}
+      </ContentSection>
+    </>
   );
 }
 
-function StatCard({
-  icon: Icon,
+function MetricCell({
   label,
   value,
-  tone = "blue",
+  highlight = false,
 }: {
-  icon: React.ComponentType<{ className?: string }>;
   label: string;
-  value: string;
-  tone?: "blue" | "emerald" | "amber" | "slate";
+  value: number | string;
+  highlight?: boolean;
 }) {
-  const toneClasses = {
-    blue: "bg-blue-50 text-blue-600",
-    emerald: "bg-emerald-50 text-emerald-600",
-    amber: "bg-amber-50 text-amber-600",
-    slate: "bg-slate-100 text-slate-600",
-  }[tone];
-
   return (
-    <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-      <div
+    <div className="metric-cell">
+      <p
         className={[
-          "flex h-9 w-9 items-center justify-center rounded-xl",
-          toneClasses,
+          "text-2xl font-medium tabular-nums tracking-tight",
+          highlight ? "text-warning" : "text-foreground",
         ].join(" ")}
       >
-        <Icon className="h-5 w-5" />
-      </div>
-
-      <p className="mt-3 text-2xl font-semibold text-slate-950">
-        {value}
+        {typeof value === "number" ? value.toLocaleString() : value}
       </p>
-      <p className="text-xs text-slate-500">{label}</p>
+      <p className="mt-2 text-sm text-text-secondary">{label}</p>
     </div>
   );
 }

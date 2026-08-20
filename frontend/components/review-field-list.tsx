@@ -1,18 +1,19 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
-  Check,
   CheckCheck,
   Clock,
   ExternalLink,
   FileSearch,
   HelpCircle,
+  MoreHorizontal,
   Pencil,
   X,
 } from "lucide-react";
 
 import ConfidenceBadge from "@/components/confidence-badge";
+import ClickableFieldValue from "@/components/clickable-field-value";
 import { getFieldAuditLog } from "@/lib/documents";
 import type {
   FieldAuditEntry,
@@ -47,11 +48,11 @@ const GROUP_ORDER = [
 ];
 
 const STATUS_STYLES: Record<ReviewStatus, string> = {
-  pending: "bg-slate-100 text-slate-600",
-  accepted: "bg-emerald-50 text-emerald-700",
-  edited: "bg-blue-50 text-blue-700",
-  rejected: "bg-red-50 text-red-700",
-  unknown: "bg-amber-50 text-amber-700",
+  pending: "bg-surface-soft text-text-secondary",
+  accepted: "bg-success/10 text-success",
+  edited: "bg-primary-soft text-primary",
+  rejected: "bg-danger/10 text-danger",
+  unknown: "bg-warning/10 text-warning",
 };
 
 const STATUS_LABELS: Record<ReviewStatus, string> = {
@@ -100,16 +101,16 @@ export default function ReviewFieldList({
 
   return (
     <div className="flex h-full flex-col">
-      <div className="flex shrink-0 items-center justify-between border-b border-slate-200 bg-white px-4 py-2.5">
-        <p className="text-sm font-semibold text-slate-900">
-          Extracted Data
+      <div className="flex shrink-0 items-center justify-between border-b border-border/80 bg-surface px-6 py-4">
+        <p className="text-sm font-medium text-foreground">
+          Extracted intelligence
         </p>
 
         <button
           type="button"
           onClick={onAcceptAll}
           disabled={acceptingAll || allReviewed}
-          className="inline-flex items-center gap-1.5 rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
+          className="btn-primary px-3 py-1.5 text-xs disabled:cursor-not-allowed disabled:opacity-60"
         >
           <CheckCheck className="h-3.5 w-3.5" />
           {allReviewed ? "All reviewed" : "Accept All"}
@@ -118,7 +119,7 @@ export default function ReviewFieldList({
 
       <div className="flex-1 overflow-auto">
         <table className="w-full min-w-[640px] border-collapse text-left text-sm">
-          <thead className="sticky top-0 z-10 bg-slate-50 text-xs font-semibold uppercase tracking-wide text-slate-500">
+          <thead className="sticky top-0 z-10 bg-surface-soft text-xs font-medium uppercase tracking-wide text-text-secondary">
             <tr>
               <th className="px-4 py-2 font-semibold">Field</th>
               <th className="px-4 py-2 font-semibold">
@@ -126,7 +127,7 @@ export default function ReviewFieldList({
               </th>
               <th className="px-4 py-2 font-semibold">Confidence</th>
               <th className="px-4 py-2 font-semibold">Status</th>
-              <th className="px-4 py-2 font-semibold">Actions</th>
+              <th className="px-4 py-2 font-semibold w-10" />
             </tr>
           </thead>
 
@@ -176,7 +177,7 @@ function FieldGroupRows({
       <tr>
         <th
           colSpan={5}
-          className="border-t border-slate-200 bg-slate-100 px-4 py-1.5 text-left text-xs font-semibold uppercase tracking-wide text-slate-500"
+          className="border-t border-border bg-surface-soft px-4 py-2 text-left text-xs font-medium uppercase tracking-wide text-text-secondary"
         >
           {group}
         </th>
@@ -264,15 +265,15 @@ function FieldRow({
       <tr
         onClick={onSelect}
         className={[
-          "cursor-pointer border-t border-slate-200 align-top transition",
-          active ? "bg-blue-50" : "bg-white hover:bg-slate-50",
+          "cursor-pointer border-t border-border/70 align-top transition duration-200",
+          active ? "field-row-selected" : "bg-surface hover:bg-[var(--row-hover)]",
         ].join(" ")}
       >
-        <td className="px-4 py-2.5 text-xs text-slate-500">
+        <td className="px-5 py-4 text-sm text-text-secondary">
           {field.label}
         </td>
 
-        <td className="px-4 py-2.5">
+        <td className="px-5 py-4">
           {editing ? (
             <div
               onClick={(event) => event.stopPropagation()}
@@ -284,7 +285,7 @@ function FieldRow({
                 onChange={(event) =>
                   setDraftValue(event.target.value)
                 }
-                className="min-w-0 flex-1 rounded-md border border-slate-300 px-2 py-1 text-xs"
+                className="min-w-0 flex-1 rounded-lg border border-border px-2 py-1 text-xs outline-none focus:border-primary/30"
                 autoFocus
               />
 
@@ -292,7 +293,7 @@ function FieldRow({
                 type="button"
                 onClick={submitEdit}
                 disabled={busy}
-                className="rounded-md bg-blue-600 px-2 py-1 text-xs font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
+                className="rounded-lg bg-primary px-2 py-1 text-xs font-medium text-white hover:bg-primary-hover disabled:cursor-not-allowed disabled:opacity-60"
               >
                 Save
               </button>
@@ -303,15 +304,17 @@ function FieldRow({
                   setEditing(false);
                   setDraftValue(field.value);
                 }}
-                className="rounded-md border border-slate-200 px-2 py-1 text-xs text-slate-600 hover:bg-slate-50"
+                className="rounded-lg border border-border px-2 py-1 text-xs text-text-secondary hover:bg-surface-soft"
               >
                 Cancel
               </button>
             </div>
           ) : (
-            <p className="max-w-xs truncate text-sm font-medium text-slate-800">
-              {field.value}
-            </p>
+            <ClickableFieldValue
+              fieldKey={field.field_key}
+              fieldLabel={field.label}
+              value={field.value}
+            />
           )}
         </td>
 
@@ -334,59 +337,30 @@ function FieldRow({
           {!editing && (
             <div
               onClick={(event) => event.stopPropagation()}
-              className="flex flex-wrap items-center gap-1.5"
+              className="flex items-center justify-end gap-2"
             >
-              <ActionButton
-                icon={<Check className="h-3 w-3" />}
-                label="Accept"
-                tone="emerald"
-                disabled={busy}
-                onClick={() => onReview(field.field_key, "accept")}
-              />
-
-              <ActionButton
-                icon={<Pencil className="h-3 w-3" />}
-                label="Edit"
-                tone="slate"
-                disabled={busy}
-                onClick={() => setEditing(true)}
-              />
-
-              <ActionButton
-                icon={<X className="h-3 w-3" />}
-                label="Reject"
-                tone="red"
-                disabled={busy}
-                onClick={() => onReview(field.field_key, "reject")}
-              />
-
-              <ActionButton
-                icon={<HelpCircle className="h-3 w-3" />}
-                label="Mark Unknown"
-                tone="amber"
-                disabled={busy}
-                onClick={() =>
+              {field.review_status === "pending" && (
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() => onReview(field.field_key, "accept")}
+                  className="rounded-md bg-brand-blue px-2 py-1 text-[11px] font-semibold text-white hover:bg-brand-blue/90 disabled:opacity-60"
+                >
+                  Accept
+                </button>
+              )}
+              <FieldActionsMenu
+                busy={busy}
+                onEdit={() => setEditing(true)}
+                onReject={() => onReview(field.field_key, "reject")}
+                onMarkUnknown={() =>
                   onReview(field.field_key, "mark_unknown")
                 }
+                onToggleSource={() =>
+                  setShowSource((current) => !current)
+                }
+                onToggleHistory={toggleHistory}
               />
-
-              <button
-                type="button"
-                onClick={() => setShowSource((current) => !current)}
-                className="inline-flex items-center gap-1 text-xs font-semibold text-slate-500 hover:text-slate-700"
-              >
-                <FileSearch className="h-3 w-3" />
-                {showSource ? "Hide Source" : "Source"}
-              </button>
-
-              <button
-                type="button"
-                onClick={toggleHistory}
-                className="inline-flex items-center gap-1 text-xs font-semibold text-slate-500 hover:text-slate-700"
-              >
-                <Clock className="h-3 w-3" />
-                {showHistory ? "Hide History" : "History"}
-              </button>
             </div>
           )}
         </td>
@@ -495,36 +469,119 @@ function FieldRow({
   );
 }
 
-function ActionButton({
+function FieldActionsMenu({
+  busy,
+  onEdit,
+  onReject,
+  onMarkUnknown,
+  onToggleSource,
+  onToggleHistory,
+}: {
+  busy: boolean;
+  onEdit: () => void;
+  onReject: () => void;
+  onMarkUnknown: () => void;
+  onToggleSource: () => void;
+  onToggleHistory: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+
+    function handleClick(event: MouseEvent) {
+      if (
+        menuRef.current &&
+        !menuRef.current.contains(event.target as Node)
+      ) {
+        setOpen(false);
+      }
+    }
+
+    window.addEventListener("mousedown", handleClick);
+    return () => window.removeEventListener("mousedown", handleClick);
+  }, [open]);
+
+  return (
+    <div ref={menuRef} className="relative">
+      <button
+        type="button"
+        aria-label="Field actions"
+        onClick={() => setOpen((current) => !current)}
+        className="rounded-md p-1 text-text-secondary hover:bg-background hover:text-foreground"
+      >
+        <MoreHorizontal className="h-4 w-4" />
+      </button>
+
+      {open && (
+        <div className="absolute right-0 top-full z-20 mt-1 w-40 rounded-lg border border-border bg-surface py-1 shadow-lg">
+          <MenuItem
+            icon={<Pencil className="h-3.5 w-3.5" />}
+            label="Edit"
+            disabled={busy}
+            onClick={() => {
+              setOpen(false);
+              onEdit();
+            }}
+          />
+          <MenuItem
+            icon={<X className="h-3.5 w-3.5" />}
+            label="Reject"
+            disabled={busy}
+            onClick={() => {
+              setOpen(false);
+              onReject();
+            }}
+          />
+          <MenuItem
+            icon={<HelpCircle className="h-3.5 w-3.5" />}
+            label="Mark Unknown"
+            disabled={busy}
+            onClick={() => {
+              setOpen(false);
+              onMarkUnknown();
+            }}
+          />
+          <MenuItem
+            icon={<FileSearch className="h-3.5 w-3.5" />}
+            label="View Source"
+            onClick={() => {
+              setOpen(false);
+              onToggleSource();
+            }}
+          />
+          <MenuItem
+            icon={<Clock className="h-3.5 w-3.5" />}
+            label="View History"
+            onClick={() => {
+              setOpen(false);
+              onToggleHistory();
+            }}
+          />
+        </div>
+      )}
+    </div>
+  );
+}
+
+function MenuItem({
   icon,
   label,
-  tone,
-  disabled,
+  disabled = false,
   onClick,
 }: {
   icon: React.ReactNode;
   label: string;
-  tone: "emerald" | "slate" | "red" | "amber";
-  disabled: boolean;
+  disabled?: boolean;
   onClick: () => void;
 }) {
-  const toneClasses = {
-    emerald:
-      "border-emerald-200 text-emerald-700 hover:bg-emerald-50",
-    slate: "border-slate-200 text-slate-600 hover:bg-slate-50",
-    red: "border-red-200 text-red-700 hover:bg-red-50",
-    amber: "border-amber-200 text-amber-700 hover:bg-amber-50",
-  }[tone];
-
   return (
     <button
       type="button"
-      onClick={onClick}
       disabled={disabled}
-      className={[
-        "inline-flex items-center gap-1 rounded-md border px-2 py-1 text-xs font-semibold transition disabled:cursor-not-allowed disabled:opacity-60",
-        toneClasses,
-      ].join(" ")}
+      onClick={onClick}
+      className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs text-foreground transition hover:bg-background disabled:opacity-50"
     >
       {icon}
       {label}

@@ -22,14 +22,14 @@ export default function ContractHierarchy({
 }: ContractHierarchyProps) {
   if (roots.length === 0) {
     return (
-      <div className="p-10 text-center text-sm text-slate-500">
+      <div className="px-8 py-16 text-center text-[15px] text-text-secondary">
         No contract relationships have been confirmed yet.
       </div>
     );
   }
 
   return (
-    <div className="divide-y divide-slate-100">
+    <div className="space-y-6 p-8">
       {roots.map((root) => (
         <TreeNode key={root.document_id} node={root} depth={0} />
       ))}
@@ -48,16 +48,13 @@ function TreeNode({
   const hasChildren = node.children.length > 0;
 
   return (
-    <div>
-      <div
-        className="flex items-center gap-2 px-6 py-3 hover:bg-slate-50"
-        style={{ paddingLeft: `${24 + depth * 24}px` }}
-      >
+    <div style={{ marginLeft: depth * 24 }}>
+      <div className="editorial-card flex items-start gap-3 p-5 transition duration-200 hover:shadow-[var(--shadow-elevated)]">
         {hasChildren ? (
           <button
             type="button"
             onClick={() => setExpanded((current) => !current)}
-            className="text-slate-400 hover:text-slate-700"
+            className="mt-0.5 text-text-secondary transition hover:text-foreground"
           >
             {expanded ? (
               <ChevronDown className="h-4 w-4" />
@@ -69,41 +66,33 @@ function TreeNode({
           <span className="w-4" />
         )}
 
-        <Link
-          href={`/documents/${node.document_id}/review`}
-          className="font-medium text-blue-700 hover:text-blue-800"
-        >
-          {node.title}
-        </Link>
-
-        {node.relationship_type && (
-          <span className="rounded-full bg-violet-50 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-violet-700">
-            {RELATIONSHIP_TYPE_LABELS[node.relationship_type] ??
-              node.relationship_type}
-          </span>
-        )}
-
-        {node.document_number && (
-          <span className="text-xs text-slate-400">
-            {node.document_number}
-          </span>
-        )}
-
-        {node.relationship_status && (
-          <span className="ml-auto rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-slate-500">
-            {node.relationship_status}
-          </span>
-        )}
+        <div className="min-w-0 flex-1">
+          <Link
+            href={`/documents/${node.document_id}/review`}
+            className="text-[15px] font-medium text-foreground hover:underline"
+          >
+            {node.title}
+          </Link>
+          <div className="mt-1 flex flex-wrap items-center gap-2 text-sm text-text-secondary">
+            {node.relationship_type && (
+              <span>
+                {RELATIONSHIP_TYPE_LABELS[node.relationship_type] ??
+                  node.relationship_type}
+              </span>
+            )}
+            {node.document_number && <span>{node.document_number}</span>}
+            {node.document_type && <span>{node.document_type}</span>}
+          </div>
+        </div>
       </div>
 
-      {expanded &&
-        node.children.map((child) => (
-          <TreeNode
-            key={child.document_id}
-            node={child}
-            depth={depth + 1}
-          />
-        ))}
+      {expanded && hasChildren && (
+        <div className="relative mt-4 space-y-4 border-l border-border/80 pl-6">
+          {node.children.map((child) => (
+            <TreeNode key={child.document_id} node={child} depth={0} />
+          ))}
+        </div>
+      )}
     </div>
   );
 }

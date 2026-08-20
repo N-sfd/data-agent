@@ -1,15 +1,21 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import {
-  Archive,
+  ChevronDown,
   ChevronLeft,
   ChevronRight,
   GitBranch,
   List,
+  Loader2,
+  Plus,
   Search,
+  Upload,
 } from "lucide-react";
 
+import ContentSection from "@/components/layout/ContentSection";
+import PageHero from "@/components/layout/PageHero";
 import ContractHierarchy from "@/components/contract-hierarchy";
 import DocumentResultsTable from "@/components/document-results-table";
 import { getDocumentHierarchy, searchDocuments } from "@/lib/documents";
@@ -22,48 +28,69 @@ import {
 
 const PAGE_SIZE = 20;
 
-const STATUS_OPTIONS: { value: DocumentStatus | ""; label: string }[] = [
-  { value: "", label: "All statuses" },
-  { value: "completed", label: "Completed" },
-  { value: "review_required", label: "Review Required" },
-  { value: "processing", label: "Processing" },
-];
+type QuickFilter =
+  | "all"
+  | "active"
+  | "needs_review"
+  | "msa"
+  | "amendment"
+  | "sow";
 
-const CONFIDENCE_OPTIONS: { value: string; label: string }[] = [
-  { value: "", label: "All confidence" },
-  { value: "0.95", label: "High (≥95%)" },
-  { value: "0.8", label: "Medium+ (≥80%)" },
-  { value: "0", label: "Low (any)" },
-];
-
-const REPOSITORY_STATUS_OPTIONS: { value: string; label: string }[] = [
-  { value: "", label: "All repository status" },
-  { value: "not_approved", label: "Not Approved" },
-  { value: "approved", label: "Approved" },
-  { value: "repository", label: "In Repository" },
+const QUICK_FILTERS: { id: QuickFilter; label: string }[] = [
+  { id: "all", label: "All" },
+  { id: "active", label: "Active" },
+  { id: "needs_review", label: "Needs Review" },
+  { id: "msa", label: "MSA" },
+  { id: "amendment", label: "Amendment" },
+  { id: "sow", label: "SOW" },
 ];
 
 type ViewMode = "table" | "hierarchy";
 
 export default function RepositoryPage() {
   const [view, setView] = useState<ViewMode>("table");
-
   const [documents, setDocuments] = useState<DocumentSummary[]>([]);
   const [total, setTotal] = useState(0);
   const [offset, setOffset] = useState(0);
-
   const [query, setQuery] = useState("");
+  const [quickFilter, setQuickFilter] = useState<QuickFilter>("all");
+  const [showAdvanced, setShowAdvanced] = useState(false);
   const [status, setStatus] = useState<DocumentStatus | "">("");
   const [documentType, setDocumentType] = useState("");
   const [confidenceMin, setConfidenceMin] = useState("");
   const [repositoryStatus, setRepositoryStatus] = useState("");
-
-  const [hierarchyRoots, setHierarchyRoots] = useState<
-    HierarchyNode[]
-  >([]);
-
+  const [hierarchyRoots, setHierarchyRoots] = useState<HierarchyNode[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+
+  useEffect(() => {
+    if (quickFilter === "all") {
+      setStatus("");
+      setDocumentType("");
+      setRepositoryStatus("");
+    } else if (quickFilter === "active") {
+      setStatus("completed");
+      setDocumentType("");
+      setRepositoryStatus("");
+    } else if (quickFilter === "needs_review") {
+      setStatus("review_required");
+      setDocumentType("");
+      setRepositoryStatus("not_approved");
+    } else if (quickFilter === "msa") {
+      setDocumentType("Master Services Agreement");
+      setStatus("");
+      setRepositoryStatus("");
+    } else if (quickFilter === "amendment") {
+      setDocumentType("Amendment");
+      setStatus("");
+      setRepositoryStatus("");
+    } else if (quickFilter === "sow") {
+      setDocumentType("Statement of Work");
+      setStatus("");
+      setRepositoryStatus("");
+    }
+    setOffset(0);
+  }, [quickFilter]);
 
   useEffect(() => {
     if (view !== "table") return;
@@ -82,30 +109,26 @@ export default function RepositoryPage() {
           repositoryStatus: repositoryStatus || undefined,
           limit: PAGE_SIZE,
           offset,
-          ...(confidenceMin
-            ? { confidence_min: Number(confidenceMin) }
-            : {}),
+          ...(confidenceMin ? { confidence_min: Number(confidenceMin) } : {}),
         });
 
         if (!active) return;
-
         setDocuments(result.documents);
         setTotal(result.total);
       } catch (err) {
-        if (!active) return;
-
-        setError(
-          err instanceof Error
-            ? err.message
-            : "Unable to load the repository.",
-        );
+        if (active) {
+          setError(
+            err instanceof Error
+              ? err.message
+              : "Unable to load the repository.",
+          );
+        }
       } finally {
         if (active) setLoading(false);
       }
     }
 
     load();
-
     return () => {
       active = false;
     };
@@ -145,7 +168,6 @@ export default function RepositoryPage() {
     }
 
     load();
-
     return () => {
       active = false;
     };
@@ -155,54 +177,30 @@ export default function RepositoryPage() {
   const to = Math.min(offset + PAGE_SIZE, total);
 
   return (
-    <div className="mx-auto max-w-6xl px-6 py-8">
-      <div className="mb-8 flex items-center justify-between gap-4">
-        <div className="flex items-center gap-2">
-          <Archive className="h-5 w-5 text-blue-600" />
-          <div>
-            <p className="text-sm font-semibold text-blue-600">
-              Contract Extraction
-            </p>
-            <h1 className="mt-1 text-2xl font-semibold text-slate-950">
-              Repository
-            </h1>
-          </div>
-        </div>
+    <>
+      <PageHero
+        eyebrow="Store / Repository"
+        title="Contract Repository"
+        description="Search and analyze every agreement from one trusted source."
+        actions={
+          <>
+            <Link href="/extraction/new" className="btn-hero-primary">
+              <Plus className="h-4 w-4" />
+              Add Contract
+            </Link>
+            <button type="button" className="btn-hero-secondary">
+              <Upload className="h-4 w-4" />
+              Import
+            </button>
+          </>
+        }
+      />
 
-        <div className="flex items-center gap-1 rounded-xl border border-slate-200 bg-white p-1">
-          <button
-            type="button"
-            onClick={() => setView("table")}
-            className={[
-              "inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold transition",
-              view === "table"
-                ? "bg-blue-600 text-white"
-                : "text-slate-600 hover:bg-slate-100",
-            ].join(" ")}
-          >
-            <List className="h-3.5 w-3.5" />
-            Table
-          </button>
-          <button
-            type="button"
-            onClick={() => setView("hierarchy")}
-            className={[
-              "inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold transition",
-              view === "hierarchy"
-                ? "bg-blue-600 text-white"
-                : "text-slate-600 hover:bg-slate-100",
-            ].join(" ")}
-          >
-            <GitBranch className="h-3.5 w-3.5" />
-            Hierarchy
-          </button>
-        </div>
-      </div>
-
-      {view === "table" && (
-        <div className="mb-4 flex flex-wrap items-center gap-3">
-          <div className="relative flex-1 min-w-[240px]">
-            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+      <ContentSection>
+      <div className="mb-8 flex flex-wrap items-center justify-between gap-4">
+        {view === "table" && (
+          <div className="relative min-w-[280px] flex-1 max-w-2xl">
+            <Search className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-text-secondary" />
             <input
               type="text"
               value={query}
@@ -210,90 +208,126 @@ export default function RepositoryPage() {
                 setOffset(0);
                 setQuery(event.target.value);
               }}
-              placeholder="Search by filename, contract number, or counterparty..."
-              className="w-full rounded-xl border border-slate-300 py-2 pl-9 pr-3 text-sm text-slate-800"
+              placeholder="Search contracts, counterparties, fields, or clauses..."
+              className="w-full rounded-2xl border border-border bg-surface py-3.5 pl-11 pr-4 text-[15px] outline-none transition duration-200 focus:border-primary/30 focus:shadow-[var(--shadow-soft)]"
             />
           </div>
+        )}
 
-          <select
-            value={documentType}
-            onChange={(event) => {
-              setOffset(0);
-              setDocumentType(event.target.value);
-            }}
-            className="rounded-xl border border-slate-300 px-3 py-2 text-sm text-slate-700"
-          >
-            <option value="">All types</option>
-            {DOCUMENT_TYPE_OPTIONS.map((option) => (
-              <option key={option} value={option}>
-                {option}
-              </option>
-            ))}
-          </select>
-
-          <select
-            value={status}
-            onChange={(event) => {
-              setOffset(0);
-              setStatus(event.target.value as DocumentStatus | "");
-            }}
-            className="rounded-xl border border-slate-300 px-3 py-2 text-sm text-slate-700"
-          >
-            {STATUS_OPTIONS.map((option) => (
-              <option key={option.value} value={option.value}>
-                {option.label}
-              </option>
-            ))}
-          </select>
-
-          <select
-            value={confidenceMin}
-            onChange={(event) => {
-              setOffset(0);
-              setConfidenceMin(event.target.value);
-            }}
-            className="rounded-xl border border-slate-300 px-3 py-2 text-sm text-slate-700"
-          >
-            {CONFIDENCE_OPTIONS.map((option) => (
-              <option key={option.value} value={option.value}>
-                {option.label}
-              </option>
-            ))}
-          </select>
-
-          <select
-            value={repositoryStatus}
-            onChange={(event) => {
-              setOffset(0);
-              setRepositoryStatus(event.target.value);
-            }}
-            className="rounded-xl border border-slate-300 px-3 py-2 text-sm text-slate-700"
-          >
-            {REPOSITORY_STATUS_OPTIONS.map((option) => (
-              <option key={option.value} value={option.value}>
-                {option.label}
-              </option>
-            ))}
-          </select>
+        <div className="flex items-center gap-1 rounded-full border border-border bg-surface p-1">
+          <ViewToggle
+            active={view === "table"}
+            onClick={() => setView("table")}
+            icon={List}
+            label="Table"
+          />
+          <ViewToggle
+            active={view === "hierarchy"}
+            onClick={() => setView("hierarchy")}
+            icon={GitBranch}
+            label="Hierarchy"
+          />
         </div>
+      </div>
+
+      {view === "table" && (
+        <>
+          <div className="mb-4 flex flex-wrap gap-2">
+            {QUICK_FILTERS.map((filter) => (
+              <button
+                key={filter.id}
+                type="button"
+                onClick={() => setQuickFilter(filter.id)}
+                className={[
+                  "chip",
+                  quickFilter === filter.id ? "chip-active" : "",
+                ].join(" ")}
+              >
+                {filter.label}
+              </button>
+            ))}
+          </div>
+
+          <button
+            type="button"
+            onClick={() => setShowAdvanced((open) => !open)}
+            className="mb-6 inline-flex items-center gap-1 text-sm text-text-secondary transition hover:text-foreground"
+          >
+            Filters
+            <ChevronDown
+              className={[
+                "h-4 w-4 transition duration-200",
+                showAdvanced ? "rotate-180" : "",
+              ].join(" ")}
+            />
+          </button>
+
+          {showAdvanced && (
+            <div className="mb-8 flex flex-wrap gap-3">
+              <AdvancedSelect
+                label="Status"
+                value={status}
+                onChange={(value) => {
+                  setOffset(0);
+                  setStatus(value as DocumentStatus | "");
+                }}
+                options={[
+                  { value: "", label: "All statuses" },
+                  { value: "completed", label: "Completed" },
+                  { value: "review_required", label: "Review required" },
+                  { value: "processing", label: "Processing" },
+                ]}
+              />
+              <AdvancedSelect
+                label="Type"
+                value={documentType}
+                onChange={(value) => {
+                  setOffset(0);
+                  setDocumentType(value);
+                }}
+                options={[
+                  { value: "", label: "All types" },
+                  ...DOCUMENT_TYPE_OPTIONS.map((option) => ({
+                    value: option,
+                    label: option,
+                  })),
+                ]}
+              />
+              <AdvancedSelect
+                label="Confidence"
+                value={confidenceMin}
+                onChange={(value) => {
+                  setOffset(0);
+                  setConfidenceMin(value);
+                }}
+                options={[
+                  { value: "", label: "Any" },
+                  { value: "0.95", label: "High (≥95%)" },
+                  { value: "0.8", label: "Medium+ (≥80%)" },
+                ]}
+              />
+            </div>
+          )}
+        </>
       )}
 
       {error && (
-        <div className="mb-6 rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+        <div className="mb-6 rounded-2xl border border-danger/20 bg-danger/5 p-4 text-sm text-danger">
           {error}
         </div>
       )}
 
-      <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+      <div className="editorial-card overflow-hidden">
         {loading ? (
-          <p className="p-10 text-center text-sm text-slate-500">
-            Loading...
-          </p>
+          <div className="flex items-center justify-center gap-2 p-16 text-sm text-text-secondary">
+            <Loader2 className="h-4 w-4 animate-spin" />
+            Indexing repository...
+          </div>
         ) : view === "table" ? (
           <DocumentResultsTable
             documents={documents}
-            emptyMessage="No documents match your filters."
-            showExtendedColumns
+            emptyMessage="No contracts match your filters."
+            repositoryMode
           />
         ) : (
           <ContractHierarchy roots={hierarchyRoots} />
@@ -301,11 +335,10 @@ export default function RepositoryPage() {
       </div>
 
       {view === "table" && total > 0 && (
-        <div className="mt-4 flex items-center justify-between text-sm text-slate-500">
+        <div className="mt-8 flex items-center justify-between text-sm text-text-secondary">
           <p>
             Showing {from}–{to} of {total.toLocaleString()}
           </p>
-
           <div className="flex items-center gap-2">
             <button
               type="button"
@@ -313,19 +346,16 @@ export default function RepositoryPage() {
                 setOffset((current) => Math.max(0, current - PAGE_SIZE))
               }
               disabled={offset === 0}
-              className="inline-flex items-center gap-1 rounded-lg border border-slate-300 px-3 py-1.5 text-xs font-semibold text-slate-700 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-40"
+              className="btn-secondary px-3 py-1.5 text-xs disabled:opacity-40"
             >
               <ChevronLeft className="h-3.5 w-3.5" />
               Previous
             </button>
-
             <button
               type="button"
-              onClick={() =>
-                setOffset((current) => current + PAGE_SIZE)
-              }
+              onClick={() => setOffset((current) => current + PAGE_SIZE)}
               disabled={offset + PAGE_SIZE >= total}
-              className="inline-flex items-center gap-1 rounded-lg border border-slate-300 px-3 py-1.5 text-xs font-semibold text-slate-700 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-40"
+              className="btn-secondary px-3 py-1.5 text-xs disabled:opacity-40"
             >
               Next
               <ChevronRight className="h-3.5 w-3.5" />
@@ -333,6 +363,64 @@ export default function RepositoryPage() {
           </div>
         </div>
       )}
-    </div>
+      </ContentSection>
+    </>
+  );
+}
+
+function ViewToggle({
+  active,
+  onClick,
+  icon: Icon,
+  label,
+}: {
+  active: boolean;
+  onClick: () => void;
+  icon: React.ComponentType<{ className?: string }>;
+  label: string;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={[
+        "inline-flex items-center gap-1.5 rounded-full px-4 py-2 text-xs font-medium transition duration-200",
+        active
+          ? "bg-navy text-white"
+          : "text-text-secondary hover:text-foreground",
+      ].join(" ")}
+    >
+      <Icon className="h-3.5 w-3.5" />
+      {label}
+    </button>
+  );
+}
+
+function AdvancedSelect({
+  label,
+  value,
+  onChange,
+  options,
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  options: { value: string; label: string }[];
+}) {
+  return (
+    <label className="flex flex-col gap-1.5">
+      <span className="text-xs text-text-secondary">{label}</span>
+      <select
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        className="rounded-xl border border-border bg-surface px-3 py-2 text-sm outline-none"
+      >
+        {options.map((option) => (
+          <option key={option.value} value={option.value}>
+            {option.label}
+          </option>
+        ))}
+      </select>
+    </label>
   );
 }

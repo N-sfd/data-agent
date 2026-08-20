@@ -5,6 +5,7 @@ import Link from "next/link";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 
 import PageHeader from "@/components/page-header";
+import { formatRelativeTime } from "@/lib/format";
 import { getGlobalAuditLog } from "@/lib/documents";
 import type { GlobalAuditEntry, ReviewAction } from "@/types/document";
 
@@ -19,12 +20,12 @@ const ACTION_LABELS: Record<ReviewAction, string> = {
 
 const ACTION_STYLES: Record<ReviewAction, string> = {
   accept: "bg-success/10 text-success",
-  edit: "bg-primary-soft text-primary",
-  reject: "bg-danger/10 text-danger",
+  edit: "bg-brand-blue/10 text-brand-blue",
+  reject: "bg-error/10 text-error",
   mark_unknown: "bg-warning/10 text-warning",
 };
 
-export default function AuditLogPage() {
+export default function ActivityPage() {
   const [entries, setEntries] = useState<GlobalAuditEntry[]>([]);
   const [total, setTotal] = useState(0);
   const [offset, setOffset] = useState(0);
@@ -40,26 +41,21 @@ export default function AuditLogPage() {
 
       try {
         const result = await getGlobalAuditLog(PAGE_SIZE, offset);
-
         if (!active) return;
-
         setEntries(result.entries);
         setTotal(result.total);
       } catch (err) {
-        if (!active) return;
-
-        setError(
-          err instanceof Error
-            ? err.message
-            : "Unable to load the audit log.",
-        );
+        if (active) {
+          setError(
+            err instanceof Error ? err.message : "Unable to load activity.",
+          );
+        }
       } finally {
         if (active) setLoading(false);
       }
     }
 
     load();
-
     return () => {
       active = false;
     };
@@ -69,52 +65,46 @@ export default function AuditLogPage() {
   const to = Math.min(offset + PAGE_SIZE, total);
 
   return (
-    <div className="page-container-wide">
+    <div className="mx-auto max-w-6xl px-6 py-8">
       <PageHeader
-        title="Audit Log"
-        description="Review every human action across extraction, classification, and field review."
+        title="Activity"
+        description="Review actions and changes across your contract portfolio."
       />
 
       {error && (
-        <div className="mb-6 rounded-2xl border border-danger/20 bg-danger/5 p-4 text-sm text-danger">
+        <div className="mb-4 rounded-xl border border-error/20 bg-error/5 p-3 text-sm text-error">
           {error}
         </div>
       )}
 
-      <div className="editorial-card overflow-hidden">
+      <div className="overflow-hidden rounded-xl border border-border bg-surface">
         {loading && entries.length === 0 ? (
-          <p className="p-10 text-center text-sm text-text-secondary">
-            Loading audit entries...
+          <p className="p-12 text-center text-sm text-text-secondary">
+            Loading activity...
           </p>
         ) : entries.length === 0 ? (
-          <p className="p-10 text-center text-sm text-text-secondary">
+          <p className="p-12 text-center text-sm text-text-secondary">
             No review actions recorded yet.
           </p>
         ) : (
           <div className="overflow-x-auto">
             <table className="min-w-full text-sm">
-              <thead>
-                <tr className="border-b border-border">
-                  <th className="px-8 py-4 text-left text-xs font-medium uppercase text-text-secondary">
-                    User
-                  </th>
-                  <th className="px-4 py-4 text-left text-xs font-medium uppercase text-text-secondary">
-                    Action
-                  </th>
-                  <th className="px-4 py-4 text-left text-xs font-medium uppercase text-text-secondary">
+              <thead className="border-b border-border bg-background">
+                <tr>
+                  <th className="px-5 py-3 text-left text-xs font-semibold uppercase text-text-secondary">
                     Document
                   </th>
-                  <th className="px-4 py-4 text-left text-xs font-medium uppercase text-text-secondary">
+                  <th className="px-5 py-3 text-left text-xs font-semibold uppercase text-text-secondary">
                     Field
                   </th>
-                  <th className="px-4 py-4 text-left text-xs font-medium uppercase text-text-secondary">
-                    Old Value
+                  <th className="px-5 py-3 text-left text-xs font-semibold uppercase text-text-secondary">
+                    Action
                   </th>
-                  <th className="px-4 py-4 text-left text-xs font-medium uppercase text-text-secondary">
-                    New Value
+                  <th className="px-5 py-3 text-left text-xs font-semibold uppercase text-text-secondary">
+                    Reviewer
                   </th>
-                  <th className="px-4 py-4 text-left text-xs font-medium uppercase text-text-secondary">
-                    Timestamp
+                  <th className="px-5 py-3 text-left text-xs font-semibold uppercase text-text-secondary">
+                    When
                   </th>
                 </tr>
               </thead>
@@ -122,40 +112,34 @@ export default function AuditLogPage() {
                 {entries.map((entry, index) => (
                   <tr
                     key={index}
-                    className="border-b border-border/70 hover:bg-surface-soft/60 transition duration-200"
+                    className="border-t border-border hover:bg-background"
                   >
-                    <td className="px-8 py-4 text-foreground">
-                      {entry.changed_by}
+                    <td className="px-5 py-3">
+                      <Link
+                        href={`/documents/${entry.document_id}/review`}
+                        className="font-medium text-brand-blue hover:underline"
+                      >
+                        {entry.document_filename.replace(/\.[^.]+$/, "")}
+                      </Link>
                     </td>
-                    <td className="px-4 py-4">
+                    <td className="px-5 py-3 text-text-secondary">
+                      {entry.field_key}
+                    </td>
+                    <td className="px-5 py-3">
                       <span
                         className={[
-                          "rounded-full px-2.5 py-0.5 text-xs font-medium",
+                          "rounded-full px-2 py-0.5 text-[11px] font-semibold",
                           ACTION_STYLES[entry.action],
                         ].join(" ")}
                       >
                         {ACTION_LABELS[entry.action]}
                       </span>
                     </td>
-                    <td className="px-4 py-4">
-                      <Link
-                        href={`/documents/${entry.document_id}/review`}
-                        className="font-medium text-primary hover:underline"
-                      >
-                        {entry.document_filename}
-                      </Link>
+                    <td className="px-5 py-3 text-text-secondary">
+                      {entry.changed_by}
                     </td>
-                    <td className="px-4 py-4 text-text-secondary">
-                      {entry.field_key}
-                    </td>
-                    <td className="max-w-[160px] truncate px-4 py-4 text-text-secondary">
-                      {entry.previous_value || "—"}
-                    </td>
-                    <td className="max-w-[160px] truncate px-4 py-4 text-foreground">
-                      {entry.new_value || "—"}
-                    </td>
-                    <td className="px-4 py-4 text-text-secondary">
-                      {new Date(entry.changed_at).toLocaleString()}
+                    <td className="px-5 py-3 text-xs text-text-secondary">
+                      {formatRelativeTime(entry.changed_at)}
                     </td>
                   </tr>
                 ))}
@@ -166,11 +150,10 @@ export default function AuditLogPage() {
       </div>
 
       {total > 0 && (
-        <div className="mt-6 flex items-center justify-between text-sm text-text-secondary">
+        <div className="mt-4 flex items-center justify-between text-sm text-text-secondary">
           <p>
             Showing {from}–{to} of {total.toLocaleString()}
           </p>
-
           <div className="flex items-center gap-2">
             <button
               type="button"
@@ -178,19 +161,16 @@ export default function AuditLogPage() {
                 setOffset((current) => Math.max(0, current - PAGE_SIZE))
               }
               disabled={offset === 0}
-              className="btn-secondary py-1.5 text-xs disabled:opacity-40"
+              className="inline-flex items-center gap-1 rounded-lg border border-border px-3 py-1.5 text-xs font-semibold disabled:opacity-40"
             >
               <ChevronLeft className="h-3.5 w-3.5" />
               Previous
             </button>
-
             <button
               type="button"
-              onClick={() =>
-                setOffset((current) => current + PAGE_SIZE)
-              }
+              onClick={() => setOffset((current) => current + PAGE_SIZE)}
               disabled={offset + PAGE_SIZE >= total}
-              className="btn-secondary py-1.5 text-xs disabled:opacity-40"
+              className="inline-flex items-center gap-1 rounded-lg border border-border px-3 py-1.5 text-xs font-semibold disabled:opacity-40"
             >
               Next
               <ChevronRight className="h-3.5 w-3.5" />

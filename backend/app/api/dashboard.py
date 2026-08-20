@@ -161,4 +161,6 @@ async def get_review_queue(
             uploaded_at=document.uploaded_at,
         )
         for document in documents
+        if compute_document_status(database, document)
+        == "review_required"
     ]

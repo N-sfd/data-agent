@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 
-import AppShell from "@/components/app-shell";
+import AppShell from "@/components/layout/AppShell";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -15,9 +15,9 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Data Agent — Financial PDF analysis",
+  title: "Data Agent — Consult America",
   description:
-    "Extract specific financial information and tables from PDFs.",
+    "Enterprise AI contract intelligence workspace for Consult America.",
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
