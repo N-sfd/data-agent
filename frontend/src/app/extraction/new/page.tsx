@@ -212,12 +212,17 @@ export default function NewExtractionPage() {
       return;
     }
 
-    const result = await universalExtract(
-      document.document_id,
-      instruction,
-    );
+    try {
+      const result = await universalExtract(
+        document.document_id,
+        instruction,
+        () => setWaking(true),
+      );
 
-    setUniversalResult(result);
+      setUniversalResult(result);
+    } finally {
+      setWaking(false);
+    }
   }
 
   async function handleAnalyzeContract() {
@@ -233,6 +238,7 @@ export default function NewExtractionPage() {
       const result = await analyzeContract(
         document.document_id,
         selectedModelId,
+        () => setWaking(true),
       );
 
       setContractAnalysis(result);
@@ -258,6 +264,7 @@ export default function NewExtractionPage() {
       );
     } finally {
       setAnalyzingContract(false);
+      setWaking(false);
     }
   }
 
@@ -358,6 +365,7 @@ export default function NewExtractionPage() {
             <AnalysisRequest
               disabled={!extraction || extracting}
               onAnalyze={handleAnalyze}
+              waking={waking}
             />
           )}
 
@@ -373,7 +381,9 @@ export default function NewExtractionPage() {
 
               {analyzingContract && (
                 <div className="mt-4 rounded-xl bg-surface-soft px-3.5 py-2.5 text-xs text-text-secondary">
-                  {ANALYZE_STAGE_MESSAGES[analyzeStageIndex]}
+                  {waking
+                    ? "Waking processing service... this can take up to a minute after a deploy."
+                    : ANALYZE_STAGE_MESSAGES[analyzeStageIndex]}
                 </div>
               )}
 

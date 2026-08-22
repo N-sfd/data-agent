@@ -298,6 +298,7 @@ export async function analyzeFinancialDocument(
 export async function analyzeContract(
   documentId: string,
   extractionModelId?: number | null,
+  onRetry?: (attempt: number, total: number) => void,
 ): Promise<ContractAnalysisResult> {
   const response = await apiFetch(
     `/api/documents/${documentId}/analyze-contract`,
@@ -310,6 +311,7 @@ export async function analyzeContract(
         extraction_model_id: extractionModelId ?? null,
       }),
     },
+    onRetry,
   );
 
   const result = await response.json();
@@ -833,6 +835,7 @@ export async function getSignatures(
 export async function universalExtract(
   documentId: string,
   instruction: string,
+  onRetry?: (attempt: number, total: number) => void,
 ): Promise<UniversalExtractionResult> {
   const response = await apiFetch(
     `/api/documents/${documentId}/extract`,
@@ -849,6 +852,7 @@ export async function universalExtract(
         use_ai_fallback: true,
       }),
     },
+    onRetry,
   );
 
   const result = await response.json();

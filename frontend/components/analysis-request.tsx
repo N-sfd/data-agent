@@ -5,6 +5,7 @@ import { useState } from "react";
 
 interface AnalysisRequestProps {
   disabled?: boolean;
+  waking?: boolean;
 
   onAnalyze: (
     instruction: string
@@ -22,6 +23,7 @@ const quickPrompts = [
 
 export default function AnalysisRequest({
   disabled = false,
+  waking = false,
   onAnalyze,
 }: AnalysisRequestProps) {
   const [instruction, setInstruction] = useState("");
@@ -122,6 +124,13 @@ export default function AnalysisRequest({
           <ArrowRight className="h-4 w-4" />
         )}
       </button>
+
+      {analyzing && waking && (
+        <div className="mt-4 rounded-xl bg-slate-50 p-3 text-sm text-slate-600">
+          Waking processing service... this can take up to a minute
+          after a deploy.
+        </div>
+      )}
 
       {error && (
         <div className="mt-4 rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">
