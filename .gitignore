@@ -28,6 +28,7 @@ frontend/next-env.d.ts
 .idea/
 .DS_Store
 Thumbs.db
+.vercel
 
 # Scratch/debug artifacts
 backend/body.json
