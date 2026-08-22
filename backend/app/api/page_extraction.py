@@ -6,6 +6,7 @@ from fastapi import (
     Depends,
     HTTPException,
 )
+from fastapi.concurrency import run_in_threadpool
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -63,7 +64,12 @@ async def extract_document_pages(
     )
 
     try:
-        result = process_document_pages(
+        # PDF rendering and OCR are CPU-bound and can take a long time for
+        # documents with many pages. Running them inline would block the
+        # single event loop for the whole duration, starving /health and
+        # risking a host restarting the process mid-extraction.
+        result = await run_in_threadpool(
+            process_document_pages,
             database=database,
             document_record=document,
             file_path=file_path,

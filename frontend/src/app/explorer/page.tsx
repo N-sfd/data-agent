@@ -122,8 +122,8 @@ function ExplorerContent() {
           Extracting contract fields across repository...
         </div>
       ) : aggregation ? (
-        <div className="mt-12 grid gap-8 lg:grid-cols-[340px_1fr]">
-          <div className="editorial-card p-8">
+        <div className="mt-12 grid min-w-0 gap-8 lg:grid-cols-[340px_1fr]">
+          <div className="editorial-card min-w-0 p-8">
             <h2 className="text-lg font-medium text-foreground">
               {aggregation.field_label}
             </h2>
@@ -149,7 +149,7 @@ function ExplorerContent() {
                     ].join(" ")}
                   >
                     <div className="flex items-center justify-between gap-3">
-                      <span className="truncate font-medium text-foreground">
+                      <span className="min-w-0 truncate font-medium text-foreground">
                         {bucket.value}
                       </span>
                       <span className="shrink-0 text-sm text-text-secondary">
@@ -168,7 +168,7 @@ function ExplorerContent() {
             </div>
           </div>
 
-          <div className="editorial-card overflow-hidden">
+          <div className="editorial-card min-w-0 overflow-hidden">
             {selectedValue ? (
               <>
                 <div className="border-b border-border px-8 py-6">

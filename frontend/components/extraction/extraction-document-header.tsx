@@ -24,17 +24,17 @@ export default function ExtractionDocumentHeader({
 
   return (
     <div className="extraction-doc-header">
-      <div className="extraction-workspace-inner flex flex-wrap items-center justify-between gap-4">
+      <div className="extraction-bar-inner flex flex-col items-stretch gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="min-w-0">
           <h2 className="truncate text-lg font-medium text-text-dark">
             {document.original_filename}
           </h2>
-          <p className="mt-1 text-sm text-text-secondary">
+          <p className="mt-1 truncate text-sm text-text-secondary">
             {document.page_count} pages · Extraction complete
             {avg !== null && ` · ${avg}% avg. confidence`}
           </p>
         </div>
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="flex items-center gap-2">
           <Link href="/extraction/new" className="btn-secondary py-2 text-xs">
             <Plus className="h-3.5 w-3.5" />
             New Extraction

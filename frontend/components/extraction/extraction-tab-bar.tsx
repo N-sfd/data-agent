@@ -31,7 +31,7 @@ export default function ExtractionTabBar({
 
   return (
     <div className="extraction-tab-bar">
-      <div className="extraction-workspace-inner flex gap-1 overflow-x-auto">
+      <div className="extraction-bar-inner flex gap-1 overflow-x-auto">
         {tabs.map((tab) => (
           <button
             key={tab}
