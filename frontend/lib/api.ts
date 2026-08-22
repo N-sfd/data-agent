@@ -30,6 +30,7 @@ const COLD_START_RETRY_DELAYS_MS = [2000, 4000, 8000, 16000, 30000];
 export async function apiFetch(
   path: string,
   init?: RequestInit,
+  onRetry?: (attempt: number, total: number) => void,
 ): Promise<Response> {
   for (
     let attempt = 0;
@@ -51,6 +52,8 @@ export async function apiFetch(
 
         throw error;
       }
+
+      onRetry?.(attempt + 1, COLD_START_RETRY_DELAYS_MS.length);
 
       await sleep(COLD_START_RETRY_DELAYS_MS[attempt]);
     }

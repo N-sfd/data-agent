@@ -122,6 +122,19 @@ export interface GlobalAuditLogResponse {
   total: number;
 }
 
+export interface ExtractionProgress {
+  document_id: string;
+  status: string;
+
+  page_current: number;
+  page_total: number;
+  percent: number;
+
+  native_pages: number;
+  ocr_pages: number;
+  ocr_completed_pages: number;
+}
+
 export interface ExtractionSummary {
   document_id: string;
   status: string;

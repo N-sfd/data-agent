@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 
 import { Sparkles } from "lucide-react";
@@ -21,6 +21,7 @@ import {
   confirmRelationship,
   extractDocumentPages,
   getDocumentPages,
+  getExtractionProgress,
   getStructuredOutput,
   universalExtract,
 } from "@/lib/documents";
@@ -29,12 +30,18 @@ import type {
   ContractAnalysisResult,
   DocumentPage,
   ExtractionModel,
+  ExtractionProgress,
   ExtractionSummary,
   RelationshipAction,
   StructuredContractOutput,
   UniversalExtractionResult,
   UploadedDocument,
 } from "@/types/document";
+
+const ANALYZE_STAGE_MESSAGES = [
+  "Classifying document... Identifying document type, contract side, language, and status.",
+  "Detecting related agreements... Checking parent and child contract relationships.",
+];
 
 export default function NewExtractionPage() {
   const [document, setDocument] =
@@ -46,6 +53,16 @@ export default function NewExtractionPage() {
   const [pages, setPages] = useState<DocumentPage[]>([]);
 
   const [extracting, setExtracting] = useState(false);
+
+  const [progress, setProgress] =
+    useState<ExtractionProgress | null>(null);
+  const [elapsedSeconds, setElapsedSeconds] = useState(0);
+  const [waking, setWaking] = useState(false);
+
+  const [analyzeStageIndex, setAnalyzeStageIndex] = useState(0);
+  const [wasAnalyzing, setWasAnalyzing] = useState(false);
+
+  const resultsWorkspaceRef = useRef<HTMLDivElement | null>(null);
 
   const [universalResult, setUniversalResult] =
     useState<UniversalExtractionResult | null>(null);
@@ -90,6 +107,64 @@ export default function NewExtractionPage() {
     };
   }, []);
 
+  useEffect(() => {
+    if (!extracting || !document) {
+      return;
+    }
+
+    let active = true;
+    const documentId = document.document_id;
+    const startedAt = Date.now();
+
+    async function poll() {
+      try {
+        const result = await getExtractionProgress(documentId);
+
+        if (active) {
+          setProgress(result);
+        }
+      } catch {
+        // Progress polling is best-effort — keep showing the last
+        // known state rather than surfacing an error for it.
+      }
+    }
+
+    poll();
+    const progressInterval = setInterval(poll, 1500);
+
+    const elapsedInterval = setInterval(() => {
+      setElapsedSeconds(Math.floor((Date.now() - startedAt) / 1000));
+    }, 1000);
+
+    return () => {
+      active = false;
+      clearInterval(progressInterval);
+      clearInterval(elapsedInterval);
+    };
+  }, [extracting, document]);
+
+  if (analyzingContract !== wasAnalyzing) {
+    setWasAnalyzing(analyzingContract);
+
+    if (!analyzingContract) {
+      setAnalyzeStageIndex(0);
+    }
+  }
+
+  useEffect(() => {
+    if (!analyzingContract) {
+      return;
+    }
+
+    const interval = setInterval(() => {
+      setAnalyzeStageIndex(
+        (index) => (index + 1) % ANALYZE_STAGE_MESSAGES.length,
+      );
+    }, 3000);
+
+    return () => clearInterval(interval);
+  }, [analyzingContract]);
+
   async function handleUploadComplete(
     uploadedDocument: UploadedDocument,
   ) {
@@ -101,13 +176,18 @@ export default function NewExtractionPage() {
     setContractAnalysis(null);
     setContractAnalysisError("");
     setStructuredOutput(null);
+    setProgress(null);
+    setElapsedSeconds(0);
+    setWaking(false);
     setExtracting(true);
 
     try {
       const extractionResult = await extractDocumentPages(
         uploadedDocument.document_id,
+        () => setWaking(true),
       );
 
+      setWaking(false);
       setExtraction(extractionResult);
 
       const extractedPages = await getDocumentPages(
@@ -123,6 +203,7 @@ export default function NewExtractionPage() {
       );
     } finally {
       setExtracting(false);
+      setWaking(false);
     }
   }
 
@@ -256,6 +337,9 @@ export default function NewExtractionPage() {
                 extraction={extraction}
                 extracting={extracting}
                 contractAnalyzed={Boolean(contractAnalysis)}
+                progress={progress}
+                elapsedSeconds={elapsedSeconds}
+                waking={waking}
               />
 
               {document && (
@@ -278,7 +362,7 @@ export default function NewExtractionPage() {
           )}
 
           {document && extraction && !contractAnalysis && (
-            <div className="editorial-card p-8">
+            <div className="editorial-card animate-fade-in p-8">
               <p className="text-base font-medium text-foreground">
                 Contract Intelligence
               </p>
@@ -286,6 +370,12 @@ export default function NewExtractionPage() {
                 Classify this document, extract its structured metadata, and
                 detect any parent contract.
               </p>
+
+              {analyzingContract && (
+                <div className="mt-4 rounded-xl bg-surface-soft px-3.5 py-2.5 text-xs text-text-secondary">
+                  {ANALYZE_STAGE_MESSAGES[analyzeStageIndex]}
+                </div>
+              )}
 
               {extractionModels.length > 0 && (
                 <label className="mt-5 block text-xs text-text-secondary">
@@ -317,7 +407,11 @@ export default function NewExtractionPage() {
                 disabled={analyzingContract}
                 className="btn-primary mt-5 disabled:cursor-not-allowed disabled:opacity-60"
               >
-                <Sparkles className="h-4 w-4" />
+                {analyzingContract ? (
+                  <span className="h-2 w-2 animate-pulse rounded-full bg-white" />
+                ) : (
+                  <Sparkles className="h-4 w-4" />
+                )}
                 {analyzingContract ? "Analyzing..." : "Run Extraction"}
               </button>
 
@@ -329,32 +423,87 @@ export default function NewExtractionPage() {
             </div>
           )}
 
+          {document && contractAnalysis && extraction && (
+            <div className="editorial-card animate-fade-in p-8">
+              <p className="text-base font-medium text-foreground">
+                Ready for review
+              </p>
+
+              <ul className="mt-3 space-y-1 text-sm text-text-secondary">
+                <li>{extraction.pages_processed} pages processed</li>
+                <li>Document classified</li>
+                <li>Relationships analyzed</li>
+                <li>
+                  {contractAnalysis.metadata_fields.length} metadata fields
+                  extracted
+                </li>
+              </ul>
+
+              <button
+                type="button"
+                onClick={() =>
+                  resultsWorkspaceRef.current?.scrollIntoView({
+                    behavior: "smooth",
+                  })
+                }
+                className="btn-primary mt-5"
+              >
+                Review Extraction
+              </button>
+            </div>
+          )}
+
           {workflowError && (
-            <div className="rounded-xl border border-danger/20 bg-danger/5 p-3 text-sm text-danger">
-              {workflowError}
+            <div className="rounded-xl border border-danger/20 bg-danger/5 p-4">
+              <p className="text-sm font-medium text-danger">
+                Extraction could not be completed
+              </p>
+              <p className="mt-1 text-sm leading-6 text-danger/80">
+                The document was uploaded successfully, but page extraction
+                failed.
+              </p>
+
+              <div className="mt-3 flex flex-wrap items-center gap-3">
+                <button
+                  type="button"
+                  onClick={() => document && handleUploadComplete(document)}
+                  className="btn-secondary text-sm"
+                >
+                  Retry Extraction
+                </button>
+
+                <details className="text-xs text-danger/80">
+                  <summary className="cursor-pointer select-none">
+                    View Details
+                  </summary>
+                  <p className="mt-1">{workflowError}</p>
+                </details>
+              </div>
             </div>
           )}
         </section>
       </div>
 
       {contractAnalysis && document && (
-        <ExtractionResultsWorkspace
-          document={document}
-          analysis={contractAnalysis}
-          pages={pages}
-          structuredOutput={structuredOutput}
-          universalResult={universalResult}
-          extractingPages={extracting}
-          pagesError={workflowError}
-          onRetryPages={() => handleUploadComplete(document)}
-          relationshipBusy={relationshipBusy}
-          onRelationshipAction={handleRelationshipAction}
-          onRelationshipChange={(relationship) =>
-            setContractAnalysis((current) =>
-              current ? { ...current, relationship } : current,
-            )
-          }
-        />
+        <div ref={resultsWorkspaceRef}>
+          <ExtractionResultsWorkspace
+            document={document}
+            analysis={contractAnalysis}
+            pages={pages}
+            structuredOutput={structuredOutput}
+            universalResult={universalResult}
+            extractingPages={extracting}
+            pagesError={workflowError}
+            onRetryPages={() => handleUploadComplete(document)}
+            relationshipBusy={relationshipBusy}
+            onRelationshipAction={handleRelationshipAction}
+            onRelationshipChange={(relationship) =>
+              setContractAnalysis((current) =>
+                current ? { ...current, relationship } : current,
+              )
+            }
+          />
+        </div>
       )}
       </ContentSection>
     </>

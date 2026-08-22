@@ -1,12 +1,20 @@
-import { Check, Circle } from "lucide-react";
+import { Check } from "lucide-react";
 
-import type { ExtractionSummary, UploadedDocument } from "@/types/document";
+import ExtractionLiveProgress from "@/components/extraction-live-progress";
+import type {
+  ExtractionProgress,
+  ExtractionSummary,
+  UploadedDocument,
+} from "@/types/document";
 
 interface ExtractionStatusPanelProps {
   document: UploadedDocument | null;
   extraction: ExtractionSummary | null;
   extracting: boolean;
   contractAnalyzed: boolean;
+  progress?: ExtractionProgress | null;
+  elapsedSeconds?: number;
+  waking?: boolean;
 }
 
 const WORKFLOW_STEPS = [
@@ -22,6 +30,9 @@ export default function ExtractionStatusPanel({
   extraction,
   extracting,
   contractAnalyzed,
+  progress = null,
+  elapsedSeconds = 0,
+  waking = false,
 }: ExtractionStatusPanelProps) {
   const currentStep = !document
     ? 0
@@ -36,7 +47,7 @@ export default function ExtractionStatusPanel({
   const statusTitle = !document
     ? "Waiting for document"
     : extracting
-      ? "Extracting page text..."
+      ? null
       : extraction && contractAnalyzed
         ? "Extraction complete"
         : extraction
@@ -46,7 +57,7 @@ export default function ExtractionStatusPanel({
   const statusDetail = !document
     ? "Upload a contract to begin extraction."
     : extracting
-      ? "Running OCR and page-level text extraction."
+      ? null
       : extraction && contractAnalyzed
         ? "Open the review workspace to validate extracted fields."
         : extraction
@@ -56,23 +67,43 @@ export default function ExtractionStatusPanel({
   return (
     <div>
       <p className="text-base font-medium text-foreground">Extraction Status</p>
-      <p className="mt-1 text-sm font-medium text-foreground">{statusTitle}</p>
-      <p className="mt-1 text-sm leading-6 text-text-secondary">
-        {statusDetail}
-      </p>
+
+      {statusTitle && (
+        <p className="mt-1 text-sm font-medium text-foreground">
+          {statusTitle}
+        </p>
+      )}
+
+      {statusDetail && (
+        <p className="mt-1 text-sm leading-6 text-text-secondary">
+          {statusDetail}
+        </p>
+      )}
+
+      {extracting && (
+        <ExtractionLiveProgress
+          progress={progress}
+          elapsedSeconds={elapsedSeconds}
+          waking={waking}
+        />
+      )}
 
       <ol className="mt-8 space-y-3">
         {WORKFLOW_STEPS.map((step, index) => {
           const done = index < currentStep;
           const active = index === currentStep;
+          const isExtractStep = step.id === "extract";
+          const hasPageTotal = Boolean(
+            progress && progress.page_total > 0,
+          );
 
           return (
-            <li key={step.id} className="flex items-center gap-3">
+            <li key={step.id} className="flex items-start gap-3">
               <span
                 className={[
-                  "flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-xs font-medium",
+                  "mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-xs font-medium",
                   done
-                    ? "bg-primary-soft text-primary"
+                    ? "bg-success/10 text-success"
                     : active
                       ? "bg-primary text-white"
                       : "bg-surface-soft text-text-muted",
@@ -80,23 +111,32 @@ export default function ExtractionStatusPanel({
               >
                 {done ? (
                   <Check className="h-3.5 w-3.5" strokeWidth={2} />
+                ) : active ? (
+                  <span className="h-2 w-2 animate-pulse rounded-full bg-white" />
                 ) : (
-                  <span>{index + 1}</span>
+                  <span className="h-1.5 w-1.5 rounded-full bg-text-muted/60" />
                 )}
               </span>
-              <span
-                className={[
-                  "text-sm",
-                  done || active
-                    ? "font-medium text-foreground"
-                    : "text-text-muted",
-                ].join(" ")}
-              >
-                {step.label}
-              </span>
-              {active && !done && (
-                <Circle className="ml-auto h-2 w-2 fill-primary text-primary animate-pulse" />
-              )}
+
+              <div>
+                <span
+                  className={[
+                    "text-sm",
+                    done || active
+                      ? "font-medium text-foreground"
+                      : "text-text-muted",
+                  ].join(" ")}
+                >
+                  {step.label}
+                </span>
+
+                {active && isExtractStep && extracting && hasPageTotal && (
+                  <p className="mt-0.5 text-xs text-text-secondary">
+                    Processing page {progress!.page_current} of{" "}
+                    {progress!.page_total}
+                  </p>
+                )}
+              </div>
             </li>
           );
         })}

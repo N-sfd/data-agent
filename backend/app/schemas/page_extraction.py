@@ -78,6 +78,19 @@ class DocumentExtractionRequest(BaseModel):
     force_reprocess: bool = False
 
 
+class DocumentExtractionProgress(BaseModel):
+    document_id: str
+    status: str
+
+    page_current: int
+    page_total: int
+    percent: int
+
+    native_pages: int
+    ocr_pages: int
+    ocr_completed_pages: int
+
+
 class DocumentExtractionSummary(BaseModel):
     document_id: str
     status: str

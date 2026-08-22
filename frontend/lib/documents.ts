@@ -16,6 +16,7 @@ import type {
   DocumentSearchResponse,
   DocumentSummary,
   DuplicateResolution,
+  ExtractionProgress,
   ExtractionSummary,
   FieldAuditEntry,
   FinancialAnalysisResult,
@@ -190,6 +191,7 @@ export async function resolveDuplicate(
 
 export async function extractDocumentPages(
   documentId: string,
+  onRetry?: (attempt: number, total: number) => void,
 ): Promise<ExtractionSummary> {
   const response = await apiFetch(
     `/api/documents/${documentId}/extract-pages`,
@@ -205,6 +207,7 @@ export async function extractDocumentPages(
         force_reprocess: false,
       }),
     },
+    onRetry,
   );
 
   const result = await response.json();
@@ -214,6 +217,26 @@ export async function extractDocumentPages(
       typeof result.detail === "string"
         ? result.detail
         : "Page extraction failed.",
+    );
+  }
+
+  return result;
+}
+
+export async function getExtractionProgress(
+  documentId: string,
+): Promise<ExtractionProgress> {
+  const response = await apiFetch(
+    `/api/documents/${documentId}/progress`,
+  );
+
+  const result = await response.json();
+
+  if (!response.ok) {
+    throw new Error(
+      typeof result.detail === "string"
+        ? result.detail
+        : "Unable to load extraction progress.",
     );
   }
 

@@ -7,7 +7,7 @@ from fastapi import (
     HTTPException,
 )
 from fastapi.concurrency import run_in_threadpool
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
@@ -16,6 +16,7 @@ from app.models.document import Document
 from app.models.document_page import DocumentPage
 from app.models.page_text_block import PageTextBlock
 from app.schemas.page_extraction import (
+    DocumentExtractionProgress,
     DocumentExtractionRequest,
     DocumentExtractionSummary,
     PageRenderResponse,
@@ -87,6 +88,77 @@ async def extract_document_pages(
             status_code=422,
             detail=str(exc),
         ) from exc
+
+
+@router.get(
+    "/{document_id}/progress",
+    response_model=DocumentExtractionProgress,
+)
+async def get_document_extraction_progress(
+    document_id: str,
+    database: Session = Depends(get_database),
+) -> DocumentExtractionProgress:
+    document = database.get(Document, document_id)
+
+    if document is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Document not found.",
+        )
+
+    # Pages are committed one at a time inside process_document_pages
+    # (which runs in a threadpool), so counting rows here reflects
+    # live progress even while that request is still in flight.
+    page_current = database.scalar(
+        select(func.count())
+        .select_from(DocumentPage)
+        .where(DocumentPage.document_id == document_id)
+    ) or 0
+
+    native_pages = database.scalar(
+        select(func.count())
+        .select_from(DocumentPage)
+        .where(
+            DocumentPage.document_id == document_id,
+            DocumentPage.requires_ocr.is_(False),
+        )
+    ) or 0
+
+    ocr_pages = database.scalar(
+        select(func.count())
+        .select_from(DocumentPage)
+        .where(
+            DocumentPage.document_id == document_id,
+            DocumentPage.requires_ocr.is_(True),
+        )
+    ) or 0
+
+    ocr_completed_pages = database.scalar(
+        select(func.count())
+        .select_from(DocumentPage)
+        .where(
+            DocumentPage.document_id == document_id,
+            DocumentPage.ocr_succeeded.is_(True),
+        )
+    ) or 0
+
+    page_total = document.page_count
+    percent = (
+        round(page_current / page_total * 100)
+        if page_total
+        else 0
+    )
+
+    return DocumentExtractionProgress(
+        document_id=document_id,
+        status=document.processing_status,
+        page_current=page_current,
+        page_total=page_total,
+        percent=min(percent, 100),
+        native_pages=native_pages,
+        ocr_pages=ocr_pages,
+        ocr_completed_pages=ocr_completed_pages,
+    )
 
 
 @router.get(

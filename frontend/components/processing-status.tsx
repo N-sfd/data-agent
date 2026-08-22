@@ -32,31 +32,53 @@ export default function ProcessingStatus({
           description={`${document.page_count} page${document.page_count === 1 ? "" : "s"} validated successfully.`}
         />
 
-        <StatusItem
-          complete={extractionComplete}
-          active={extracting}
-          title="Page-level extraction"
-          description={
-            extractionComplete
-              ? `${extraction?.pages_processed} pages processed.`
-              : "Extract native text and preserve page evidence."
-          }
-        />
+        {extracting && !extractionComplete ? (
+          <>
+            <SkeletonStatusRow />
+            <SkeletonStatusRow />
+          </>
+        ) : (
+          <>
+            <StatusItem
+              complete={extractionComplete}
+              active={extracting}
+              title="Page-level extraction"
+              description={
+                extractionComplete
+                  ? `${extraction?.pages_processed} pages processed.`
+                  : "Extract native text and preserve page evidence."
+              }
+            />
 
-        <StatusItem
-          complete={
-            extractionComplete &&
-            (extraction?.ocr_required_pages ?? 0) ===
-              (extraction?.ocr_completed_pages ?? 0)
-          }
-          active={extracting && !extractionComplete}
-          title="OCR detection"
-          description={
-            extractionComplete
-              ? `${extraction?.ocr_required_pages ?? 0} pages required OCR.`
-              : "Detect scanned and image-based pages."
-          }
-        />
+            <StatusItem
+              complete={
+                extractionComplete &&
+                (extraction?.ocr_required_pages ?? 0) ===
+                  (extraction?.ocr_completed_pages ?? 0)
+              }
+              active={extracting && !extractionComplete}
+              title="OCR detection"
+              description={
+                extractionComplete
+                  ? `${extraction?.ocr_required_pages ?? 0} pages required OCR.`
+                  : "Detect scanned and image-based pages."
+              }
+            />
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function SkeletonStatusRow() {
+  return (
+    <div className="flex gap-3">
+      <div className="mt-0.5 h-5 w-5 shrink-0 rounded-full skeleton" />
+
+      <div className="flex-1">
+        <div className="skeleton h-3.5 w-40 rounded" />
+        <div className="skeleton mt-2 h-3 w-56 rounded" />
       </div>
     </div>
   );
