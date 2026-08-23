@@ -135,6 +135,40 @@ export interface ExtractionProgress {
   ocr_completed_pages: number;
 }
 
+export interface DetectedTable {
+  key: string;
+  label: string;
+  pages: number[];
+  confidence: number;
+}
+
+export interface DetectedField {
+  key: string;
+  label: string;
+  pages: number[];
+}
+
+export interface ContentStats {
+  tables: number;
+  dates: number;
+  currency_values: number;
+  organizations: number;
+}
+
+export interface StructureDetectionResult {
+  document_id: string;
+
+  document_family: string;
+  document_family_label: string;
+
+  detected_fields: DetectedField[];
+  detected_tables: DetectedTable[];
+  detected_contacts: string[];
+  detected_obligations: string[];
+
+  content_stats: ContentStats;
+}
+
 export interface ExtractionSummary {
   document_id: string;
   status: string;

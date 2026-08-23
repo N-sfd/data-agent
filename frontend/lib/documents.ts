@@ -28,6 +28,7 @@ import type {
   ReviewAction,
   ReviewQueueEntry,
   SignatureExtractionResult,
+  StructureDetectionResult,
   StructuredContractOutput,
   TableExtractionResult,
   UniversalExtractionResult,
@@ -142,6 +143,17 @@ export async function getDocumentPages(
   documentId: string,
 ): Promise<DocumentPage[]> {
   return apiFetch(`/api/documents/${documentId}/pages`);
+}
+
+export async function detectStructures(
+  documentId: string,
+  onRetry?: (attempt: number, total: number) => void,
+): Promise<StructureDetectionResult> {
+  return apiFetch(
+    `/api/documents/${documentId}/detect-structures`,
+    { method: "POST" },
+    onRetry,
+  );
 }
 
 export async function analyzeFinancialDocument(

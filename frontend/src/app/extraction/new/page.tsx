@@ -19,6 +19,7 @@ import ProcessingStatus from "@/components/processing-status";
 import {
   analyzeContract,
   confirmRelationship,
+  detectStructures,
   extractDocumentPages,
   getDocumentPages,
   getExtractionProgress,
@@ -33,6 +34,7 @@ import type {
   ExtractionProgress,
   ExtractionSummary,
   RelationshipAction,
+  StructureDetectionResult,
   StructuredContractOutput,
   UniversalExtractionResult,
   UploadedDocument,
@@ -83,6 +85,9 @@ export default function NewExtractionPage() {
 
   const [structuredOutput, setStructuredOutput] =
     useState<StructuredContractOutput | null>(null);
+
+  const [structureDetection, setStructureDetection] =
+    useState<StructureDetectionResult | null>(null);
 
   const [extractionModels, setExtractionModels] = useState<
     ExtractionModel[]
@@ -176,6 +181,7 @@ export default function NewExtractionPage() {
     setContractAnalysis(null);
     setContractAnalysisError("");
     setStructuredOutput(null);
+    setStructureDetection(null);
     setProgress(null);
     setElapsedSeconds(0);
     setWaking(false);
@@ -195,6 +201,18 @@ export default function NewExtractionPage() {
       );
 
       setPages(extractedPages);
+
+      try {
+        const detection = await detectStructures(
+          uploadedDocument.document_id,
+        );
+
+        setStructureDetection(detection);
+      } catch {
+        // Structure detection is a convenience layer on top of a
+        // successful extraction — if it fails, the target picker
+        // just falls back to the generic template library.
+      }
     } catch (error) {
       setWorkflowError(
         error instanceof Error
@@ -207,9 +225,11 @@ export default function NewExtractionPage() {
     }
   }
 
-  async function handleAnalyze(instruction: string) {
+  async function handleAnalyze(
+    instruction: string,
+  ): Promise<UniversalExtractionResult> {
     if (!document) {
-      return;
+      throw new Error("Upload a document first.");
     }
 
     try {
@@ -220,6 +240,8 @@ export default function NewExtractionPage() {
       );
 
       setUniversalResult(result);
+
+      return result;
     } finally {
       setWaking(false);
     }
@@ -366,6 +388,7 @@ export default function NewExtractionPage() {
               disabled={!extraction || extracting}
               onAnalyze={handleAnalyze}
               waking={waking}
+              structureDetection={structureDetection}
             />
           )}
 
