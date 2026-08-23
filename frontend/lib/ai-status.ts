@@ -8,17 +8,16 @@ export interface AiStatus {
   model: string | null;
 }
 
+interface HealthResponse {
+  ai?: Record<string, unknown>;
+}
+
 export async function getAiStatus(): Promise<AiStatus | null> {
   try {
-    const response = await apiFetch("/health", {
+    const payload = await apiFetch<HealthResponse>("/health", {
       cache: "no-store",
     });
 
-    if (!response.ok) {
-      return null;
-    }
-
-    const payload = await response.json();
     const ai = payload.ai;
 
     if (!ai || typeof ai !== "object") {

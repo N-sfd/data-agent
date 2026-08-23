@@ -101,23 +101,15 @@ export default function DocumentUploader({
 
       setProgress(35);
 
-      const response = await apiFetch("/api/documents/upload", {
-        method: "POST",
-        body: formData,
-      });
+      const result = await apiFetch<UploadedDocument>(
+        "/api/documents/upload",
+        {
+          method: "POST",
+          body: formData,
+        },
+      );
 
       setProgress(80);
-
-      const result = await response.json();
-
-      if (!response.ok) {
-        const detail =
-          typeof result.detail === "string"
-            ? result.detail
-            : result.detail?.message ?? "Upload failed.";
-
-        throw new Error(detail);
-      }
 
       if (result.duplicate && result.existing_document) {
         setPendingDuplicate({

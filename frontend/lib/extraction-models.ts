@@ -9,65 +9,28 @@ import type {
 export async function listExtractionModels(): Promise<
   ExtractionModel[]
 > {
-  const response = await apiFetch("/api/extraction-models");
-
-  const result = await response.json();
-
-  if (!response.ok) {
-    throw new Error(
-      typeof result.detail === "string"
-        ? result.detail
-        : "Unable to retrieve extraction models.",
-    );
-  }
-
-  return result;
+  return apiFetch("/api/extraction-models");
 }
 
 export async function createExtractionModel(
   name: string,
   description: string,
 ): Promise<ExtractionModel> {
-  const response = await apiFetch("/api/extraction-models", {
+  return apiFetch("/api/extraction-models", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
     },
     body: JSON.stringify({ name, description }),
   });
-
-  const result = await response.json();
-
-  if (!response.ok) {
-    throw new Error(
-      typeof result.detail === "string"
-        ? result.detail
-        : "Unable to create the extraction model.",
-    );
-  }
-
-  return result;
 }
 
 export async function deleteExtractionModel(
   modelId: number,
 ): Promise<void> {
-  const response = await apiFetch(
-    `/api/extraction-models/${modelId}`,
-    {
-      method: "DELETE",
-    },
-  );
-
-  if (!response.ok) {
-    const result = await response.json().catch(() => null);
-
-    throw new Error(
-      typeof result?.detail === "string"
-        ? result.detail
-        : "Unable to delete the extraction model.",
-    );
-  }
+  await apiFetch(`/api/extraction-models/${modelId}`, {
+    method: "DELETE",
+  });
 }
 
 export async function addExtractionField(
@@ -76,56 +39,29 @@ export async function addExtractionField(
   description: string,
   dataType: ExtractionFieldDataType,
 ): Promise<ExtractionModel> {
-  const response = await apiFetch(
-    `/api/extraction-models/${modelId}/fields`,
-    {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        field_name: fieldName,
-        description,
-        data_type: dataType,
-      }),
+  return apiFetch(`/api/extraction-models/${modelId}/fields`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
     },
-  );
-
-  const result = await response.json();
-
-  if (!response.ok) {
-    throw new Error(
-      typeof result.detail === "string"
-        ? result.detail
-        : "Unable to add the field.",
-    );
-  }
-
-  return result;
+    body: JSON.stringify({
+      field_name: fieldName,
+      description,
+      data_type: dataType,
+    }),
+  });
 }
 
 export async function deleteExtractionField(
   modelId: number,
   fieldId: number,
 ): Promise<ExtractionModel> {
-  const response = await apiFetch(
+  return apiFetch(
     `/api/extraction-models/${modelId}/fields/${fieldId}`,
     {
       method: "DELETE",
     },
   );
-
-  const result = await response.json();
-
-  if (!response.ok) {
-    throw new Error(
-      typeof result.detail === "string"
-        ? result.detail
-        : "Unable to delete the field.",
-    );
-  }
-
-  return result;
 }
 
 export type { ExtractionField, ExtractionModel };

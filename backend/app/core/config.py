@@ -81,6 +81,17 @@ class Settings(BaseSettings):
             if origin.strip()
         ]
 
+        # Known frontend origins for this project. Kept here (not
+        # just in the Render dashboard's FRONTEND_URL) so CORS still
+        # works out of the box if the service is ever recreated.
+        for origin in (
+            "http://localhost:3000",
+            "https://data-agent-ca.vercel.app",
+            "https://frontend-ivory-nine-22.vercel.app",
+        ):
+            if origin not in origins:
+                origins.append(origin)
+
         if self.debug:
             for origin in (
                 "http://localhost:3000",

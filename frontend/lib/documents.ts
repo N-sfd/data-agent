@@ -37,37 +37,11 @@ import type {
 export async function listDocuments(
   limit = 10,
 ): Promise<DocumentSummary[]> {
-  const response = await apiFetch(
-    `/api/documents?limit=${limit}`,
-  );
-
-  const result = await response.json();
-
-  if (!response.ok) {
-    throw new Error(
-      typeof result.detail === "string"
-        ? result.detail
-        : "Unable to retrieve documents.",
-    );
-  }
-
-  return result;
+  return apiFetch(`/api/documents?limit=${limit}`);
 }
 
 export async function getDashboardStats(): Promise<DashboardStats> {
-  const response = await apiFetch("/api/dashboard/stats");
-
-  const result = await response.json();
-
-  if (!response.ok) {
-    throw new Error(
-      typeof result.detail === "string"
-        ? result.detail
-        : "Unable to retrieve dashboard stats.",
-    );
-  }
-
-  return result;
+  return apiFetch("/api/dashboard/stats");
 }
 
 export interface DocumentSearchParams {
@@ -103,58 +77,20 @@ export async function searchDocuments(
   query.set("limit", String(params.limit ?? 25));
   query.set("offset", String(params.offset ?? 0));
 
-  const response = await apiFetch(
-    `/api/documents/search?${query.toString()}`,
-  );
-
-  const result = await response.json();
-
-  if (!response.ok) {
-    throw new Error(
-      typeof result.detail === "string"
-        ? result.detail
-        : "Unable to search documents.",
-    );
-  }
-
-  return result;
+  return apiFetch(`/api/documents/search?${query.toString()}`);
 }
 
 export async function getGlobalAuditLog(
   limit = 50,
   offset = 0,
 ): Promise<GlobalAuditLogResponse> {
-  const response = await apiFetch(
+  return apiFetch(
     `/api/documents/audit-log?limit=${limit}&offset=${offset}`,
   );
-
-  const result = await response.json();
-
-  if (!response.ok) {
-    throw new Error(
-      typeof result.detail === "string"
-        ? result.detail
-        : "Unable to retrieve the audit log.",
-    );
-  }
-
-  return result;
 }
 
 export async function getReviewQueue(): Promise<ReviewQueueEntry[]> {
-  const response = await apiFetch("/api/dashboard/review-queue");
-
-  const result = await response.json();
-
-  if (!response.ok) {
-    throw new Error(
-      typeof result.detail === "string"
-        ? result.detail
-        : "Unable to retrieve the review queue.",
-    );
-  }
-
-  return result;
+  return apiFetch("/api/dashboard/review-queue");
 }
 
 export async function resolveDuplicate(
@@ -162,38 +98,23 @@ export async function resolveDuplicate(
   action: DuplicateResolution,
   originalFilename?: string,
 ): Promise<UploadedDocument> {
-  const response = await apiFetch(
-    `/api/documents/${documentId}/resolve-duplicate`,
-    {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        action,
-        original_filename: originalFilename ?? null,
-      }),
+  return apiFetch(`/api/documents/${documentId}/resolve-duplicate`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
     },
-  );
-
-  const result = await response.json();
-
-  if (!response.ok) {
-    throw new Error(
-      typeof result.detail === "string"
-        ? result.detail
-        : "Unable to resolve the duplicate upload.",
-    );
-  }
-
-  return result;
+    body: JSON.stringify({
+      action,
+      original_filename: originalFilename ?? null,
+    }),
+  });
 }
 
 export async function extractDocumentPages(
   documentId: string,
   onRetry?: (attempt: number, total: number) => void,
 ): Promise<ExtractionSummary> {
-  const response = await apiFetch(
+  return apiFetch(
     `/api/documents/${documentId}/extract-pages`,
     {
       method: "POST",
@@ -209,90 +130,35 @@ export async function extractDocumentPages(
     },
     onRetry,
   );
-
-  const result = await response.json();
-
-  if (!response.ok) {
-    throw new Error(
-      typeof result.detail === "string"
-        ? result.detail
-        : "Page extraction failed.",
-    );
-  }
-
-  return result;
 }
 
 export async function getExtractionProgress(
   documentId: string,
 ): Promise<ExtractionProgress> {
-  const response = await apiFetch(
-    `/api/documents/${documentId}/progress`,
-  );
-
-  const result = await response.json();
-
-  if (!response.ok) {
-    throw new Error(
-      typeof result.detail === "string"
-        ? result.detail
-        : "Unable to load extraction progress.",
-    );
-  }
-
-  return result;
+  return apiFetch(`/api/documents/${documentId}/progress`);
 }
 
 export async function getDocumentPages(
   documentId: string,
 ): Promise<DocumentPage[]> {
-  const response = await apiFetch(
-    `/api/documents/${documentId}/pages`,
-  );
-
-  const result = await response.json();
-
-  if (!response.ok) {
-    throw new Error(
-      typeof result.detail === "string"
-        ? result.detail
-        : "Unable to retrieve extracted pages.",
-    );
-  }
-
-  return result;
+  return apiFetch(`/api/documents/${documentId}/pages`);
 }
 
 export async function analyzeFinancialDocument(
   documentId: string,
   instruction: string,
 ): Promise<FinancialAnalysisResult> {
-  const response = await apiFetch(
-    `/api/documents/${documentId}/analyze`,
-    {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        instruction,
-        page_start: null,
-        page_end: null,
-      }),
+  return apiFetch(`/api/documents/${documentId}/analyze`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
     },
-  );
-
-  const result = await response.json();
-
-  if (!response.ok) {
-    throw new Error(
-      typeof result.detail === "string"
-        ? result.detail
-        : "Financial analysis failed.",
-    );
-  }
-
-  return result;
+    body: JSON.stringify({
+      instruction,
+      page_start: null,
+      page_end: null,
+    }),
+  });
 }
 
 export async function analyzeContract(
@@ -300,7 +166,7 @@ export async function analyzeContract(
   extractionModelId?: number | null,
   onRetry?: (attempt: number, total: number) => void,
 ): Promise<ContractAnalysisResult> {
-  const response = await apiFetch(
+  return apiFetch(
     `/api/documents/${documentId}/analyze-contract`,
     {
       method: "POST",
@@ -313,18 +179,6 @@ export async function analyzeContract(
     },
     onRetry,
   );
-
-  const result = await response.json();
-
-  if (!response.ok) {
-    throw new Error(
-      typeof result.detail === "string"
-        ? result.detail
-        : "Contract analysis failed.",
-    );
-  }
-
-  return result;
 }
 
 export async function confirmRelationship(
@@ -332,28 +186,13 @@ export async function confirmRelationship(
   action: RelationshipAction,
   changedBy: string,
 ): Promise<ConfirmRelationshipResult> {
-  const response = await apiFetch(
-    `/api/documents/${documentId}/confirm-relationship`,
-    {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ action, changed_by: changedBy }),
+  return apiFetch(`/api/documents/${documentId}/confirm-relationship`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
     },
-  );
-
-  const result = await response.json();
-
-  if (!response.ok) {
-    throw new Error(
-      typeof result.detail === "string"
-        ? result.detail
-        : "Unable to resolve the relationship.",
-    );
-  }
-
-  return result;
+    body: JSON.stringify({ action, changed_by: changedBy }),
+  });
 }
 
 export async function assignRelationship(
@@ -362,255 +201,103 @@ export async function assignRelationship(
   changedBy: string,
   relationshipType = "amendment_of",
 ): Promise<DetectedRelationship> {
-  const response = await apiFetch(
-    `/api/documents/${documentId}/relationship`,
-    {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        parent_document_id: parentDocumentId,
-        relationship_type: relationshipType,
-        changed_by: changedBy,
-      }),
+  return apiFetch(`/api/documents/${documentId}/relationship`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
     },
-  );
-
-  const result = await response.json();
-
-  if (!response.ok) {
-    throw new Error(
-      typeof result.detail === "string"
-        ? result.detail
-        : "Unable to assign this relationship.",
-    );
-  }
-
-  return result;
+    body: JSON.stringify({
+      parent_document_id: parentDocumentId,
+      relationship_type: relationshipType,
+      changed_by: changedBy,
+    }),
+  });
 }
 
 export async function removeRelationship(
   documentId: string,
   changedBy: string,
 ): Promise<void> {
-  const response = await apiFetch(
-    `/api/documents/${documentId}/relationship`,
-    {
-      method: "DELETE",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ changed_by: changedBy }),
+  await apiFetch(`/api/documents/${documentId}/relationship`, {
+    method: "DELETE",
+    headers: {
+      "Content-Type": "application/json",
     },
-  );
-
-  if (!response.ok) {
-    const result = await response.json();
-    throw new Error(
-      typeof result.detail === "string"
-        ? result.detail
-        : "Unable to remove this relationship.",
-    );
-  }
+    body: JSON.stringify({ changed_by: changedBy }),
+  });
 }
 
 export async function updateClassification(
   documentId: string,
   update: ClassificationUpdate,
 ): Promise<ContractClassification> {
-  const response = await apiFetch(
-    `/api/documents/${documentId}/classification`,
-    {
-      method: "PATCH",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(update),
+  return apiFetch(`/api/documents/${documentId}/classification`, {
+    method: "PATCH",
+    headers: {
+      "Content-Type": "application/json",
     },
-  );
-
-  const result = await response.json();
-
-  if (!response.ok) {
-    throw new Error(
-      typeof result.detail === "string"
-        ? result.detail
-        : "Unable to update the classification.",
-    );
-  }
-
-  return result;
+    body: JSON.stringify(update),
+  });
 }
 
 export async function getClassificationHistory(
   documentId: string,
 ): Promise<ClassificationHistoryEntry[]> {
-  const response = await apiFetch(
-    `/api/documents/${documentId}/classification-history`,
-  );
-
-  const result = await response.json();
-
-  if (!response.ok) {
-    throw new Error(
-      typeof result.detail === "string"
-        ? result.detail
-        : "Unable to retrieve classification history.",
-    );
-  }
-
-  return result;
+  return apiFetch(`/api/documents/${documentId}/classification-history`);
 }
 
 export async function getDocumentHierarchy(): Promise<DocumentHierarchyResult> {
-  const response = await apiFetch("/api/documents/hierarchy");
-
-  const result = await response.json();
-
-  if (!response.ok) {
-    throw new Error(
-      typeof result.detail === "string"
-        ? result.detail
-        : "Unable to retrieve the contract hierarchy.",
-    );
-  }
-
-  return result;
+  return apiFetch("/api/documents/hierarchy");
 }
 
 export async function getChildRelationships(
   documentId: string,
 ): Promise<ChildRelationshipsResult> {
-  const response = await apiFetch(
-    `/api/documents/${documentId}/child-relationships`,
-  );
-
-  const result = await response.json();
-
-  if (!response.ok) {
-    throw new Error(
-      typeof result.detail === "string"
-        ? result.detail
-        : "Unable to retrieve contract relationships.",
-    );
-  }
-
-  return result;
+  return apiFetch(`/api/documents/${documentId}/child-relationships`);
 }
 
 export async function approveDocument(
   documentId: string,
   changedBy: string,
 ): Promise<ApproveDocumentResult> {
-  const response = await apiFetch(
-    `/api/documents/${documentId}/approve`,
-    {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ changed_by: changedBy }),
+  return apiFetch(`/api/documents/${documentId}/approve`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
     },
-  );
-
-  const result = await response.json();
-
-  if (!response.ok) {
-    throw new Error(
-      typeof result.detail === "string"
-        ? result.detail
-        : "Unable to approve this document.",
-    );
-  }
-
-  return result;
+    body: JSON.stringify({ changed_by: changedBy }),
+  });
 }
 
 export async function promoteDocument(
   documentId: string,
   changedBy: string,
 ): Promise<PromoteDocumentResult> {
-  const response = await apiFetch(
-    `/api/documents/${documentId}/promote`,
-    {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ changed_by: changedBy }),
+  return apiFetch(`/api/documents/${documentId}/promote`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
     },
-  );
-
-  const result = await response.json();
-
-  if (!response.ok) {
-    throw new Error(
-      typeof result.detail === "string"
-        ? result.detail
-        : "Unable to promote this document to the repository.",
-    );
-  }
-
-  return result;
+    body: JSON.stringify({ changed_by: changedBy }),
+  });
 }
 
 export async function getStructuredOutput(
   documentId: string,
 ): Promise<StructuredContractOutput> {
-  const response = await apiFetch(
-    `/api/documents/${documentId}/structured-output`,
-  );
-
-  const result = await response.json();
-
-  if (!response.ok) {
-    throw new Error(
-      typeof result.detail === "string"
-        ? result.detail
-        : "Unable to retrieve structured output.",
-    );
-  }
-
-  return result;
+  return apiFetch(`/api/documents/${documentId}/structured-output`);
 }
 
 export async function getDocument(
   documentId: string,
 ): Promise<UploadedDocument> {
-  const response = await apiFetch(`/api/documents/${documentId}`);
-
-  const result = await response.json();
-
-  if (!response.ok) {
-    throw new Error(
-      typeof result.detail === "string"
-        ? result.detail
-        : "Unable to retrieve the document.",
-    );
-  }
-
-  return result;
+  return apiFetch(`/api/documents/${documentId}`);
 }
 
 export async function getContractAnalysis(
   documentId: string,
 ): Promise<ContractAnalysisResult> {
-  const response = await apiFetch(
-    `/api/documents/${documentId}/analyze-contract`,
-  );
-
-  const result = await response.json();
-
-  if (!response.ok) {
-    throw new Error(
-      typeof result.detail === "string"
-        ? result.detail
-        : "Unable to retrieve the contract analysis.",
-    );
-  }
-
-  return result;
+  return apiFetch(`/api/documents/${documentId}/analyze-contract`);
 }
 
 export async function getPageRender(
@@ -622,21 +309,9 @@ export async function getPageRender(
     ? `?${new URLSearchParams({ highlight })}`
     : "";
 
-  const response = await apiFetch(
+  return apiFetch(
     `/api/documents/${documentId}/pages/${pageNumber}/render${params}`,
   );
-
-  const result = await response.json();
-
-  if (!response.ok) {
-    throw new Error(
-      typeof result.detail === "string"
-        ? result.detail
-        : "Unable to render the page.",
-    );
-  }
-
-  return result;
 }
 
 export async function reviewMetadataField(
@@ -646,7 +321,7 @@ export async function reviewMetadataField(
   changedBy: string,
   value?: string,
 ): Promise<MetadataField> {
-  const response = await apiFetch(
+  return apiFetch(
     `/api/documents/${documentId}/metadata-fields/${fieldKey}/review`,
     {
       method: "POST",
@@ -660,176 +335,64 @@ export async function reviewMetadataField(
       }),
     },
   );
-
-  const result = await response.json();
-
-  if (!response.ok) {
-    throw new Error(
-      typeof result.detail === "string"
-        ? result.detail
-        : "Unable to review the field.",
-    );
-  }
-
-  return result;
 }
 
 export async function acceptAllMetadataFields(
   documentId: string,
   changedBy: string,
 ): Promise<MetadataField[]> {
-  const response = await apiFetch(
-    `/api/documents/${documentId}/metadata-fields/accept-all`,
-    {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ changed_by: changedBy }),
+  return apiFetch(`/api/documents/${documentId}/metadata-fields/accept-all`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
     },
-  );
-
-  const result = await response.json();
-
-  if (!response.ok) {
-    throw new Error(
-      typeof result.detail === "string"
-        ? result.detail
-        : "Unable to accept all fields.",
-    );
-  }
-
-  return result;
+    body: JSON.stringify({ changed_by: changedBy }),
+  });
 }
 
 export async function getFieldAuditLog(
   documentId: string,
   fieldKey: string,
 ): Promise<FieldAuditEntry[]> {
-  const response = await apiFetch(
+  return apiFetch(
     `/api/documents/${documentId}/metadata-fields/${fieldKey}/audit-log`,
   );
-
-  const result = await response.json();
-
-  if (!response.ok) {
-    throw new Error(
-      typeof result.detail === "string"
-        ? result.detail
-        : "Unable to retrieve the audit log.",
-    );
-  }
-
-  return result;
 }
 
 export async function extractClauses(
   documentId: string,
 ): Promise<ClauseExtractionResult> {
-  const response = await apiFetch(
-    `/api/documents/${documentId}/extract-clauses`,
-    {
-      method: "POST",
-    },
-  );
-
-  const result = await response.json();
-
-  if (!response.ok) {
-    throw new Error(
-      typeof result.detail === "string"
-        ? result.detail
-        : "Clause extraction failed.",
-    );
-  }
-
-  return result;
+  return apiFetch(`/api/documents/${documentId}/extract-clauses`, {
+    method: "POST",
+  });
 }
 
 export async function getClauses(
   documentId: string,
 ): Promise<ClauseExtractionResult> {
-  const response = await apiFetch(
-    `/api/documents/${documentId}/extract-clauses`,
-  );
-
-  const result = await response.json();
-
-  if (!response.ok) {
-    throw new Error(
-      typeof result.detail === "string"
-        ? result.detail
-        : "Unable to retrieve clauses.",
-    );
-  }
-
-  return result;
+  return apiFetch(`/api/documents/${documentId}/extract-clauses`);
 }
 
 export async function extractTables(
   documentId: string,
 ): Promise<TableExtractionResult> {
-  const response = await apiFetch(
-    `/api/documents/${documentId}/extract-tables`,
-    {
-      method: "POST",
-    },
-  );
-
-  const result = await response.json();
-
-  if (!response.ok) {
-    throw new Error(
-      typeof result.detail === "string"
-        ? result.detail
-        : "Table extraction failed.",
-    );
-  }
-
-  return result;
+  return apiFetch(`/api/documents/${documentId}/extract-tables`, {
+    method: "POST",
+  });
 }
 
 export async function extractSignatures(
   documentId: string,
 ): Promise<SignatureExtractionResult> {
-  const response = await apiFetch(
-    `/api/documents/${documentId}/extract-signatures`,
-    {
-      method: "POST",
-    },
-  );
-
-  const result = await response.json();
-
-  if (!response.ok) {
-    throw new Error(
-      typeof result.detail === "string"
-        ? result.detail
-        : "Signature extraction failed.",
-    );
-  }
-
-  return result;
+  return apiFetch(`/api/documents/${documentId}/extract-signatures`, {
+    method: "POST",
+  });
 }
 
 export async function getSignatures(
   documentId: string,
 ): Promise<SignatureExtractionResult> {
-  const response = await apiFetch(
-    `/api/documents/${documentId}/extract-signatures`,
-  );
-
-  const result = await response.json();
-
-  if (!response.ok) {
-    throw new Error(
-      typeof result.detail === "string"
-        ? result.detail
-        : "Unable to retrieve signatures.",
-    );
-  }
-
-  return result;
+  return apiFetch(`/api/documents/${documentId}/extract-signatures`);
 }
 
 export async function universalExtract(
@@ -837,7 +400,7 @@ export async function universalExtract(
   instruction: string,
   onRetry?: (attempt: number, total: number) => void,
 ): Promise<UniversalExtractionResult> {
-  const response = await apiFetch(
+  return apiFetch(
     `/api/documents/${documentId}/extract`,
     {
       method: "POST",
@@ -854,16 +417,4 @@ export async function universalExtract(
     },
     onRetry,
   );
-
-  const result = await response.json();
-
-  if (!response.ok) {
-    throw new Error(
-      typeof result.detail === "string"
-        ? result.detail
-        : result.detail?.message ?? "Extraction failed.",
-    );
-  }
-
-  return result;
 }
