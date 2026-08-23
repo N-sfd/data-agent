@@ -37,7 +37,7 @@ class Settings(BaseSettings):
     convera_ai_enabled: bool = False
 
     gemini_api_key: str | None = None
-    gemini_model: str = "gemini-2.5-flash"
+    gemini_model: str = "gemini-3.6-flash"
 
     openai_api_key: str | None = None
     openai_model: str | None = None
