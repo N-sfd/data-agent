@@ -472,7 +472,11 @@ export default function AnalysisRequest({
     try {
       const result = await onAnalyze(instruction.trim());
 
-      if (result.values.length === 0 && result.tables.length === 0) {
+      if (
+        result.values.length === 0 &&
+        result.tables.length === 0 &&
+        !result.answer
+      ) {
         setNoMatch(true);
       }
     } catch (analysisError) {

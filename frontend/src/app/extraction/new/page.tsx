@@ -11,6 +11,7 @@ import ExtractionStatusPanel from "@/components/extraction-status-panel";
 import WorkflowBreadcrumb from "@/components/workflow-breadcrumb";
 import ExtractionResultsWorkspace from "@/components/extraction/extraction-results-workspace";
 import AnalysisRequest from "@/components/analysis-request";
+import UniversalResults from "@/components/universal-results";
 import DocumentCard from "@/components/document-card";
 import DocumentUploader from "@/components/document-uploader";
 import ImportSourceTabs from "@/components/import-source-tabs";
@@ -65,6 +66,7 @@ export default function NewExtractionPage() {
   const [wasAnalyzing, setWasAnalyzing] = useState(false);
 
   const resultsWorkspaceRef = useRef<HTMLDivElement | null>(null);
+  const universalResultRef = useRef<HTMLDivElement | null>(null);
 
   const [universalResult, setUniversalResult] =
     useState<UniversalExtractionResult | null>(null);
@@ -240,6 +242,12 @@ export default function NewExtractionPage() {
       );
 
       setUniversalResult(result);
+      requestAnimationFrame(() => {
+        universalResultRef.current?.scrollIntoView({
+          behavior: "smooth",
+          block: "start",
+        });
+      });
 
       return result;
     } finally {
@@ -392,6 +400,12 @@ export default function NewExtractionPage() {
             />
           )}
 
+          {document && universalResult && !contractAnalysis && (
+            <div ref={universalResultRef} className="animate-fade-in">
+              <UniversalResults result={universalResult} />
+            </div>
+          )}
+
           {document && extraction && !contractAnalysis && (
             <div className="editorial-card animate-fade-in p-8">
               <p className="text-base font-medium text-foreground">
@@ -445,7 +459,9 @@ export default function NewExtractionPage() {
                 ) : (
                   <Sparkles className="h-4 w-4" />
                 )}
-                {analyzingContract ? "Analyzing..." : "Run Extraction"}
+                {analyzingContract
+                  ? "Analyzing..."
+                  : "Run Contract Intelligence"}
               </button>
 
               {contractAnalysisError && (
