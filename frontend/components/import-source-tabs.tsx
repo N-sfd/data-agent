@@ -11,6 +11,7 @@ export default function ImportSourceTabs() {
   return (
     <div className="flex flex-wrap items-center gap-3">
       <span className="text-sm text-text-secondary">Import from</span>
+      <span className="text-[11px] text-text-muted">(cloud sources not yet available)</span>
 
       <div className="flex flex-wrap gap-2">
         {SOURCES.map((source) =>

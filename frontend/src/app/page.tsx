@@ -6,6 +6,8 @@ import { ArrowRight, Loader2, Sparkles, Upload } from "lucide-react";
 
 import CapabilitySection from "@/components/capability-section";
 import DocumentResultsTable from "@/components/document-results-table";
+import ProductHeroVisual from "@/components/illustrations/product-hero-visual";
+import WorkflowDiagram from "@/components/illustrations/workflow-diagram";
 import ContentSection from "@/components/layout/ContentSection";
 import PageHero from "@/components/layout/PageHero";
 import { getDashboardStats, listDocuments } from "@/lib/documents";
@@ -65,9 +67,22 @@ export default function HomePage() {
             </Link>
           </>
         }
+        visual={<ProductHeroVisual />}
       />
 
       <ContentSection>
+        <section className="mb-10">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-text-teal">
+            How it works
+          </p>
+          <h2 className="mt-2 text-lg font-medium text-foreground">
+            From upload to verified repository
+          </h2>
+          <div className="mt-4">
+            <WorkflowDiagram />
+          </div>
+        </section>
+
         <CapabilitySection />
 
         {loading ? (

@@ -16,6 +16,7 @@ from app.schemas.document_target import (
 from app.services.ai_context import build_page_context
 from app.services.ai_provider import AIProvider
 from app.services.ai_value_mapping import map_ai_value
+from app.services.clause_citation_scanner import scan_pages_for_clause_citations
 from app.services.detected_target_store import load_document_targets
 from app.services.form_field_search import search_form_fields
 from app.services.generic_label_extractor import extract_labeled_value
@@ -52,6 +53,8 @@ def _resolve_scalar_target(
                     source_text=snippet,
                     page_text=page.final_text or "",
                 )
+                if not verified:
+                    continue
                 return ScalarTargetResult(
                     target=target.key,
                     normalized_key=target.key,
@@ -77,6 +80,8 @@ def _resolve_scalar_target(
                 source_text=label_value,
                 page_text=page.final_text or "",
             )
+            if not verified:
+                continue
             return ScalarTargetResult(
                 target=target.key,
                 normalized_key=target.key,
@@ -93,6 +98,57 @@ def _resolve_scalar_target(
             )
 
     return None
+
+
+_CLAUSE_TARGET_KEYS = {"far_clauses", "dfars_clauses"}
+
+
+def _resolve_clause_target(
+    target: DocumentTarget,
+    page_lookup: dict[int, DocumentPage],
+    all_pages: list[DocumentPage],
+) -> TableTargetResult | None:
+    if target.target_type != "clause" and target.key not in _CLAUSE_TARGET_KEYS:
+        return None
+
+    candidate_pages = [
+        page_lookup[number]
+        for number in target.page_numbers
+        if number in page_lookup
+    ] or all_pages
+
+    family_filter = None
+    if target.key == "far_clauses":
+        family_filter = "far_clauses"
+    elif target.key == "dfars_clauses":
+        family_filter = "dfars_clauses"
+
+    citations = scan_pages_for_clause_citations(
+        pages=candidate_pages,
+        family_filter=family_filter,
+    )
+    if not citations:
+        return None
+
+    columns = ["clause_family", "clause_number", "title", "source_text", "page"]
+    rows = [
+        {
+            "clause_family": citation.clause_family,
+            "clause_number": citation.clause_number,
+            "title": citation.title,
+            "source_text": citation.source_text,
+            "page": citation.page_number,
+        }
+        for citation in citations
+    ]
+    pages = sorted({citation.page_number for citation in citations})
+
+    return TableTargetResult(
+        target=target.key,
+        columns=columns,
+        rows=rows,
+        pages=pages,
+    )
 
 
 def _headers_overlap(a: list[str], b: list[str]) -> float:
@@ -198,6 +254,9 @@ async def _run_batched_scalar_ai_fallback(
         )
         remaining.remove(matched)
 
+    # Never surface unverified AI values — they failed source validation.
+    scalars = [item for item in scalars if item.verified]
+
     warnings.extend(ai_result.get("warnings", []))
 
     return scalars, warnings
@@ -264,6 +323,11 @@ async def _run_per_target_ai_fallback(
             if warning:
                 warnings.append(warning)
                 continue
+            if not value.verified:
+                warnings.append(
+                    f"AI result for '{target.label}' failed source validation."
+                )
+                continue
             return (
                 ScalarTargetResult(
                     target=target.key,
@@ -327,6 +391,13 @@ async def extract_by_targets(
             resolved_table = _resolve_table_target(target, page_lookup)
             if resolved_table is not None:
                 tables.append(resolved_table)
+                continue
+        elif target.target_type == "clause" or target.key in _CLAUSE_TARGET_KEYS:
+            resolved_clause = _resolve_clause_target(
+                target, page_lookup, all_pages
+            )
+            if resolved_clause is not None:
+                tables.append(resolved_clause)
                 continue
         else:
             resolved_scalar = _resolve_scalar_target(

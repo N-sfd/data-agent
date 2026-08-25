@@ -3,6 +3,8 @@
 import { useRouter } from "next/navigation";
 
 import ConfidenceIndicator from "@/components/confidence-indicator";
+import EmptyState from "@/components/illustrations/empty-state";
+import { getDocumentTypeAppearance } from "@/lib/document-type-icon";
 import { STATUS_LABELS, STATUS_STYLES } from "@/lib/document-status";
 import { formatRelativeTime } from "@/lib/format";
 import type {
@@ -39,9 +41,10 @@ export default function DocumentResultsTable({
 
   if (documents.length === 0) {
     return (
-      <div className="px-8 py-16 text-center text-[15px] text-text-secondary">
-        {emptyMessage}
-      </div>
+      <EmptyState
+        variant="documents"
+        description={emptyMessage}
+      />
     );
   }
 
@@ -100,7 +103,14 @@ export default function DocumentResultsTable({
           </tr>
         </thead>
         <tbody>
-          {documents.map((document) => (
+          {documents.map((document) => {
+            const appearance = getDocumentTypeAppearance(
+              document.original_filename,
+              document.document_type,
+            );
+            const TypeIcon = appearance.Icon;
+
+            return (
             <tr
               key={document.document_id}
               onClick={() =>
@@ -109,12 +119,28 @@ export default function DocumentResultsTable({
               className="cursor-pointer border-b border-border/60 transition duration-200 last:border-0 table-row-hover"
             >
               <td className="px-8 py-[18px]">
-                <p className="text-[15px] font-medium text-foreground">
-                  {document.document_type ?? contractTitle(document)}
-                </p>
-                <p className="mt-0.5 text-sm text-text-secondary">
-                  {document.original_filename}
-                </p>
+                <div className="flex items-start gap-3">
+                  <span
+                    className={[
+                      "mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-border/70",
+                      appearance.bgClass,
+                    ].join(" ")}
+                    title={appearance.label}
+                  >
+                    <TypeIcon
+                      className={["h-4 w-4", appearance.iconClass].join(" ")}
+                      strokeWidth={1.75}
+                    />
+                  </span>
+                  <div className="min-w-0">
+                    <p className="text-[15px] font-medium text-foreground">
+                      {document.document_type ?? contractTitle(document)}
+                    </p>
+                    <p className="mt-0.5 text-sm text-text-secondary">
+                      {document.original_filename}
+                    </p>
+                  </div>
+                </div>
               </td>
               {fullRepository && (
                 <td className="px-5 py-[18px] text-sm text-text-secondary">
@@ -186,7 +212,8 @@ export default function DocumentResultsTable({
                 {formatRelativeTime(document.last_updated)}
               </td>
             </tr>
-          ))}
+            );
+          })}
         </tbody>
       </table>
     </div>

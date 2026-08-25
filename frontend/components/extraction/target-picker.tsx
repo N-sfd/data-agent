@@ -113,6 +113,11 @@ export default function TargetPicker({
                         <span className="inline-block h-1.5 w-1.5 rounded-full bg-success" />
                         {confidenceLabel(target)}
                       </span>
+                      {target.source_examples[0] && (
+                        <span className="mt-0.5 line-clamp-1 text-[11px] text-text-muted">
+                          {target.source_examples[0]}
+                        </span>
+                      )}
                     </span>
                   </button>
                 );

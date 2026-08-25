@@ -6,6 +6,7 @@ import {
   Archive as ArchiveIcon,
   ArrowLeft,
   BadgeCheck,
+  Loader2,
 } from "lucide-react";
 
 import ContractRelationshipsTree from "@/components/contract-relationships-tree";
@@ -18,8 +19,10 @@ import PdfToolbar, { type SearchMatch } from "@/components/pdf-toolbar";
 import PipelineStrip from "@/components/pipeline-strip";
 import RelationshipCard from "@/components/relationship-card";
 import ReviewFieldList from "@/components/review-field-list";
+import { ApiError } from "@/lib/api";
 import {
   acceptAllMetadataFields,
+  analyzeContract,
   approveDocument,
   confirmRelationship,
   extractClauses,
@@ -66,6 +69,9 @@ export default function ReviewWorkspacePage({
     useState<ContractAnalysisResult | null>(null);
   const [children, setChildren] = useState<ChildRelationship[]>([]);
   const [loadError, setLoadError] = useState("");
+  const [notAnalyzed, setNotAnalyzed] = useState(false);
+  const [analyzing, setAnalyzing] = useState(false);
+  const [analyzeError, setAnalyzeError] = useState("");
 
   const [reviewerName, setReviewerName] = useState("Consult America");
 
@@ -131,53 +137,78 @@ export default function ReviewWorkspacePage({
     let active = true;
 
     async function load() {
+      let documentResult: UploadedDocument;
+
       try {
-        const [
-          documentResult,
-          analysisResult,
-          clausesResult,
-          signaturesResult,
-          childrenResult,
-        ] = await Promise.all([
-          getDocument(documentId),
-          getContractAnalysis(documentId),
-          getClauses(documentId).catch(() => null),
-          getSignatures(documentId).catch(() => null),
-          getChildRelationships(documentId).catch(() => null),
-        ]);
-
-        if (!active) return;
-
-        setDocument(documentResult);
-        setAnalysis(analysisResult);
-
-        if (clausesResult) {
-          setClauses(clausesResult.clauses);
-        }
-
-        if (signaturesResult) {
-          setSignatures(signaturesResult.signatures);
-        }
-
-        if (childrenResult) {
-          setChildren(childrenResult.children);
-        }
-
-        const firstField = analysisResult.metadata_fields[0];
-
-        if (firstField) {
-          setActiveFieldKey(firstField.field_key);
-          setCurrentPage(firstField.evidence.page_number);
-          setHighlightText(firstField.evidence.source_text);
-        }
+        documentResult = await getDocument(documentId);
       } catch (error) {
         if (!active) return;
 
         setLoadError(
           error instanceof Error
             ? error.message
-            : "Unable to load this document's analysis.",
+            : "Unable to load this document.",
         );
+        return;
+      }
+
+      if (!active) return;
+
+      setDocument(documentResult);
+
+      const [analysisResult, clausesResult, signaturesResult, childrenResult] =
+        await Promise.all([
+          getContractAnalysis(documentId)
+            .then((result) => ({ ok: true as const, result }))
+            .catch((error) => ({ ok: false as const, error })),
+          getClauses(documentId).catch(() => null),
+          getSignatures(documentId).catch(() => null),
+          getChildRelationships(documentId).catch(() => null),
+        ]);
+
+      if (!active) return;
+
+      if (clausesResult) {
+        setClauses(clausesResult.clauses);
+      }
+
+      if (signaturesResult) {
+        setSignatures(signaturesResult.signatures);
+      }
+
+      if (childrenResult) {
+        setChildren(childrenResult.children);
+      }
+
+      if (analysisResult.ok) {
+        applyAnalysis(analysisResult.result);
+        return;
+      }
+
+      const { error } = analysisResult;
+
+      if (error instanceof ApiError && error.status === 404) {
+        setNotAnalyzed(true);
+        return;
+      }
+
+      setLoadError(
+        error instanceof Error
+          ? error.message
+          : "Unable to load this document's analysis.",
+      );
+    }
+
+    function applyAnalysis(analysisResult: ContractAnalysisResult) {
+      setAnalysis(analysisResult);
+      setNotAnalyzed(false);
+
+      const firstField = analysisResult.metadata_fields[0];
+
+      if (firstField) {
+        setActiveFieldKey(firstField.field_key);
+        setCurrentPage(firstField.evidence.page_number);
+        setHighlightText(firstField.evidence.source_text);
       }
     }
 

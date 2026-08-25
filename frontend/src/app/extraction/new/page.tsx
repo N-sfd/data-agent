@@ -13,6 +13,7 @@ import ProcessingDetailsDrawer from "@/components/extraction/processing-details-
 import TargetResults from "@/components/extraction/target-results";
 import AnalysisRequest from "@/components/analysis-request";
 import UniversalResults from "@/components/universal-results";
+import type { SourceViewRequest } from "@/components/source-verification-panel";
 import DocumentOverview from "@/components/document-overview";
 import DocumentUploader from "@/components/document-uploader";
 import ImportSourceTabs from "@/components/import-source-tabs";
@@ -73,6 +74,8 @@ export default function NewExtractionPage() {
   const targetResultRef = useRef<HTMLDivElement | null>(null);
 
   const [processingDrawerOpen, setProcessingDrawerOpen] = useState(false);
+  const [sourceRequest, setSourceRequest] =
+    useState<SourceViewRequest | null>(null);
 
   const [universalResult, setUniversalResult] =
     useState<UniversalExtractionResult | null>(null);
@@ -497,7 +500,9 @@ export default function NewExtractionPage() {
                     onExtractTargets={handleExtractTargets}
                     waking={waking}
                     targets={(schemaDiscovery?.targets ?? []).filter(
-                      (target) => target.source !== "template",
+                      (target) =>
+                        target.source !== "template" &&
+                        target.source_examples.length > 0,
                     )}
                     documentFamilyLabel={
                       schemaDiscovery?.document_family_label
@@ -645,8 +650,14 @@ export default function NewExtractionPage() {
                 <TargetResults
                   result={targetResult}
                   targets={(schemaDiscovery?.targets ?? []).filter(
-                    (target) => target.source !== "template",
+                    (target) =>
+                      target.source !== "template" &&
+                      target.source_examples.length > 0,
                   )}
+                  documentId={document.document_id}
+                  pageCount={document.page_count}
+                  sourceRequest={sourceRequest}
+                  onViewSource={setSourceRequest}
                 />
               </div>
             </div>

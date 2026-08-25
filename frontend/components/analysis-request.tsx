@@ -178,8 +178,8 @@ export default function AnalysisRequest({
               ))}
             </div>
             <p className="text-xs leading-5 text-text-muted">
-              Only structures found in this file will appear — template targets
-              like Pricing Table or Rate Card are not assumed.
+            Only structures with source evidence appear — Detected means Data Agent
+            can show where it exists in this file, not that AI thinks it might.
             </p>
           </div>
         ) : (

@@ -79,6 +79,16 @@ async function extractErrorMessage(
   return message;
 }
 
+export class ApiError extends Error {
+  status: number;
+
+  constructor(message: string, status: number) {
+    super(message);
+    this.name = "ApiError";
+    this.status = status;
+  }
+}
+
 /**
  * Fetches from the Data Agent API and returns the parsed JSON body.
  * Throws a descriptive Error on any failure so callers never have to
@@ -104,7 +114,7 @@ export async function apiFetch<T = unknown>(
   }
 
   if (!response.ok) {
-    throw new Error(await extractErrorMessage(response));
+    throw new ApiError(await extractErrorMessage(response), response.status);
   }
 
   if (response.status === 204) {

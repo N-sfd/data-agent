@@ -551,6 +551,133 @@ body {
   gap: 0.75rem;
 }
 
+.page-hero-split {
+  display: grid;
+  gap: 2.5rem;
+  align-items: center;
+}
+
+@media (min-width: 1024px) {
+  .page-hero-split {
+    grid-template-columns: minmax(0, 1.05fr) minmax(0, 0.95fr);
+    gap: 3rem;
+  }
+}
+
+.page-hero-visual {
+  order: -1;
+}
+
+@media (min-width: 1024px) {
+  .page-hero-visual {
+    order: 0;
+  }
+}
+
+/* Workflow diagram */
+.workflow-diagram-steps {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 0.5rem 0;
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.workflow-diagram-step {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+
+.workflow-diagram-connector {
+  display: none;
+  width: 1.25rem;
+  height: 1px;
+  margin: 0 0.35rem;
+  background: linear-gradient(90deg, var(--border), var(--primary));
+  opacity: 0.5;
+}
+
+@media (min-width: 640px) {
+  .workflow-diagram-connector {
+    display: block;
+  }
+}
+
+.workflow-diagram-node {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.625rem;
+  padding: 0.625rem 0.75rem;
+  border-radius: 0.75rem;
+  border: 1px solid var(--border);
+  background: var(--surface-soft);
+  min-width: 0;
+}
+
+.workflow-diagram-node-active {
+  border-color: color-mix(in srgb, var(--primary) 35%, var(--border));
+  background: color-mix(in srgb, var(--primary) 6%, var(--surface));
+}
+
+.workflow-diagram-icon-wrap {
+  display: flex;
+  height: 2rem;
+  width: 2rem;
+  shrink: 0;
+  align-items: center;
+  justify-content: center;
+  border-radius: 0.5rem;
+  background: color-mix(in srgb, var(--primary) 12%, white);
+  color: var(--primary);
+}
+
+.workflow-diagram-label {
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--foreground);
+  line-height: 1.2;
+}
+
+.workflow-diagram-desc {
+  margin-top: 0.125rem;
+  font-size: 0.6875rem;
+  line-height: 1.35;
+  color: var(--text-secondary);
+}
+
+.workflow-diagram-compact .workflow-diagram-node {
+  padding: 0.5rem 0.625rem;
+}
+
+.workflow-diagram-compact .workflow-diagram-desc {
+  display: none;
+}
+
+/* Empty state art */
+.empty-state-art {
+  position: relative;
+  color: var(--border);
+}
+
+.empty-state-icon-badge {
+  position: absolute;
+  right: -0.25rem;
+  bottom: 0.25rem;
+  display: flex;
+  height: 2rem;
+  width: 2rem;
+  align-items: center;
+  justify-content: center;
+  border-radius: 9999px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text-muted);
+  box-shadow: 0 1px 2px rgb(15 23 42 / 0.06);
+}
+
 .content-section,
 .content-section-wide {
   margin: 0 auto;

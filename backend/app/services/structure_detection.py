@@ -411,6 +411,7 @@ FIELD_PROBES: list[tuple[str, str, str]] = [
     ("net_income", "Net Income", "Net Income"),
     ("operating_expenses", "Operating Expenses", "Operating Expenses"),
     ("contract_number", "Contract Number", "Contract Number"),
+    ("contract_no", "Contract No.", "CONTRACT NO"),
     ("effective_date", "Effective Date", "Effective Date"),
     ("invoice_number", "Invoice Number", "Invoice Number"),
     ("amount_due", "Amount Due", "Amount Due"),
@@ -455,6 +456,36 @@ ORGANIZATION_PATTERN = re.compile(
 KNOWN_TEMPLATE_KEYS = set(TABLE_FAMILIES) | {
     family.key for family in HEADING_FAMILIES
 }
+
+# Template table families that must never appear without a literal
+# document phrase — not inferred from column headers alone.
+LITERAL_PHRASE_TEMPLATE_KEYS: dict[str, str] = {
+    "pricing_table": "pricing table",
+    "rate_card": "rate card",
+}
+
+
+def _page_contains_literal_phrase(page_text: str, phrase: str) -> bool:
+    return phrase in (page_text or "").lower()
+
+
+def _template_target_allowed(
+    key: str,
+    *,
+    page_text: str,
+    evidence: list[str],
+) -> bool:
+    """Block template presets unless the page literally contains the phrase."""
+    required = LITERAL_PHRASE_TEMPLATE_KEYS.get(key)
+    if required is None:
+        return True
+
+    haystack = (page_text or "").lower()
+    if required in haystack:
+        return True
+
+    combined_evidence = " ".join(evidence).lower()
+    return required in combined_evidence
 
 
 def _keyword_score(text: str, keywords: list[str]) -> int:
@@ -735,6 +766,13 @@ async def detect_document_structures(
 
         # Heading-based discovery even when pdfplumber missed the table.
         for family in _heading_matches(page_text):
+            if not _template_target_allowed(
+                family.key,
+                page_text=page_text,
+                evidence=[f"Heading '{family.label}' on page {page.page_number}"],
+            ):
+                continue
+
             already = any(
                 item.key == family.key and page.page_number in item.pages
                 for item in detected

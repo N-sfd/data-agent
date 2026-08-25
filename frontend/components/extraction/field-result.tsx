@@ -3,12 +3,16 @@
 import { CheckCircle2, ChevronDown, ChevronRight, Eye, Sparkles } from "lucide-react";
 import { useMemo, useState } from "react";
 
+import type { SourceViewRequest } from "@/components/source-verification-panel";
 import type { UniversalValue } from "@/types/document";
+
+export type { SourceViewRequest };
 
 interface FieldResultProps {
   values: UniversalValue[];
   /** Prefer dense rows for extraction results (default). */
   density?: "compact" | "cards";
+  onViewSource?: (request: SourceViewRequest) => void;
 }
 
 function methodLabel(method: string): string {
@@ -126,7 +130,13 @@ function SourceList({ items }: { items: UniversalValue[] }) {
   );
 }
 
-function ValueRow({ group }: { group: ValueGroup }) {
+function ValueRow({
+  group,
+  onViewSource,
+}: {
+  group: ValueGroup;
+  onViewSource?: (request: SourceViewRequest) => void;
+}) {
   const [expanded, setExpanded] = useState(false);
   const first = group.items[0];
   const isAi = first.extraction_method === "ai";
@@ -175,14 +185,36 @@ function ValueRow({ group }: { group: ValueGroup }) {
           <MethodBadge isAi={isAi} />
         </td>
         <td className="hidden whitespace-nowrap px-3 py-2.5 align-top sm:table-cell sm:px-4">
-          <button
-            type="button"
-            onClick={() => setExpanded((value) => !value)}
-            className="inline-flex items-center gap-1 text-xs font-semibold text-text-teal hover:text-primary"
-          >
-            <Eye className="h-3 w-3" />
-            {uniqueSources > 1 ? `${uniqueSources}` : "Source"}
-          </button>
+          {onViewSource ? (
+            <button
+              type="button"
+              onClick={() =>
+                onViewSource({
+                  pageNumber: first.evidence.page_number,
+                  highlightText:
+                    first.evidence.source_text ||
+                    String(group.value ?? ""),
+                  label: group.label,
+                  value: String(group.value ?? ""),
+                  confidence: first.confidence,
+                  verified: anyVerified,
+                })
+              }
+              className="inline-flex items-center gap-1 text-xs font-semibold text-text-teal hover:text-primary"
+            >
+              <Eye className="h-3 w-3" />
+              View Source
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setExpanded((value) => !value)}
+              className="inline-flex items-center gap-1 text-xs font-semibold text-text-teal hover:text-primary"
+            >
+              <Eye className="h-3 w-3" />
+              {uniqueSources > 1 ? `${uniqueSources}` : "Source"}
+            </button>
+          )}
         </td>
       </tr>
 
@@ -204,6 +236,7 @@ function ValueRow({ group }: { group: ValueGroup }) {
 export default function FieldResult({
   values,
   density = "compact",
+  onViewSource,
 }: FieldResultProps) {
   const groups = groupValues(values);
 
@@ -267,7 +300,11 @@ export default function FieldResult({
         </thead>
         <tbody>
           {groups.map((group, index) => (
-            <ValueRow key={`${group.label}-${index}`} group={group} />
+            <ValueRow
+              key={`${group.label}-${index}`}
+              group={group}
+              onViewSource={onViewSource}
+            />
           ))}
         </tbody>
       </table>

@@ -1,5 +1,8 @@
 import FieldResult from "@/components/extraction/field-result";
 import TableResult from "@/components/extraction/table-result";
+import SourceVerificationPanel, {
+  type SourceViewRequest,
+} from "@/components/source-verification-panel";
 import type {
   DocumentTarget,
   ExtractTargetsResult,
@@ -14,6 +17,10 @@ interface TargetResultsProps {
   result: ExtractTargetsResult;
   /** Schema targets used to classify scalar results (contacts vs fields). */
   targets?: DocumentTarget[];
+  documentId?: string;
+  pageCount?: number;
+  sourceRequest?: SourceViewRequest | null;
+  onViewSource?: (request: SourceViewRequest) => void;
 }
 
 function scalarToUniversalValue(scalar: ScalarTargetResult): UniversalValue {
@@ -113,6 +120,10 @@ function dedupeClauseTables(tables: TableTargetResult[]): TableTargetResult[] {
 export default function TargetResults({
   result,
   targets = [],
+  documentId,
+  pageCount = 1,
+  sourceRequest = null,
+  onViewSource,
 }: TargetResultsProps) {
   const typeByLabel = new Map<string, TargetType>();
   for (const target of targets) {
@@ -140,6 +151,14 @@ export default function TargetResults({
 
   return (
     <div className="space-y-6">
+      {documentId && onViewSource && (
+        <SourceVerificationPanel
+          documentId={documentId}
+          pageCount={pageCount}
+          request={sourceRequest}
+        />
+      )}
+
       {result.unresolved_targets.length > 0 && (
         <div className="rounded-xl border border-warning/25 bg-warning/5 p-4 text-sm text-warning">
           <p>
@@ -162,6 +181,7 @@ export default function TargetResults({
             <FieldResult
               values={fieldScalars.map(scalarToUniversalValue)}
               density="compact"
+              onViewSource={onViewSource}
             />
           </div>
         </div>
@@ -176,6 +196,7 @@ export default function TargetResults({
             <FieldResult
               values={identifierScalars.map(scalarToUniversalValue)}
               density="compact"
+              onViewSource={onViewSource}
             />
           </div>
         </div>
@@ -225,6 +246,16 @@ export default function TargetResults({
               <TableResult
                 key={tableToUniversalTable(table, index).table_id}
                 table={tableToUniversalTable(table, index)}
+                onViewSource={
+                  onViewSource
+                    ? (req) =>
+                        onViewSource({
+                          ...req,
+                          value: table.target,
+                          verified: true,
+                        })
+                    : undefined
+                }
               />
             ))}
           </div>

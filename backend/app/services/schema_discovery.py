@@ -17,8 +17,33 @@ from app.services.entity_classifier import classify_target_type
 from app.services.structure_detection import (
     DETECTION_PAGE_LIMIT,
     KNOWN_TEMPLATE_KEYS,
+    LITERAL_PHRASE_TEMPLATE_KEYS,
     detect_document_structures,
 )
+
+
+def _has_source_evidence(target: DetectedTarget) -> bool:
+    """Detected = we can point to where it exists in the document."""
+    if not target.evidence:
+        return False
+
+    if target.key in LITERAL_PHRASE_TEMPLATE_KEYS:
+        required = LITERAL_PHRASE_TEMPLATE_KEYS[target.key]
+        combined = " ".join(target.evidence).lower()
+        if required not in combined:
+            return False
+
+    if target.extraction_type == "table" and target.key in KNOWN_TEMPLATE_KEYS:
+        # Template tables need heading/column evidence, not a bare page mention.
+        combined = " ".join(target.evidence).lower()
+        if "unlabeled table" in combined and target.key in LITERAL_PHRASE_TEMPLATE_KEYS:
+            return False
+
+    return True
+
+
+def _filter_evidence_backed(targets: list[DetectedTarget]) -> list[DetectedTarget]:
+    return [target for target in targets if _has_source_evidence(target)]
 
 
 def _sample_value_from_evidence(evidence: list[str]) -> str:
@@ -121,11 +146,11 @@ async def discover_document_schema(
         ai_provider=ai_provider,
     )
 
-    primary_targets = list(detection.detected_targets)
+    primary_targets = _filter_evidence_backed(detection.detected_targets)
 
     # Promote high-value field-like possibles (KV / unlabeled document
     # labels) without reintroducing weak template table presets.
-    for target in detection.possible_targets:
+    for target in _filter_evidence_backed(detection.possible_targets):
         if target.extraction_type in {
             "field",
             "identifier",

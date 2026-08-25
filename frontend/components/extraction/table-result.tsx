@@ -7,6 +7,11 @@ import type { UniversalTable } from "@/types/document";
 
 interface TableResultProps {
   table: UniversalTable;
+  onViewSource?: (request: {
+    pageNumber: number;
+    highlightText?: string | null;
+    label?: string;
+  }) => void;
 }
 
 function downloadBlob(content: string, filename: string, type: string) {
@@ -44,7 +49,7 @@ function toTsv(table: UniversalTable): string {
   return lines.join("\n");
 }
 
-export default function TableResult({ table }: TableResultProps) {
+export default function TableResult({ table, onViewSource }: TableResultProps) {
   const [copied, setCopied] = useState(false);
 
   async function copyTable() {
@@ -93,13 +98,30 @@ export default function TableResult({ table }: TableResultProps) {
         </div>
 
         <div className="flex flex-wrap gap-2">
-          <a
-            href={`#page-${table.page_number}`}
-            className="btn-secondary py-1.5 text-xs"
-          >
-            <FileText className="h-3.5 w-3.5" />
-            View Source
-          </a>
+          {onViewSource ? (
+            <button
+              type="button"
+              onClick={() =>
+                onViewSource({
+                  pageNumber: table.page_number,
+                  highlightText: table.source_reference || null,
+                  label: table.title || "Extracted table",
+                })
+              }
+              className="btn-secondary py-1.5 text-xs"
+            >
+              <FileText className="h-3.5 w-3.5" />
+              View Source
+            </button>
+          ) : (
+            <a
+              href={`#page-${table.page_number}`}
+              className="btn-secondary py-1.5 text-xs"
+            >
+              <FileText className="h-3.5 w-3.5" />
+              View Source
+            </a>
+          )}
 
           <button
             type="button"
