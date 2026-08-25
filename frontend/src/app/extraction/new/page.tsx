@@ -12,7 +12,7 @@ import WorkflowBreadcrumb from "@/components/workflow-breadcrumb";
 import ExtractionResultsWorkspace from "@/components/extraction/extraction-results-workspace";
 import AnalysisRequest from "@/components/analysis-request";
 import UniversalResults from "@/components/universal-results";
-import DocumentCard from "@/components/document-card";
+import DocumentOverview from "@/components/document-overview";
 import DocumentUploader from "@/components/document-uploader";
 import ImportSourceTabs from "@/components/import-source-tabs";
 import IngestionChecklist from "@/components/ingestion-checklist";
@@ -358,16 +358,31 @@ export default function NewExtractionPage() {
           />
         </div>
 
-        <div className="grid gap-8 lg:grid-cols-2">
-          <section className="space-y-8">
+        <div className="grid gap-8 lg:grid-cols-5">
+          <section className="space-y-8 lg:col-span-2">
             <DocumentUploader onUploadComplete={handleUploadComplete} />
 
             <ImportSourceTabs />
 
-            {document && <DocumentCard document={document} />}
+            {document && (
+              <DocumentOverview
+                document={document}
+                structureDetection={structureDetection}
+                contractAnalysis={contractAnalysis}
+                onViewResults={
+                  contractAnalysis || universalResult
+                    ? () =>
+                        (contractAnalysis
+                          ? resultsWorkspaceRef
+                          : universalResultRef
+                        ).current?.scrollIntoView({ behavior: "smooth" })
+                    : undefined
+                }
+              />
+            )}
           </section>
 
-          <section className="space-y-8">
+          <section className="space-y-8 lg:col-span-3">
             <div className="editorial-card p-8">
               <ExtractionStatusPanel
                 document={document}
@@ -398,12 +413,6 @@ export default function NewExtractionPage() {
               waking={waking}
               structureDetection={structureDetection}
             />
-          )}
-
-          {document && universalResult && !contractAnalysis && (
-            <div ref={universalResultRef} className="animate-fade-in">
-              <UniversalResults result={universalResult} />
-            </div>
           )}
 
           {document && extraction && !contractAnalysis && (
@@ -532,6 +541,17 @@ export default function NewExtractionPage() {
           )}
         </section>
       </div>
+
+      {document && universalResult && !contractAnalysis && (
+        <div ref={universalResultRef} className="animate-fade-in mt-10">
+          <p className="text-base font-medium text-foreground">
+            Extraction Result
+          </p>
+          <div className="mt-4">
+            <UniversalResults result={universalResult} />
+          </div>
+        </div>
+      )}
 
       {contractAnalysis && document && (
         <div ref={resultsWorkspaceRef}>

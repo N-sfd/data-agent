@@ -39,59 +39,6 @@ function methodLabel(method: string): string {
   }
 }
 
-function ExtractionMethodBadge({
-  item,
-}: {
-  item: UniversalValue;
-}) {
-  const isAi = item.extraction_method === "ai";
-
-  if (isAi) {
-    return (
-      <div className="space-y-1.5">
-        <p className="text-xs text-slate-400">
-          Extraction method
-        </p>
-        <p className="inline-flex items-center gap-1.5 text-sm font-semibold text-violet-700">
-          <Sparkles className="h-3.5 w-3.5" />
-          AI-assisted
-        </p>
-        {item.verified ? (
-          <p className="inline-flex items-center gap-1.5 text-xs font-medium text-emerald-700">
-            <CheckCircle2 className="h-3.5 w-3.5" />
-            Verified against source
-          </p>
-        ) : (
-          <p className="text-xs font-medium text-amber-700">
-            Not yet verified against source
-          </p>
-        )}
-      </div>
-    );
-  }
-
-  return (
-    <div className="space-y-1.5">
-      <p className="text-xs text-slate-400">
-        Extraction method
-      </p>
-      <p className="inline-flex items-center gap-1.5 text-sm font-semibold text-emerald-700">
-        <CheckCircle2 className="h-3.5 w-3.5" />
-        Deterministic
-      </p>
-      <p className="text-xs text-slate-500">
-        {methodLabel(item.extraction_method)}
-      </p>
-      {item.verified && (
-        <p className="inline-flex items-center gap-1.5 text-xs font-medium text-emerald-700">
-          <CheckCircle2 className="h-3.5 w-3.5" />
-          Verified against source
-        </p>
-      )}
-    </div>
-  );
-}
-
 function ResultMethodSummary({
   result,
 }: {
@@ -139,47 +86,102 @@ function ResultMethodSummary({
   );
 }
 
-function ValueCard({ item }: { item: UniversalValue }) {
-  const [showSource, setShowSource] = useState(false);
+interface ValueGroup {
+  label: string;
+  value: unknown;
+  items: UniversalValue[];
+}
+
+// Collapse repeated hits for the same label/value (e.g. a contract
+// number that appears on pages 53, 64, and 69) into one canonical
+// card instead of one card per occurrence.
+function groupValues(values: UniversalValue[]): ValueGroup[] {
+  const groups = new Map<string, ValueGroup>();
+
+  for (const item of values) {
+    const key = `${item.label}::${String(item.value ?? "")}`;
+    const existing = groups.get(key);
+
+    if (existing) {
+      existing.items.push(item);
+    } else {
+      groups.set(key, { label: item.label, value: item.value, items: [item] });
+    }
+  }
+
+  return Array.from(groups.values());
+}
+
+function ValueCard({ group }: { group: ValueGroup }) {
+  const [showSources, setShowSources] = useState(false);
+
+  const first = group.items[0];
+  const isAi = first.extraction_method === "ai";
+  const anyVerified = group.items.some((item) => item.verified);
+  const pages = Array.from(
+    new Set(group.items.map((item) => item.evidence.page_number)),
+  ).sort((a, b) => a - b);
 
   return (
     <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
-      <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-        {item.label}
-      </p>
-
-      <p className="mt-2 text-lg font-semibold text-slate-950">
-        {String(item.value ?? "")}
-      </p>
-
-      <div className="mt-4 grid gap-4 text-xs text-slate-600 sm:grid-cols-2">
-        <div>
-          <span className="text-slate-400">Source</span>
-          <p className="mt-1 font-medium text-slate-800">
-            Page {item.evidence.page_number}
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0">
+          <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+            {group.label}
+          </p>
+          <p className="mt-1 text-lg font-semibold text-slate-950">
+            {String(group.value ?? "")}
           </p>
         </div>
 
-        <ExtractionMethodBadge item={item} />
+        {isAi ? (
+          <span className="inline-flex shrink-0 items-center gap-1.5 rounded-full bg-violet-50 px-2.5 py-1 text-xs font-semibold text-violet-700">
+            <Sparkles className="h-3.5 w-3.5" />
+            AI-assisted
+          </span>
+        ) : (
+          <span className="inline-flex shrink-0 items-center gap-1.5 rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-700">
+            <CheckCircle2 className="h-3.5 w-3.5" />
+            Deterministic
+          </span>
+        )}
       </div>
+
+      <p className="mt-3 text-xs text-slate-500">
+        {pages.length > 1
+          ? `Found on ${pages.length} pages · Pages ${pages.join(", ")}`
+          : `Page ${pages[0]} · ${methodLabel(first.extraction_method)}`}
+        {anyVerified && " · Verified"}
+      </p>
 
       <button
         type="button"
-        onClick={() => setShowSource((value) => !value)}
+        onClick={() => setShowSources((value) => !value)}
         className="mt-3 inline-flex items-center gap-1.5 text-xs font-semibold text-blue-700 hover:text-blue-800"
       >
         <Eye className="h-3.5 w-3.5" />
-        {showSource ? "Hide Source" : "View Source"}
+        {showSources
+          ? "Hide Source"
+          : pages.length > 1
+            ? "View all sources"
+            : "View Source"}
       </button>
 
-      {showSource && (
-        <div className="mt-3 rounded-lg border border-slate-200 bg-white p-3 text-xs leading-5 text-slate-600">
-          <p className="font-medium text-slate-800">
-            {item.evidence.source_reference}
-          </p>
-          <p className="mt-2 whitespace-pre-wrap">
-            {item.evidence.source_text}
-          </p>
+      {showSources && (
+        <div className="mt-3 space-y-2">
+          {group.items.map((item, index) => (
+            <div
+              key={index}
+              className="rounded-lg border border-slate-200 bg-white p-3 text-xs leading-5 text-slate-600"
+            >
+              <p className="font-medium text-slate-800">
+                {item.evidence.source_reference}
+              </p>
+              <p className="mt-2 whitespace-pre-wrap">
+                {item.evidence.source_text}
+              </p>
+            </div>
+          ))}
         </div>
       )}
     </div>
@@ -363,10 +365,10 @@ export default function UniversalResults({
             Extracted data
           </p>
           <div className="mt-4 space-y-3">
-            {result.values.map((item, index) => (
+            {groupValues(result.values).map((group, index) => (
               <ValueCard
-                key={`${item.label}-${index}`}
-                item={item}
+                key={`${group.label}-${index}`}
+                group={group}
               />
             ))}
           </div>

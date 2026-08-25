@@ -140,12 +140,43 @@ export interface DetectedTable {
   label: string;
   pages: number[];
   confidence: number;
+  suggested_prompt?: string | null;
+  columns?: string[];
 }
 
 export interface DetectedField {
   key: string;
   label: string;
   pages: number[];
+}
+
+export type DetectionExtractionType =
+  | "field"
+  | "table"
+  | "contact"
+  | "obligation"
+  | "clause"
+  | "signature"
+  | "custom";
+
+export interface DetectedTarget {
+  key: string;
+  label: string;
+  extraction_type: DetectionExtractionType;
+  pages: number[];
+  confidence: number;
+  evidence: string[];
+  suggested_prompt: string | null;
+  columns: string[];
+}
+
+export interface DetectionCounts {
+  fields: number;
+  tables: number;
+  contacts: number;
+  obligations: number;
+  clauses: number;
+  signatures: number;
 }
 
 export interface ContentStats {
@@ -160,13 +191,18 @@ export interface StructureDetectionResult {
 
   document_family: string;
   document_family_label: string;
+  document_family_confidence: number;
 
   detected_fields: DetectedField[];
   detected_tables: DetectedTable[];
   detected_contacts: string[];
   detected_obligations: string[];
 
+  detected_targets: DetectedTarget[];
+  possible_targets: DetectedTarget[];
+
   content_stats: ContentStats;
+  counts: DetectionCounts;
 }
 
 export interface ExtractionSummary {

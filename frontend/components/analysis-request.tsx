@@ -3,7 +3,18 @@
 import { ArrowRight, ChevronDown, ChevronRight, Search } from "lucide-react";
 import { useState } from "react";
 
+import DetectedContentDrawer from "@/components/detected-content-drawer";
+import DetectionCountChips from "@/components/detection-count-chips";
+import {
+  DETECTION_TYPE_LABELS,
+  DETECTION_TYPE_ORDER,
+  DETECTION_TYPE_PLURAL,
+  groupByPage,
+  pageGroupLabel,
+  pageGroupPrompt,
+} from "@/lib/detection";
 import type {
+  DetectionExtractionType,
   StructureDetectionResult,
   UniversalExtractionResult,
 } from "@/types/document";
@@ -18,12 +29,10 @@ interface AnalysisRequestProps {
   ) => Promise<UniversalExtractionResult>;
 }
 
-type ExtractionType =
-  | "field"
-  | "table"
-  | "contacts"
-  | "obligations"
-  | "custom";
+// The generic starting-point library, shown when a document has no
+// (or very few) real detections. Kept separate from the live
+// detected/grouped flow below, which is what most documents use.
+type TemplateType = "field" | "table" | "contact" | "obligation" | "custom";
 
 interface ExtractionTemplate {
   id: string;
@@ -36,13 +45,7 @@ interface ExtractionTypeDefinition {
   targets: ExtractionTemplate[];
 }
 
-// The static template library — not claims about what's in the
-// current document, just generic starting points. Demoted to "More
-// extraction options" whenever real detections are available.
-const EXTRACTION_TEMPLATES: Record<
-  ExtractionType,
-  ExtractionTypeDefinition
-> = {
+const EXTRACTION_TEMPLATES: Record<TemplateType, ExtractionTypeDefinition> = {
   field: {
     label: "Field",
     targets: [
@@ -161,7 +164,7 @@ const EXTRACTION_TEMPLATES: Record<
       },
     ],
   },
-  contacts: {
+  contact: {
     label: "Contacts",
     targets: [
       {
@@ -211,7 +214,7 @@ const EXTRACTION_TEMPLATES: Record<
       },
     ],
   },
-  obligations: {
+  obligation: {
     label: "Obligations",
     targets: [
       {
@@ -274,63 +277,57 @@ const EXTRACTION_TEMPLATES: Record<
   },
 };
 
-const EXTRACTION_TYPES = Object.keys(
-  EXTRACTION_TEMPLATES,
-) as ExtractionType[];
+const TEMPLATE_TYPES = Object.keys(EXTRACTION_TEMPLATES) as TemplateType[];
 
+// A detected option is either a real, named target the backend
+// recognized (e.g. "Pricing Table"), or a synthetic grouping of
+// several low-confidence, unlabeled detections on the same page
+// (e.g. "Page 11 — 9 tables") — collapsed so near-duplicate raw
+// detections don't flood the picker.
 interface DetectedOption {
-  type: ExtractionType;
+  kind: "named" | "grouped";
+  type: DetectionExtractionType;
   key: string;
   label: string;
   prompt: string;
 }
 
-function pagesLabel(pages: number[]): string {
-  if (pages.length <= 1) {
-    return `page ${pages[0] ?? "?"}`;
-  }
+function buildOptionsForType(
+  detection: StructureDetectionResult,
+  type: DetectionExtractionType,
+): DetectedOption[] {
+  const named: DetectedOption[] = detection.detected_targets
+    .filter((target) => target.extraction_type === type)
+    .map((target) => ({
+      kind: "named",
+      type,
+      key: target.key,
+      label: target.label,
+      prompt: target.suggested_prompt || `Extract the ${target.label}.`,
+    }));
 
-  return `pages ${pages.join(", ")}`;
+  const typeLabel = DETECTION_TYPE_PLURAL[type];
+  const grouped: DetectedOption[] = groupByPage(
+    detection.possible_targets,
+    type,
+  ).map((group) => ({
+    kind: "grouped",
+    type,
+    key: `other:${type}:${group.page}`,
+    label: pageGroupLabel(group, typeLabel),
+    prompt: pageGroupPrompt(group, typeLabel),
+  }));
+
+  return [...named, ...grouped];
 }
 
-function buildDetectedOptions(
+function detectedTypesFor(
   detection: StructureDetectionResult | null,
-): DetectedOption[] {
-  if (!detection) {
-    return [];
-  }
-
-  const options: DetectedOption[] = [];
-
-  for (const table of detection.detected_tables) {
-    options.push({
-      type: "table",
-      key: `table:${table.key}`,
-      label: table.label,
-      prompt: `Extract the ${table.label} table (${pagesLabel(table.pages)}) with all rows and columns.`,
-    });
-  }
-
-  for (const field of detection.detected_fields) {
-    options.push({
-      type: "field",
-      key: `field:${field.key}`,
-      label: field.label,
-      prompt: `Extract the ${field.label}.`,
-    });
-  }
-
-  if (detection.detected_contacts.length > 0) {
-    options.push({
-      type: "contacts",
-      key: "contacts:detected",
-      label: `Contacts found in this document (${detection.detected_contacts.length})`,
-      prompt:
-        "Extract all contacts mentioned in the document, including names, roles, emails, and phone numbers.",
-    });
-  }
-
-  return options;
+): DetectionExtractionType[] {
+  if (!detection) return [];
+  return DETECTION_TYPE_ORDER.filter(
+    (type) => buildOptionsForType(detection, type).length > 0,
+  );
 }
 
 export default function AnalysisRequest({
@@ -339,24 +336,20 @@ export default function AnalysisRequest({
   structureDetection = null,
   onAnalyze,
 }: AnalysisRequestProps) {
-  const detectedOptions = buildDetectedOptions(structureDetection);
-  const hasDetections = detectedOptions.length > 0;
+  const detectedTypes = detectedTypesFor(structureDetection);
+  const hasDetections = detectedTypes.length > 0;
   const isKnownEmpty = Boolean(structureDetection) && !hasDetections;
-
-  const detectedTypes = Array.from(
-    new Set(detectedOptions.map((option) => option.type)),
-  );
 
   const [initializedFor, setInitializedFor] =
     useState<StructureDetectionResult | null>(null);
 
   const [detectedType, setDetectedType] =
-    useState<ExtractionType | null>(null);
+    useState<DetectionExtractionType | null>(null);
   const [detectedTargetKey, setDetectedTargetKey] =
     useState<string | null>(null);
 
   const [templateType, setTemplateType] =
-    useState<ExtractionType>("field");
+    useState<TemplateType>("field");
   const [templateTargetId, setTemplateTargetId] = useState(
     EXTRACTION_TEMPLATES.field.targets[0].id,
   );
@@ -369,6 +362,8 @@ export default function AnalysisRequest({
   );
 
   const [moreOptionsOpen, setMoreOptionsOpen] = useState(false);
+  const [instructionExpanded, setInstructionExpanded] = useState(false);
+  const [drawerOpen, setDrawerOpen] = useState(false);
   const [analyzing, setAnalyzing] = useState(false);
   const [error, setError] = useState("");
   const [noMatch, setNoMatch] = useState(false);
@@ -380,17 +375,15 @@ export default function AnalysisRequest({
     setInitializedFor(structureDetection);
     setNoMatch(false);
 
-    if (detectedTypes.length > 0) {
+    if (structureDetection && detectedTypes.length > 0) {
       const firstType = detectedTypes[0];
-      const firstOption = detectedOptions.find(
-        (option) => option.type === firstType,
-      );
+      const firstOption = buildOptionsForType(structureDetection, firstType)[0];
 
       if (firstOption) {
         setDetectedType(firstType);
         setDetectedTargetKey(firstOption.key);
         setInstruction(firstOption.prompt);
-        setBadgeLabel(EXTRACTION_TEMPLATES[firstType].label);
+        setBadgeLabel(DETECTION_TYPE_LABELS[firstType]);
       }
     } else if (Boolean(structureDetection)) {
       setTemplateType("custom");
@@ -404,29 +397,25 @@ export default function AnalysisRequest({
     setDetectedType(option.type);
     setDetectedTargetKey(option.key);
     setInstruction(option.prompt);
-    setBadgeLabel(EXTRACTION_TEMPLATES[option.type].label);
+    setBadgeLabel(DETECTION_TYPE_LABELS[option.type]);
     setNoMatch(false);
   }
 
-  function handleDetectedTypeChange(nextType: ExtractionType) {
-    const firstOption = detectedOptions.find(
-      (option) => option.type === nextType,
-    );
-
-    if (firstOption) {
-      applyDetected(firstOption);
-    }
+  function handleDetectedTypeChange(nextType: DetectionExtractionType) {
+    if (!structureDetection) return;
+    const firstOption = buildOptionsForType(structureDetection, nextType)[0];
+    if (firstOption) applyDetected(firstOption);
   }
 
   function handleDetectedTargetChange(nextKey: string) {
-    const option = detectedOptions.find((item) => item.key === nextKey);
-
-    if (option) {
-      applyDetected(option);
-    }
+    if (!structureDetection || !detectedType) return;
+    const option = buildOptionsForType(structureDetection, detectedType).find(
+      (item) => item.key === nextKey,
+    );
+    if (option) applyDetected(option);
   }
 
-  function applyTemplate(type: ExtractionType, template: ExtractionTemplate) {
+  function applyTemplate(type: TemplateType, template: ExtractionTemplate) {
     setTemplateType(type);
     setTemplateTargetId(template.id);
     setInstruction(template.prompt);
@@ -434,7 +423,7 @@ export default function AnalysisRequest({
     setNoMatch(false);
   }
 
-  function handleTemplateTypeChange(nextType: ExtractionType) {
+  function handleTemplateTypeChange(nextType: TemplateType) {
     applyTemplate(nextType, EXTRACTION_TEMPLATES[nextType].targets[0]);
   }
 
@@ -455,8 +444,13 @@ export default function AnalysisRequest({
   }
 
   function chooseFirstDetected() {
-    if (detectedOptions.length > 0) {
-      applyDetected(detectedOptions[0]);
+    if (!structureDetection) return;
+    for (const type of detectedTypes) {
+      const first = buildOptionsForType(structureDetection, type)[0];
+      if (first) {
+        applyDetected(first);
+        return;
+      }
     }
   }
 
@@ -491,6 +485,16 @@ export default function AnalysisRequest({
   }
 
   const busy = disabled || analyzing;
+  const detectedTargetOptions =
+    structureDetection && detectedType
+      ? buildOptionsForType(structureDetection, detectedType)
+      : [];
+  const namedTargetOptions = detectedTargetOptions.filter(
+    (option) => option.kind === "named",
+  );
+  const otherTargetOptions = detectedTargetOptions.filter(
+    (option) => option.kind === "grouped",
+  );
 
   return (
     <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
@@ -530,14 +534,14 @@ export default function AnalysisRequest({
                 disabled={busy}
                 onChange={(event) =>
                   handleDetectedTypeChange(
-                    event.target.value as ExtractionType,
+                    event.target.value as DetectionExtractionType,
                   )
                 }
                 className="mt-1.5 w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none transition focus:border-blue-500 focus:ring-4 focus:ring-blue-50 disabled:bg-slate-50"
               >
                 {detectedTypes.map((type) => (
                   <option key={type} value={type}>
-                    {EXTRACTION_TEMPLATES[type].label}
+                    {DETECTION_TYPE_LABELS[type]}
                   </option>
                 ))}
               </select>
@@ -553,36 +557,52 @@ export default function AnalysisRequest({
                 }
                 className="mt-1.5 w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none transition focus:border-blue-500 focus:ring-4 focus:ring-blue-50 disabled:bg-slate-50"
               >
-                {detectedOptions
-                  .filter((option) => option.type === detectedType)
-                  .map((option) => (
-                    <option key={option.key} value={option.key}>
-                      {option.label}
-                    </option>
-                  ))}
+                {namedTargetOptions.length > 0 && (
+                  <optgroup label="Named">
+                    {namedTargetOptions.map((option) => (
+                      <option key={option.key} value={option.key}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </optgroup>
+                )}
+
+                {otherTargetOptions.length > 0 && (
+                  <optgroup
+                    label={`Other detected ${
+                      detectedType
+                        ? DETECTION_TYPE_PLURAL[detectedType].toLowerCase()
+                        : ""
+                    }`}
+                  >
+                    {otherTargetOptions.map((option) => (
+                      <option key={option.key} value={option.key}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </optgroup>
+                )}
               </select>
             </label>
           </div>
 
-          <div className="mt-4">
+          <div className="mt-5 border-t border-slate-100 pt-4">
             <p className="text-xs font-medium text-slate-500">
-              Detected in this document
+              Detected Content
             </p>
-
-            <ul className="mt-2 space-y-1">
-              {detectedOptions.map((option) => (
-                <li key={option.key}>
-                  <button
-                    type="button"
-                    disabled={busy}
-                    onClick={() => applyDetected(option)}
-                    className="text-left text-sm text-slate-700 transition hover:text-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
-                  >
-                    <span className="text-emerald-600">✓</span> {option.label}
-                  </button>
-                </li>
-              ))}
-            </ul>
+            <div className="mt-2">
+              <DetectionCountChips
+                counts={structureDetection!.counts}
+                tableTotal={structureDetection!.content_stats.tables}
+              />
+            </div>
+            <button
+              type="button"
+              onClick={() => setDrawerOpen(true)}
+              className="mt-3 text-xs font-semibold text-blue-700 hover:text-blue-800"
+            >
+              View detected content →
+            </button>
           </div>
         </>
       )}
@@ -639,12 +659,12 @@ export default function AnalysisRequest({
                 disabled={busy}
                 onChange={(event) =>
                   handleTemplateTypeChange(
-                    event.target.value as ExtractionType,
+                    event.target.value as TemplateType,
                   )
                 }
                 className="mt-1.5 w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none transition focus:border-blue-500 focus:ring-4 focus:ring-blue-50 disabled:bg-slate-50"
               >
-                {EXTRACTION_TYPES.map((type) => (
+                {TEMPLATE_TYPES.map((type) => (
                   <option key={type} value={type}>
                     {EXTRACTION_TEMPLATES[type].label}
                   </option>
@@ -705,11 +725,20 @@ export default function AnalysisRequest({
           onChange={(event) =>
             setInstruction(event.target.value)
           }
-          rows={5}
+          rows={instructionExpanded ? 8 : 3}
+          style={{ minHeight: instructionExpanded ? undefined : "110px" }}
           placeholder="Describe what to extract, or pick a target above to prefill this."
           className="mt-1.5 w-full resize-none rounded-xl border border-slate-200 bg-white p-4 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-blue-500 focus:ring-4 focus:ring-blue-50 disabled:bg-slate-50"
         />
       </label>
+
+      <button
+        type="button"
+        onClick={() => setInstructionExpanded((value) => !value)}
+        className="mt-1.5 text-xs font-medium text-blue-700 hover:text-blue-800"
+      >
+        {instructionExpanded ? "Collapse instruction" : "Expand instruction"}
+      </button>
 
       <div className="mt-4 flex items-center gap-2">
         <span className="text-xs font-medium text-slate-500">
@@ -789,6 +818,14 @@ export default function AnalysisRequest({
         <div className="mt-4 rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">
           {error}
         </div>
+      )}
+
+      {structureDetection && (
+        <DetectedContentDrawer
+          open={drawerOpen}
+          onClose={() => setDrawerOpen(false)}
+          structureDetection={structureDetection}
+        />
       )}
     </div>
   );
