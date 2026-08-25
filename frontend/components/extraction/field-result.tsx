@@ -158,13 +158,18 @@ function ValueRow({ group }: { group: ValueGroup }) {
         <td className="px-3 py-2.5 align-top text-sm font-medium text-foreground sm:px-4">
           {String(group.value ?? "")}
         </td>
-        <td className="whitespace-nowrap px-3 py-2.5 align-top text-xs text-text-secondary sm:px-4">
-          {pages.length > 1 ? `${pages.length} pages` : `p.${pages[0]}`}
+        <td className="min-w-[7rem] px-3 py-2.5 align-top text-xs text-text-secondary sm:px-4">
+          <span className="font-medium text-foreground">
+            {pages.length > 1 ? `pp. ${pages.join(", ")}` : `p. ${pages[0]}`}
+          </span>
           {anyVerified && (
-            <span className="ml-1 inline-flex text-success">
+            <span className="ml-1 inline-flex align-middle text-success">
               <CheckCircle2 className="h-3 w-3" />
             </span>
           )}
+          <p className="mt-0.5 line-clamp-1 text-[11px] text-text-muted">
+            {first.evidence.source_reference || "Source evidence"}
+          </p>
         </td>
         <td className="whitespace-nowrap px-3 py-2.5 align-top sm:px-4">
           <MethodBadge isAi={isAi} />

@@ -16,6 +16,7 @@ from app.services.clin_block_detector import (
 from app.services.entity_classifier import classify_target_type
 from app.services.structure_detection import (
     DETECTION_PAGE_LIMIT,
+    KNOWN_TEMPLATE_KEYS,
     detect_document_structures,
 )
 
@@ -120,9 +121,35 @@ async def discover_document_schema(
         ai_provider=ai_provider,
     )
 
+    primary_targets = list(detection.detected_targets)
+
+    # Promote high-value field-like possibles (KV / unlabeled document
+    # labels) without reintroducing weak template table presets.
+    for target in detection.possible_targets:
+        if target.extraction_type in {
+            "field",
+            "identifier",
+            "date",
+            "amount",
+            "contact",
+            "signature",
+        }:
+            primary_targets.append(target)
+            continue
+
+        if (
+            target.extraction_type == "table"
+            and target.key not in KNOWN_TEMPLATE_KEYS
+            and target.key.startswith("table_p")
+            and target.confidence >= 0.7
+            and target.columns
+        ):
+            # Keep document-specific unlabeled tables with real columns.
+            primary_targets.append(target)
+
     targets = [
         _map_detected_target(target, document_id=document.id)
-        for target in detection.detected_targets + detection.possible_targets
+        for target in primary_targets
     ]
 
     for page in pages[:DETECTION_PAGE_LIMIT]:

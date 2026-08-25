@@ -162,9 +162,25 @@ export default function AnalysisRequest({
 
       <div className="mt-5">
         {schemaDiscovering ? (
-          <div className="flex items-center gap-2 rounded-xl border border-border bg-surface-soft px-4 py-6 text-sm text-text-secondary">
-            <Loader2 className="h-4 w-4 animate-spin text-primary" />
-            Discovering document schema...
+          <div className="space-y-3 rounded-xl border border-border bg-surface-soft px-4 py-5">
+            <div className="flex items-center gap-2 text-sm text-text-secondary">
+              <Loader2 className="h-4 w-4 animate-spin text-primary" />
+              {waking
+                ? "Waking processing service…"
+                : "Discovering fields, tables, and clauses in this document…"}
+            </div>
+            <div className="grid gap-2 sm:grid-cols-2">
+              {Array.from({ length: 6 }).map((_, index) => (
+                <div
+                  key={index}
+                  className="h-10 animate-pulse rounded-lg border border-border/70 bg-surface"
+                />
+              ))}
+            </div>
+            <p className="text-xs leading-5 text-text-muted">
+              Only structures found in this file will appear — template targets
+              like Pricing Table or Rate Card are not assumed.
+            </p>
           </div>
         ) : (
           <TargetPicker

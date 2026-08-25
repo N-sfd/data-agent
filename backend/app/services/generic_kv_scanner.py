@@ -131,9 +131,9 @@ def _scan_two_column_tables(page: DocumentPage) -> list[ScannedPair]:
 
 
 _INLINE_PATTERNS: tuple[tuple[re.Pattern[str], float], ...] = (
-    (_INLINE_LABEL_VALUE, 0.72),
-    (_INLINE_LABEL_VALUE_WIDE_GAP, 0.68),
-    (_DOT_LEADER, 0.72),
+    (_INLINE_LABEL_VALUE, 0.78),
+    (_INLINE_LABEL_VALUE_WIDE_GAP, 0.8),
+    (_DOT_LEADER, 0.76),
 )
 
 
@@ -144,13 +144,18 @@ def _scan_inline_regex(text: str) -> list[ScannedPair]:
             label, value = match.group(1).strip(), match.group(2).strip()
             if not label or not value or _looks_like_noise(label):
                 continue
+            # All-caps government form labels (SOLICITATION NO., DODAAC, ...)
+            # are high-signal — keep them above the primary detection floor.
+            boosted = confidence
+            if _ALL_CAPS.match(label):
+                boosted = max(confidence, 0.82)
             pairs.append(
                 ScannedPair(
                     raw_label=label,
                     normalized_label=_normalize_label(label),
                     value=value,
                     method="inline_regex",
-                    confidence=confidence,
+                    confidence=boosted,
                 )
             )
     return pairs
@@ -170,7 +175,9 @@ def _scan_stacked_lines(text: str) -> list[ScannedPair]:
                 normalized_label=_normalize_label(label),
                 value=value,
                 method="stacked_line",
-                confidence=0.55,
+                # All-caps stacked labels are common on SF/OF forms —
+                # keep them at/above the primary detection floor (0.75).
+                confidence=0.82 if _ALL_CAPS.match(label) else 0.62,
             )
         )
     return pairs

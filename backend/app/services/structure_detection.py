@@ -22,7 +22,7 @@ from app.services.generic_label_extractor import (
     extract_labeled_value,
 )
 
-DETECTION_PAGE_LIMIT = 15
+DETECTION_PAGE_LIMIT = 40
 
 PRIMARY_CONFIDENCE_MIN = 0.75
 HIGH_CONFIDENCE_MIN = 0.90
@@ -31,7 +31,7 @@ FAMILY_SCORE_MARGIN = 1
 FAMILY_MIN_SCORE = 2
 TABLE_MATCH_MIN_SCORE = 2
 
-# Preferred defaults when several tables are equally plausible.
+# Preferred sort order only — never injects missing targets into the schema.
 FAMILY_DEFAULT_KEYS: dict[str, list[str]] = {
     "financial_report": [
         "operating_expenses",
@@ -44,7 +44,7 @@ FAMILY_DEFAULT_KEYS: dict[str, list[str]] = {
         "budget_vs_actual",
         "financial_summary",
     ],
-    "government_contract": ["clins", "rate_card", "pricing_table"],
+    "government_contract": ["clins", "supplies_services", "wawf_routing_data"],
     "rate_card": ["rate_card", "labor_categories", "hourly_rates"],
 }
 
@@ -269,7 +269,9 @@ TABLE_FAMILIES: dict[str, tuple[str, list[str]]] = {
     ),
     "rate_card": (
         "Rate Card",
-        ["labor category", "hourly rate", "rate card", "billing rate"],
+        # Require the literal heading. "labor category" / "hourly rate"
+        # alone are common in government CLINs and must not invent a Rate Card.
+        ["rate card"],
     ),
     "labor_categories": (
         "Labor Categories",
@@ -285,19 +287,17 @@ TABLE_FAMILIES: dict[str, tuple[str, list[str]]] = {
     ),
     "pricing_table": (
         "Pricing Table",
-        # "unit price"/"total price" alone are too generic — they also
-        # appear in ordinary supplies/services or line-item tables that
-        # aren't labeled "Pricing Table" anywhere in the document. Only
-        # match when the document itself uses the term.
+        # Literal phrase only — "unit price"/"total price" appear on most
+        # supplies/services schedules that are not Pricing Tables.
         ["pricing table"],
     ),
     "payment_schedule": (
         "Payment Schedule",
-        ["payment schedule", "installment"],
+        ["payment schedule"],
     ),
     "delivery_schedule": (
         "Delivery Schedule",
-        ["delivery schedule", "milestone date"],
+        ["delivery schedule"],
     ),
     "funding_table": (
         "Funding Table",
@@ -318,7 +318,8 @@ TABLE_FAMILIES: dict[str, tuple[str, list[str]]] = {
     ),
     "wawf_routing_data": (
         "WAWF Routing Data",
-        ["wawf", "routing data", "dodaac"],
+        # Need at least two of these for TABLE_MATCH_MIN_SCORE=2
+        ["wawf", "routing", "dodaac"],
     ),
     "clauses_incorporated_by_reference": (
         "Clauses Incorporated by Reference",
@@ -383,7 +384,9 @@ DOCUMENT_FAMILIES: dict[str, tuple[str, list[str]]] = {
     ),
     "rate_card": (
         "Rate Card",
-        ["rate card", "labor category", "hourly rate"],
+        # Document-family classification only — do not treat ordinary
+        # labor-category/hourly-rate language as a Rate Card document.
+        ["rate card", "labor rate card"],
     ),
     "procurement": (
         "Procurement Document",
@@ -412,6 +415,21 @@ FIELD_PROBES: list[tuple[str, str, str]] = [
     ("invoice_number", "Invoice Number", "Invoice Number"),
     ("amount_due", "Amount Due", "Amount Due"),
     ("po_number", "PO Number", "PO Number"),
+    ("solicitation_number", "Solicitation No.", "SOLICITATION"),
+    ("dodaac", "DODAAC", "DODAAC"),
+    ("cage_code", "CAGE Code", "CAGE"),
+    ("psc_cd", "PSC CD", "PSC CD"),
+    ("naics", "NAICS", "NAICS"),
+    ("max_net_amt", "Max Net Amt", "MAX NET AMT"),
+    ("wawf", "WAWF", "WAWF"),
+    ("wawf_payment_office", "WAWF Payment Office", "PAYMENT OFFICE"),
+    ("wawf_admin_office", "WAWF Admin Office", "ADMIN OFFICE"),
+    ("issued_by", "Issued By", "ISSUED BY"),
+    ("ship_to", "Ship To", "SHIP TO"),
+    ("date_issued", "Date Issued", "DATE ISSUED"),
+    ("requisition_number", "Requisition Number", "REQUISITION"),
+    ("offer_due_date", "Offer Due Date", "OFFER DUE"),
+    ("type_of_solicitation", "Type of Solicitation", "TYPE OF SOLICITATION"),
 ]
 
 SUGGESTED_PROMPTS: dict[str, str] = {
@@ -440,7 +458,12 @@ KNOWN_TEMPLATE_KEYS = set(TABLE_FAMILIES) | {
 
 
 def _keyword_score(text: str, keywords: list[str]) -> int:
-    return sum(1 for keyword in keywords if keyword in text)
+    """Score keyword hits. Multi-word phrases are high-signal on their own."""
+    score = 0
+    for keyword in keywords:
+        if keyword in text:
+            score += 2 if " " in keyword.strip() else 1
+    return score
 
 
 def _slugify(label: str) -> str:
@@ -487,21 +510,34 @@ def _label_from_headers(
             best_label = label
             best_score = score
 
-    heading_hits = _heading_matches(surrounding_text[:800])
-    table_headings = [
-        family for family in heading_hits
-        if family.extraction_type == "table"
-    ]
-
-    if table_headings:
-        family = table_headings[0]
-        best_key = family.key
-        best_label = family.label
-        confidence = 0.98
-        evidence = [f"Heading on page {page_number}: {family.label}"]
-        if headers:
-            evidence.append("Columns: " + ", ".join(headers[:8]))
-        return best_key, best_label, confidence, evidence
+    # Heading overrides only apply when there are no usable headers.
+    # With headers present, a page-level phrase like "labor categories"
+    # must not rename every table on that page. Heading-only discovery
+    # (missed table geometry) still runs separately in detect_document_structures.
+    if not headers:
+        heading_hits = _heading_matches(haystack)
+        table_headings = [
+            family for family in heading_hits
+            if family.extraction_type == "table"
+        ]
+        if table_headings:
+            family = table_headings[0]
+            best_key = family.key
+            best_label = family.label
+            if best_key in {"pricing_table", "rate_card"}:
+                required = {
+                    "pricing_table": "pricing table",
+                    "rate_card": "rate card",
+                }[best_key]
+                if required not in haystack:
+                    best_key = f"table_p{page_number}_{index}"
+                    best_label = _humanize_table_label(page_number, headers)
+                    confidence = 0.6
+                    evidence = [f"Unlabeled table on page {page_number}"]
+                    return best_key, best_label, confidence, evidence
+            confidence = 0.98
+            evidence = [f"Heading on page {page_number}: {family.label}"]
+            return best_key, best_label, confidence, evidence
 
     if _is_budget_actual_table(headers):
         lowered = surrounding_text.lower()
@@ -522,11 +558,28 @@ def _label_from_headers(
 
     if best_score < TABLE_MATCH_MIN_SCORE:
         best_key = f"table_p{page_number}_{index}"
+        best_label = _humanize_table_label(page_number, headers)
         confidence = 0.72 if headers else 0.6
         evidence = [f"Unlabeled table on page {page_number}"]
         if headers:
             evidence.append("Columns: " + ", ".join(headers[:8]))
         return best_key, best_label, confidence, evidence
+
+    # Guardrail: never rename a table to a known template family unless
+    # the document literally contains that family's primary phrase.
+    if best_key in {"pricing_table", "rate_card"}:
+        required = {
+            "pricing_table": "pricing table",
+            "rate_card": "rate card",
+        }[best_key]
+        if required not in haystack:
+            best_key = f"table_p{page_number}_{index}"
+            best_label = _humanize_table_label(page_number, headers)
+            confidence = 0.72 if headers else 0.6
+            evidence = [f"Unlabeled table on page {page_number}"]
+            if headers:
+                evidence.append("Columns: " + ", ".join(headers[:8]))
+            return best_key, best_label, confidence, evidence
 
     confidence = min(0.99, 0.78 + 0.07 * best_score)
     evidence = [f"Matched {best_label} from table headers on page {page_number}"]

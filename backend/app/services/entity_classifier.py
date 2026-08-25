@@ -31,6 +31,9 @@ _IDENTIFIER_LABEL_KEYWORDS = (
     "clin",
     "duns",
     "uei",
+    "max net",
+    "wawf",
+    "routing",
 )
 
 _DATE_LABEL_KEYWORDS = (
@@ -50,6 +53,7 @@ _AMOUNT_LABEL_KEYWORDS = (
     "value",
     "fee",
     "rate",
+    "max net",
     "$",
 )
 

@@ -83,9 +83,12 @@ export default function TableResult({ table }: TableResultProps) {
           </p>
           <p className="mt-1 font-semibold text-foreground">
             Page {table.page_number}
+            <span className="ml-2 text-xs font-medium text-text-teal">
+              · Source evidence
+            </span>
           </p>
           <p className="mt-1 text-xs text-text-secondary">
-            {table.source_reference}
+            {table.source_reference || `Verified against page ${table.page_number}`}
           </p>
         </div>
 
