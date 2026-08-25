@@ -82,12 +82,7 @@ async function extractErrorMessage(
 /**
  * Fetches from the Data Agent API and returns the parsed JSON body.
  * Throws a descriptive Error on any failure so callers never have to
- * repeat response.ok / response.json() handling themselves:
- * - non-2xx response -> the backend's own error detail (or its raw
- *   text, or "API returned <status>" as a last resort)
- * - fetch() itself failing (network down, DNS, CORS block) -> a
- *   distinct "Network or CORS error" message, never confused with an
- *   application error
+ * repeat response.ok / response.json() handling themselves.
  */
 export async function apiFetch<T = unknown>(
   path: string,
@@ -101,7 +96,7 @@ export async function apiFetch<T = unknown>(
   } catch (error) {
     if (error instanceof TypeError) {
       throw new Error(
-        "Network or CORS error while contacting the Data Agent API.",
+        `Cannot reach the Data Agent API at ${API_URL}. The processing service may be waking up, offline, or blocked — retry in a moment, or confirm the FastAPI backend is running.`,
       );
     }
 

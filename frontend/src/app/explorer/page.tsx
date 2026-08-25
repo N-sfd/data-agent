@@ -1,9 +1,9 @@
 "use client";
 
-import { Suspense, useEffect, useState } from "react";
+import { Suspense, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { ChevronRight, Loader2 } from "lucide-react";
+import { ChevronRight, Loader2, Search } from "lucide-react";
 
 import ContentSection from "@/components/layout/ContentSection";
 import PageHero from "@/components/layout/PageHero";
@@ -29,12 +29,24 @@ function ExplorerContent() {
       ? initialField
       : "payment_terms",
   );
+  const [fieldQuery, setFieldQuery] = useState("");
   const [aggregation, setAggregation] = useState<FieldAggregation | null>(null);
   const [selectedValue, setSelectedValue] = useState<string | null>(
     initialValue,
   );
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+
+  const filteredFields = useMemo(() => {
+    const q = fieldQuery.trim().toLowerCase();
+    if (!q) return EXPLORER_FIELDS;
+    return EXPLORER_FIELDS.filter(
+      (field) =>
+        field.label.toLowerCase().includes(q) ||
+        field.key.toLowerCase().includes(q) ||
+        field.group.toLowerCase().includes(q),
+    );
+  }, [fieldQuery]);
 
   useEffect(() => {
     let active = true;
@@ -93,22 +105,48 @@ function ExplorerContent() {
       />
 
       <ContentSection>
-      <div className="max-w-md">
-        <label className="mb-2 block text-sm text-text-secondary">Field</label>
-        <select
-          value={selectedField}
-          onChange={(event) =>
-            setSelectedField(event.target.value as ExplorerFieldKey)
-          }
-          className="w-full rounded-2xl border border-border bg-surface px-4 py-3.5 text-[15px] outline-none transition duration-200 focus:border-primary/30 focus:ring-2 focus:ring-primary/10"
-        >
-          {EXPLORER_FIELDS.map((field) => (
-            <option key={field.key} value={field.key}>
-              {field.label}
-            </option>
-          ))}
-        </select>
-      </div>
+        <div className="editorial-card p-5 sm:p-6">
+          <div className="flex flex-wrap items-end gap-4">
+            <div className="min-w-[240px] flex-1">
+              <label className="mb-2 block text-xs font-medium text-text-muted">
+                Search fields
+              </label>
+              <div className="relative">
+                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-text-muted" />
+                <input
+                  type="text"
+                  value={fieldQuery}
+                  onChange={(event) => setFieldQuery(event.target.value)}
+                  placeholder="Payment terms, governing law, supplier..."
+                  className="w-full rounded-xl border border-border bg-surface py-2.5 pl-10 pr-3 text-sm outline-none focus:border-primary/30 focus:ring-2 focus:ring-primary/10"
+                />
+              </div>
+            </div>
+            <div className="min-w-[220px] flex-1">
+              <label className="mb-2 block text-xs font-medium text-text-muted">
+                Target field
+              </label>
+              <select
+                value={selectedField}
+                onChange={(event) =>
+                  setSelectedField(event.target.value as ExplorerFieldKey)
+                }
+                className="w-full rounded-xl border border-border bg-surface px-3 py-2.5 text-sm outline-none focus:border-primary/30 focus:ring-2 focus:ring-primary/10"
+              >
+                {filteredFields.map((field) => (
+                  <option key={field.key} value={field.key}>
+                    {field.group} · {field.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+          {filteredFields.length === 0 && (
+            <p className="mt-3 text-sm text-text-secondary">
+              No fields match &ldquo;{fieldQuery}&rdquo;.
+            </p>
+          )}
+        </div>
 
       {error && (
         <div className="mt-6 rounded-2xl border border-danger/20 bg-danger/5 p-4 text-sm text-danger">
@@ -117,62 +155,68 @@ function ExplorerContent() {
       )}
 
       {loading ? (
-        <div className="mt-12 flex items-center gap-2 text-sm text-text-secondary">
+        <div className="mt-10 flex items-center gap-2 text-sm text-text-secondary">
           <Loader2 className="h-4 w-4 animate-spin" />
           Extracting contract fields across repository...
         </div>
       ) : aggregation ? (
-        <div className="mt-12 grid min-w-0 gap-8 lg:grid-cols-[340px_1fr]">
-          <div className="editorial-card min-w-0 p-8">
+        <div className="mt-8 grid min-w-0 gap-6 lg:grid-cols-[minmax(260px,0.38fr)_minmax(0,0.62fr)]">
+          <div className="editorial-card min-w-0 p-6">
             <h2 className="text-lg font-medium text-foreground">
               {aggregation.field_label}
             </h2>
             <p className="mt-1 text-sm text-text-secondary">
               {aggregation.total_analyzed} contracts analyzed
             </p>
-            <div className="mt-6 space-y-3">
-              {aggregation.buckets.map((bucket) => {
-                const width = Math.max(
-                  8,
-                  Math.round((bucket.count / maxCount) * 100),
-                );
-                return (
-                  <button
-                    key={bucket.value}
-                    type="button"
-                    onClick={() => setSelectedValue(bucket.value)}
-                    className={[
-                      "w-full rounded-xl p-4 text-left transition duration-200",
-                      selectedValue === bucket.value
-                        ? "bg-primary-soft ring-1 ring-primary/20"
-                        : "hover:bg-surface-soft",
-                    ].join(" ")}
-                  >
-                    <div className="flex items-center justify-between gap-3">
-                      <span className="min-w-0 truncate font-medium text-foreground">
-                        {bucket.value}
-                      </span>
-                      <span className="shrink-0 text-sm text-text-secondary">
-                        {bucket.count} contracts
-                      </span>
-                    </div>
-                    <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-surface-soft">
-                      <div
-                        className="h-full rounded-full bg-primary/70"
-                        style={{ width: `${width}%` }}
-                      />
-                    </div>
-                  </button>
-                );
-              })}
+            <div className="mt-5 max-h-[28rem] space-y-2 overflow-y-auto">
+              {aggregation.buckets.length === 0 ? (
+                <p className="text-sm text-text-secondary">
+                  No values found for this field yet.
+                </p>
+              ) : (
+                aggregation.buckets.map((bucket) => {
+                  const width = Math.max(
+                    8,
+                    Math.round((bucket.count / maxCount) * 100),
+                  );
+                  return (
+                    <button
+                      key={bucket.value}
+                      type="button"
+                      onClick={() => setSelectedValue(bucket.value)}
+                      className={[
+                        "w-full rounded-xl p-3 text-left transition duration-200",
+                        selectedValue === bucket.value
+                          ? "bg-primary-soft ring-1 ring-primary/20"
+                          : "hover:bg-surface-soft",
+                      ].join(" ")}
+                    >
+                      <div className="flex items-center justify-between gap-3">
+                        <span className="min-w-0 truncate text-sm font-medium text-foreground">
+                          {bucket.value}
+                        </span>
+                        <span className="shrink-0 text-xs text-text-secondary">
+                          {bucket.count}
+                        </span>
+                      </div>
+                      <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-surface-soft">
+                        <div
+                          className="h-full rounded-full bg-primary/70"
+                          style={{ width: `${width}%` }}
+                        />
+                      </div>
+                    </button>
+                  );
+                })
+              )}
             </div>
           </div>
 
           <div className="editorial-card min-w-0 overflow-hidden">
             {selectedValue ? (
               <>
-                <div className="border-b border-border px-8 py-6">
-                  <p className="text-xl font-medium text-foreground">
+                <div className="border-b border-border px-6 py-5">
+                  <p className="text-lg font-medium text-foreground">
                     {matches.length} matching contracts
                   </p>
                   <p className="mt-1 text-sm text-text-secondary">
@@ -180,25 +224,25 @@ function ExplorerContent() {
                   </p>
                 </div>
                 <div className="overflow-x-auto">
-                  <table className="min-w-full">
+                  <table className="min-w-full text-sm">
                     <thead>
-                      <tr className="border-b border-border">
-                        <th className="px-8 py-4 text-left text-xs font-medium uppercase text-text-secondary">
+                      <tr className="border-b border-border bg-surface-soft">
+                        <th className="px-6 py-3 text-left text-xs font-semibold text-foreground">
                           Contract
                         </th>
-                        <th className="px-4 py-4 text-left text-xs font-medium uppercase text-text-secondary">
+                        <th className="px-4 py-3 text-left text-xs font-semibold text-foreground">
                           Counterparty
                         </th>
-                        <th className="px-4 py-4 text-left text-xs font-medium uppercase text-text-secondary">
+                        <th className="px-4 py-3 text-left text-xs font-semibold text-foreground">
                           Effective
                         </th>
-                        <th className="px-4 py-4 text-left text-xs font-medium uppercase text-text-secondary">
+                        <th className="px-4 py-3 text-left text-xs font-semibold text-foreground">
                           Expires
                         </th>
-                        <th className="px-4 py-4 text-left text-xs font-medium uppercase text-text-secondary">
+                        <th className="px-4 py-3 text-left text-xs font-semibold text-foreground">
                           Confidence
                         </th>
-                        <th className="px-4 py-4" />
+                        <th className="px-4 py-3" />
                       </tr>
                     </thead>
                     <tbody>
@@ -207,29 +251,29 @@ function ExplorerContent() {
                           key={row.document_id}
                           className="border-b border-border/70 hover:bg-surface-soft/60"
                         >
-                          <td className="px-8 py-5 font-medium">
+                          <td className="px-6 py-3.5 font-medium text-foreground">
                             {row.contract_title}
                           </td>
-                          <td className="px-4 py-5 text-text-secondary">
+                          <td className="px-4 py-3.5 text-text-secondary">
                             {row.counterparty ?? "—"}
                           </td>
-                          <td className="px-4 py-5 text-text-secondary">
+                          <td className="px-4 py-3.5 text-text-secondary">
                             {row.effective_date ?? "—"}
                           </td>
-                          <td className="px-4 py-5 text-text-secondary">
+                          <td className="px-4 py-3.5 text-text-secondary">
                             {row.expiration_date ?? "—"}
                           </td>
-                          <td className="px-4 py-5">
+                          <td className="px-4 py-3.5">
                             {row.confidence !== null ? (
                               <ConfidenceIndicator confidence={row.confidence} />
                             ) : (
                               "—"
                             )}
                           </td>
-                          <td className="px-4 py-5">
+                          <td className="px-4 py-3.5">
                             <Link
                               href={`/documents/${row.document_id}/review`}
-                              className="inline-flex items-center gap-1 text-sm text-primary hover:underline"
+                              className="inline-flex items-center gap-1 text-sm text-text-teal hover:text-primary"
                             >
                               Open
                               <ChevronRight className="h-3.5 w-3.5" />
@@ -242,7 +286,7 @@ function ExplorerContent() {
                 </div>
               </>
             ) : (
-              <div className="flex flex-col items-center justify-center px-8 py-20 text-center">
+              <div className="flex flex-col items-center justify-center px-8 py-16 text-center">
                 <p className="font-medium text-foreground">
                   Select a value to explore matching contracts
                 </p>

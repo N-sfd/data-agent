@@ -1,8 +1,10 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Plus, Settings, Trash2 } from "lucide-react";
+import { Plus, Trash2 } from "lucide-react";
 
+import ContentSection from "@/components/layout/ContentSection";
+import PageHero from "@/components/layout/PageHero";
 import {
   addExtractionField,
   createExtractionModel,
@@ -112,23 +114,17 @@ export default function ExtractionModelsPage() {
   }
 
   return (
-    <div className="mx-auto max-w-4xl px-6 py-8">
-      <div className="mb-8 flex items-center gap-3">
-        <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-50">
-          <Settings className="h-5 w-5 text-blue-600" />
-        </div>
-        <div>
-          <p className="text-sm font-semibold text-blue-600">
-            Settings
-          </p>
-          <h1 className="text-xl font-semibold text-slate-950">
-            Extraction Models
-          </h1>
-        </div>
-      </div>
+    <>
+      <PageHero
+        eyebrow="Settings"
+        title="Extraction Models"
+        description="Define reusable field templates for Contract Intelligence runs."
+      />
 
-      <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-        <p className="text-sm font-semibold text-slate-900">
+      <ContentSection>
+
+      <div className="rounded-2xl border border-border bg-surface p-6 shadow-sm">
+        <p className="text-sm font-semibold text-foreground">
           + New Model
         </p>
 
@@ -140,7 +136,7 @@ export default function ExtractionModelsPage() {
             onChange={(event) =>
               setNewModelName(event.target.value)
             }
-            className="rounded-lg border border-slate-300 px-3 py-2 text-sm"
+            className="rounded-lg border border-border px-3 py-2 text-sm"
           />
           <input
             type="text"
@@ -149,13 +145,13 @@ export default function ExtractionModelsPage() {
             onChange={(event) =>
               setNewModelDescription(event.target.value)
             }
-            className="rounded-lg border border-slate-300 px-3 py-2 text-sm"
+            className="rounded-lg border border-border px-3 py-2 text-sm"
           />
           <button
             type="button"
             onClick={handleCreateModel}
             disabled={creatingModel || !newModelName.trim()}
-            className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
+            className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-white transition hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-60"
           >
             <Plus className="h-4 w-4" />
             Create
@@ -164,18 +160,18 @@ export default function ExtractionModelsPage() {
       </div>
 
       {error && (
-        <div className="mt-4 rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+        <div className="mt-4 rounded-xl border border-danger/20 bg-danger/5 p-3 text-sm text-danger">
           {error}
         </div>
       )}
 
       <div className="mt-6 space-y-4">
         {loading && (
-          <p className="text-sm text-slate-500">Loading...</p>
+          <p className="text-sm text-text-secondary">Loading...</p>
         )}
 
         {!loading && models.length === 0 && (
-          <div className="rounded-2xl border border-slate-200 bg-white p-10 text-center text-sm text-slate-500 shadow-sm">
+          <div className="rounded-2xl border border-border bg-surface p-10 text-center text-sm text-text-secondary shadow-sm">
             No extraction models yet. Create one above.
           </div>
         )}
@@ -189,7 +185,8 @@ export default function ExtractionModelsPage() {
           />
         ))}
       </div>
-    </div>
+      </ContentSection>
+    </>
   );
 }
 
@@ -254,14 +251,14 @@ function ModelCard({
   }
 
   return (
-    <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+    <div className="rounded-2xl border border-border bg-surface p-6 shadow-sm">
       <div className="flex items-start justify-between gap-3">
         <div>
-          <p className="text-sm font-semibold text-slate-900">
+          <p className="text-sm font-semibold text-foreground">
             {model.name}
           </p>
           {model.description && (
-            <p className="mt-0.5 text-xs text-slate-500">
+            <p className="mt-0.5 text-xs text-text-secondary">
               {model.description}
             </p>
           )}
@@ -270,7 +267,7 @@ function ModelCard({
         <button
           type="button"
           onClick={onDeleteModel}
-          className="rounded-lg p-2 text-slate-400 transition hover:bg-red-50 hover:text-red-600"
+          className="rounded-lg p-2 text-text-muted transition hover:bg-red-50 hover:text-red-600"
           aria-label={`Delete ${model.name}`}
         >
           <Trash2 className="h-4 w-4" />
@@ -282,17 +279,17 @@ function ModelCard({
           {model.fields.map((field) => (
             <div
               key={field.id}
-              className="flex items-center justify-between gap-2 rounded-xl bg-slate-50 p-3"
+              className="flex items-center justify-between gap-2 rounded-xl bg-surface-soft p-3"
             >
               <div className="min-w-0">
-                <p className="truncate text-sm font-medium text-slate-800">
+                <p className="truncate text-sm font-medium text-foreground">
                   {field.field_name}
-                  <span className="ml-2 rounded-full bg-slate-200 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-slate-600">
+                  <span className="ml-2 rounded-full bg-border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-text-secondary">
                     {field.data_type}
                   </span>
                 </p>
                 {field.description && (
-                  <p className="mt-0.5 truncate text-xs text-slate-500">
+                  <p className="mt-0.5 truncate text-xs text-text-secondary">
                     {field.description}
                   </p>
                 )}
@@ -301,7 +298,7 @@ function ModelCard({
               <button
                 type="button"
                 onClick={() => handleDeleteField(field.id)}
-                className="shrink-0 rounded-lg p-1.5 text-slate-400 transition hover:bg-red-50 hover:text-red-600"
+                className="shrink-0 rounded-lg p-1.5 text-text-muted transition hover:bg-red-50 hover:text-red-600"
                 aria-label={`Delete ${field.field_name}`}
               >
                 <Trash2 className="h-3.5 w-3.5" />
@@ -311,8 +308,8 @@ function ModelCard({
         </div>
       )}
 
-      <div className="mt-4 rounded-xl border border-dashed border-slate-300 p-3">
-        <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+      <div className="mt-4 rounded-xl border border-dashed border-border p-3">
+        <p className="text-xs font-semibold uppercase tracking-wide text-text-secondary">
           + Add Field
         </p>
 
@@ -324,7 +321,7 @@ function ModelCard({
             onChange={(event) =>
               setFieldName(event.target.value)
             }
-            className="rounded-lg border border-slate-300 px-2.5 py-1.5 text-sm"
+            className="rounded-lg border border-border px-2.5 py-1.5 text-sm"
           />
 
           <select
@@ -334,7 +331,7 @@ function ModelCard({
                 event.target.value as ExtractionFieldDataType,
               )
             }
-            className="rounded-lg border border-slate-300 px-2.5 py-1.5 text-sm capitalize"
+            className="rounded-lg border border-border px-2.5 py-1.5 text-sm capitalize"
           >
             {DATA_TYPES.map((type) => (
               <option key={type} value={type}>
@@ -351,21 +348,21 @@ function ModelCard({
             setFieldDescription(event.target.value)
           }
           rows={2}
-          className="mt-2 w-full rounded-lg border border-slate-300 px-2.5 py-1.5 text-sm"
+          className="mt-2 w-full rounded-lg border border-border px-2.5 py-1.5 text-sm"
         />
 
         <button
           type="button"
           onClick={handleAddField}
           disabled={addingField || !fieldName.trim()}
-          className="mt-2 inline-flex items-center gap-1.5 rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
+          className="mt-2 inline-flex items-center gap-1.5 rounded-lg bg-primary px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-60"
         >
           <Plus className="h-3.5 w-3.5" />
           Add Field
         </button>
 
         {fieldError && (
-          <p className="mt-2 text-xs text-red-700">
+          <p className="mt-2 text-xs text-danger">
             {fieldError}
           </p>
         )}

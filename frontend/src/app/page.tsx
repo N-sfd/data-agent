@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import { ArrowRight, Loader2, Sparkles, Upload } from "lucide-react";
 
+import CapabilitySection from "@/components/capability-section";
 import DocumentResultsTable from "@/components/document-results-table";
 import ContentSection from "@/components/layout/ContentSection";
 import PageHero from "@/components/layout/PageHero";
@@ -67,14 +68,16 @@ export default function HomePage() {
       />
 
       <ContentSection>
+        <CapabilitySection />
+
         {loading ? (
-          <div className="flex items-center gap-2 text-sm text-text-secondary">
+          <div className="mt-14 flex items-center gap-2 text-sm text-text-secondary">
             <Loader2 className="h-4 w-4 animate-spin" />
             Building contract intelligence...
           </div>
         ) : stats ? (
           <>
-            <section>
+            <section className="mt-14">
               <h2 className="mb-4 text-lg font-medium text-foreground">
                 Operational metrics
               </h2>

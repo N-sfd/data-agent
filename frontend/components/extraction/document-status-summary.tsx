@@ -46,22 +46,22 @@ export default function DocumentStatusSummary({
     const checksPassed = document.pipeline_log?.length ?? 0;
 
     return (
-      <div className="rounded-xl bg-emerald-50 p-4">
-        <p className="flex items-center gap-2 text-sm font-semibold text-emerald-800">
+      <div className="rounded-xl bg-success/10 px-3 py-3">
+        <p className="flex items-center gap-2 text-sm font-semibold text-success">
           <CheckCircle2 className="h-4 w-4" />
           Extraction complete
         </p>
-        <p className="mt-1.5 text-sm text-emerald-700">
+        <p className="mt-1 text-xs text-success/90">
           {extraction.pages_processed} / {extraction.total_document_pages}{" "}
-          pages processed
+          pages
           {checksPassed > 0 &&
-            ` · ${checksPassed} ingestion check${checksPassed === 1 ? "" : "s"} passed`}
+            ` · ${checksPassed} check${checksPassed === 1 ? "" : "s"}`}
         </p>
 
         <button
           type="button"
           onClick={onOpenDetails}
-          className="mt-3 text-xs font-semibold text-emerald-800 underline underline-offset-2 hover:text-emerald-900"
+          className="mt-2 text-xs font-semibold text-success underline underline-offset-2 hover:opacity-80"
         >
           View processing details
         </button>

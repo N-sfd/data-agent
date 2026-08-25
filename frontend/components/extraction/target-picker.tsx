@@ -51,26 +51,33 @@ export default function TargetPicker({
   );
   const grouped = useMemo(() => groupTargets(filtered), [filtered]);
   const hasAnyDetected = targets.length > 0;
+  const fieldCount = targets.filter((t) => t.target_type === "field").length;
+  const tableCount = targets.filter((t) => t.target_type === "table").length;
 
   return (
-    <div className="rounded-xl border border-slate-200 bg-white">
-      <div className="flex items-center gap-2 border-b border-slate-100 px-3">
-        <Search className="h-4 w-4 shrink-0 text-slate-400" />
+    <div className="overflow-hidden rounded-xl border border-border bg-surface">
+      <div className="flex items-center gap-2 border-b border-border bg-surface-soft px-3">
+        <Search className="h-4 w-4 shrink-0 text-text-muted" />
         <input
           type="text"
           value={query}
           disabled={disabled}
           onChange={(event) => setQuery(event.target.value)}
-          placeholder="Search detected fields, tables, clauses..."
-          className="flex-1 py-3 text-sm outline-none placeholder:text-slate-400 disabled:opacity-50"
+          placeholder="Search this document’s schema..."
+          className="flex-1 bg-transparent py-3 text-sm text-foreground outline-none placeholder:text-text-muted disabled:opacity-50"
         />
+        {hasAnyDetected && (
+          <span className="shrink-0 text-[11px] font-medium text-text-muted">
+            {targets.length} detected
+          </span>
+        )}
       </div>
 
       <div className="max-h-80 overflow-y-auto p-2">
         {hasAnyDetected &&
           Array.from(grouped.entries()).map(([groupKey, groupTargetsList]) => (
             <section key={groupKey} className="mb-1">
-              <p className="px-2 py-1.5 text-[11px] font-semibold uppercase tracking-wider text-slate-400">
+              <p className="px-2 py-1.5 text-[11px] font-semibold uppercase tracking-wider text-text-muted">
                 {displayGroupLabel(groupKey)}
               </p>
               {groupTargetsList.map((target) => {
@@ -81,23 +88,29 @@ export default function TargetPicker({
                     type="button"
                     disabled={disabled}
                     onClick={() => onToggle(target.id)}
-                    className="flex w-full items-center gap-3 rounded-lg px-2 py-2 text-left transition hover:bg-slate-50 disabled:opacity-50"
+                    className={[
+                      "flex w-full items-center gap-3 rounded-lg px-2 py-2 text-left transition disabled:opacity-50",
+                      selected
+                        ? "bg-primary/8 hover:bg-primary/12"
+                        : "hover:bg-surface-soft",
+                    ].join(" ")}
                   >
                     <span
-                      className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border ${
+                      className={[
+                        "flex h-4 w-4 shrink-0 items-center justify-center rounded border",
                         selected
-                          ? "border-blue-600 bg-blue-600"
-                          : "border-slate-300 bg-white"
-                      }`}
+                          ? "border-primary bg-primary"
+                          : "border-border bg-surface",
+                      ].join(" ")}
                     >
                       {selected && <Check className="h-3 w-3 text-white" />}
                     </span>
                     <span className="min-w-0 flex-1">
-                      <span className="block truncate text-sm font-medium text-slate-800">
+                      <span className="block truncate text-sm font-medium text-foreground">
                         {target.label}
                       </span>
-                      <span className="flex items-center gap-1 text-xs text-slate-500">
-                        <span className="inline-block h-1.5 w-1.5 rounded-full bg-emerald-500" />
+                      <span className="flex items-center gap-1 text-xs text-text-secondary">
+                        <span className="inline-block h-1.5 w-1.5 rounded-full bg-success" />
                         {confidenceLabel(target)}
                       </span>
                     </span>
@@ -108,19 +121,20 @@ export default function TargetPicker({
           ))}
 
         {!hasAnyDetected && (
-          <p className="px-2 py-6 text-center text-sm text-slate-500">
-            No structures were detected in this document yet.
+          <p className="px-2 py-6 text-center text-sm text-text-secondary">
+            No structures were detected in this document yet. Use a custom
+            instruction below, or wait for schema discovery to finish.
           </p>
         )}
 
         {hasAnyDetected && filtered.length === 0 && (
-          <p className="px-2 py-6 text-center text-sm text-slate-500">
+          <p className="px-2 py-6 text-center text-sm text-text-secondary">
             No detected items match &ldquo;{query}&rdquo;.
           </p>
         )}
 
-        <section className="mt-1 border-t border-slate-100 pt-2">
-          <p className="px-2 py-1.5 text-[11px] font-semibold uppercase tracking-wider text-slate-400">
+        <section className="mt-1 border-t border-border pt-2">
+          <p className="px-2 py-1.5 text-[11px] font-semibold uppercase tracking-wider text-text-muted">
             Custom
           </p>
           <div className="flex flex-wrap gap-2 px-2 pb-1">
@@ -130,7 +144,7 @@ export default function TargetPicker({
                 type="button"
                 disabled={disabled}
                 onClick={() => onSelectCustom(pick)}
-                className="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-600 transition hover:border-blue-300 hover:bg-blue-50 hover:text-blue-700 disabled:opacity-50"
+                className="rounded-full border border-border bg-surface px-3 py-1.5 text-xs font-medium text-text-secondary transition hover:border-accent/40 hover:bg-accent/5 hover:text-accent disabled:opacity-50"
               >
                 {pick.label}
               </button>
@@ -139,31 +153,31 @@ export default function TargetPicker({
         </section>
       </div>
 
-      <div className="flex flex-wrap items-center gap-2 border-t border-slate-100 p-3">
+      <div className="flex flex-wrap items-center gap-2 border-t border-border p-3">
         <button
           type="button"
           disabled={disabled || selectedIds.size === 0}
           onClick={onClear}
-          className="rounded-lg px-3 py-1.5 text-xs font-medium text-slate-500 transition hover:text-slate-700 disabled:opacity-40"
+          className="rounded-lg px-3 py-1.5 text-xs font-medium text-text-muted transition hover:text-foreground disabled:opacity-40"
         >
           Clear
         </button>
         <div className="flex-1" />
         <button
           type="button"
-          disabled={disabled || !hasAnyDetected}
+          disabled={disabled || fieldCount === 0}
           onClick={() => onSelectAll("field")}
-          className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-medium text-slate-700 transition hover:bg-slate-50 disabled:opacity-40"
+          className="rounded-lg border border-border px-3 py-1.5 text-xs font-medium text-foreground transition hover:bg-surface-soft disabled:opacity-40"
         >
-          Extract All Detected Fields
+          Extract All Fields{fieldCount ? ` (${fieldCount})` : ""}
         </button>
         <button
           type="button"
-          disabled={disabled || !hasAnyDetected}
+          disabled={disabled || tableCount === 0}
           onClick={() => onSelectAll("table")}
-          className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-medium text-slate-700 transition hover:bg-slate-50 disabled:opacity-40"
+          className="rounded-lg border border-border px-3 py-1.5 text-xs font-medium text-foreground transition hover:bg-surface-soft disabled:opacity-40"
         >
-          Extract All Tables
+          Extract All Tables{tableCount ? ` (${tableCount})` : ""}
         </button>
       </div>
     </div>

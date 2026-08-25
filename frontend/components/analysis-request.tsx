@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowRight, Search } from "lucide-react";
+import { ArrowRight, Loader2, Search } from "lucide-react";
 import { useState } from "react";
 
 import ExtractionInstruction from "@/components/extraction/extraction-instruction";
@@ -19,6 +19,7 @@ interface AnalysisRequestProps {
   waking?: boolean;
   targets?: DocumentTarget[];
   documentFamilyLabel?: string | null;
+  schemaDiscovering?: boolean;
 
   onExtractTargets: (
     targetIds: string[],
@@ -30,12 +31,9 @@ interface AnalysisRequestProps {
 }
 
 const CUSTOM_QUICK_PICKS: CustomQuickPick[] = [
-  { key: "custom_field", label: "Custom Field", prompt: "" },
-  { key: "custom_table", label: "Custom Table", prompt: "" },
-  { key: "custom_question", label: "Custom Question", prompt: "" },
   {
     key: "custom_instruction",
-    label: "Custom Extraction Instruction",
+    label: "Write a custom instruction",
     prompt: "",
   },
 ];
@@ -45,6 +43,7 @@ export default function AnalysisRequest({
   waking = false,
   targets = [],
   documentFamilyLabel = null,
+  schemaDiscovering = false,
   onExtractTargets,
   onAnalyze,
 }: AnalysisRequestProps) {
@@ -86,10 +85,7 @@ export default function AnalysisRequest({
 
     try {
       const result = await onExtractTargets(targetIds);
-      if (
-        result.scalars.length === 0 &&
-        result.tables.length === 0
-      ) {
+      if (result.scalars.length === 0 && result.tables.length === 0) {
         setNoMatch(true);
       }
     } catch (error) {
@@ -135,83 +131,97 @@ export default function AnalysisRequest({
   }
 
   return (
-    <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+    <div className="editorial-card p-6 sm:p-8">
       <div className="flex items-start gap-3">
-        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-blue-50">
-          <Search className="h-5 w-5 text-blue-600" />
+        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-primary/10">
+          <Search className="h-5 w-5 text-primary" strokeWidth={1.75} />
         </div>
 
-        <div>
-          <h2 className="text-lg font-semibold text-slate-950">
+        <div className="min-w-0">
+          <h2 className="text-lg font-medium text-foreground">
             Universal Extraction
           </h2>
-          <p className="mt-0.5 text-base font-medium text-slate-800">
+          <p className="mt-0.5 text-base font-medium text-foreground">
             What do you want to extract?
           </p>
-          <p className="mt-1 text-sm leading-6 text-slate-500">
-            Search fields, tables, sections, clauses, and other
-            information actually detected in this document.
+          <p className="mt-1 text-sm leading-6 text-text-secondary">
+            Search the document schema — fields, tables, sections, and clauses
+            actually detected in this file.
           </p>
         </div>
       </div>
 
       {documentFamilyLabel && (
-        <p className="mt-4 text-xs text-slate-500">
+        <p className="mt-4 text-xs text-text-secondary">
           Detected as{" "}
-          <span className="font-medium text-slate-700">
+          <span className="font-medium text-foreground">
             {documentFamilyLabel}
           </span>
         </p>
       )}
 
-      <div className="mt-4">
-        <TargetPicker
-          targets={targets}
-          customQuickPicks={CUSTOM_QUICK_PICKS}
-          selectedIds={selectedIds}
-          disabled={busy}
-          onToggle={toggleTarget}
-          onSelectAll={selectAllOfType}
-          onClear={clearSelection}
-          onSelectCustom={selectCustomQuickPick}
-        />
+      <div className="mt-5">
+        {schemaDiscovering ? (
+          <div className="flex items-center gap-2 rounded-xl border border-border bg-surface-soft px-4 py-6 text-sm text-text-secondary">
+            <Loader2 className="h-4 w-4 animate-spin text-primary" />
+            Discovering document schema...
+          </div>
+        ) : (
+          <TargetPicker
+            targets={targets}
+            customQuickPicks={CUSTOM_QUICK_PICKS}
+            selectedIds={selectedIds}
+            disabled={busy}
+            onToggle={toggleTarget}
+            onSelectAll={selectAllOfType}
+            onClear={clearSelection}
+            onSelectCustom={selectCustomQuickPick}
+          />
+        )}
       </div>
 
       <button
         type="button"
         disabled={busy || selectedIds.size === 0}
         onClick={() => void runExtraction(Array.from(selectedIds))}
-        className="mt-4 inline-flex items-center gap-2 rounded-xl bg-slate-950 px-5 py-3 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-40"
+        className="btn-primary mt-4 disabled:cursor-not-allowed disabled:opacity-40"
       >
-        {extracting
-          ? "Extracting..."
-          : `Extract Selected${selectedIds.size ? ` (${selectedIds.size})` : ""}`}
-        {!extracting && <ArrowRight className="h-4 w-4" />}
+        {extracting ? (
+          <>
+            <Loader2 className="h-4 w-4 animate-spin" />
+            Extracting selected targets...
+          </>
+        ) : (
+          <>
+            Extract Selected{selectedIds.size ? ` (${selectedIds.size})` : ""}
+            <ArrowRight className="h-4 w-4" />
+          </>
+        )}
       </button>
 
-      {extracting && waking && (
-        <div className="mt-4 rounded-xl bg-slate-50 p-3 text-sm text-slate-600">
-          Waking processing service... this can take up to a minute
-          after a deploy.
+      {extracting && (
+        <div className="mt-4 rounded-xl border border-primary/15 bg-primary/5 px-3.5 py-2.5 text-sm text-text-secondary">
+          {waking
+            ? "Waking processing service — first request after idle can take up to a minute."
+            : "Running extraction against detected document schema..."}
         </div>
       )}
 
       {noMatch && (
-        <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-700">
-          That selection didn&apos;t resolve to any values in this
-          document.
+        <div className="mt-4 rounded-xl border border-warning/25 bg-warning/5 p-4 text-sm text-warning">
+          That selection didn&apos;t resolve to any values in this document.
         </div>
       )}
 
       {extractError && (
-        <div className="mt-4 rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+        <div className="mt-4 rounded-xl border border-danger/20 bg-danger/5 p-3 text-sm text-danger">
           {extractError}
         </div>
       )}
 
-      <div className="mt-6 border-t border-slate-100 pt-5">
-        <p className="text-xs font-medium text-slate-500">
-          Custom — ask anything
+      <div className="mt-6 border-t border-border pt-5">
+        <p className="text-xs font-medium text-text-muted">
+          Or ask anything not listed above
         </p>
         <div className="mt-2">
           <ExtractionInstruction
@@ -229,13 +239,27 @@ export default function AnalysisRequest({
           type="button"
           disabled={busy || !instruction.trim()}
           onClick={() => void askQuestion()}
-          className="mt-3 inline-flex items-center gap-2 rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
+          className="btn-secondary mt-3 disabled:cursor-not-allowed disabled:opacity-40"
         >
-          {asking ? "Analyzing..." : "Ask / Extract Custom"}
+          {asking ? (
+            <>
+              <Loader2 className="h-4 w-4 animate-spin" />
+              Analyzing...
+            </>
+          ) : (
+            "Ask / Extract Custom"
+          )}
         </button>
 
+        {asking && waking && (
+          <div className="mt-3 rounded-xl border border-primary/15 bg-primary/5 px-3.5 py-2.5 text-sm text-text-secondary">
+            Waking processing service — first request after idle can take up to
+            a minute.
+          </div>
+        )}
+
         {askError && (
-          <div className="mt-3 rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+          <div className="mt-3 rounded-xl border border-danger/20 bg-danger/5 p-3 text-sm text-danger">
             {askError}
           </div>
         )}

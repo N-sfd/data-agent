@@ -18,6 +18,10 @@ export const metadata: Metadata = {
   title: "Data Agent — Consult America",
   description:
     "Enterprise AI contract intelligence workspace for Consult America.",
+  icons: {
+    icon: "/consult-america-logo.jpg",
+    apple: "/consult-america-logo.jpg",
+  },
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {

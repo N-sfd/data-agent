@@ -1,18 +1,23 @@
-import PageHeader from "@/components/page-header";
+import ContentSection from "@/components/layout/ContentSection";
+import PageHero from "@/components/layout/PageHero";
 
 export default function ApiKeysPage() {
   return (
-    <div className="mx-auto max-w-3xl px-6 py-8">
-      <PageHeader
+    <>
+      <PageHero
+        eyebrow="Governance"
         title="API Keys"
-        description="Manage integration keys for external systems."
+        description="Manage integration keys for external systems and automation."
       />
-      <div className="rounded-xl border border-border bg-surface p-8 text-center">
-        <p className="text-sm font-medium text-foreground">Coming Soon</p>
-        <p className="mt-1 text-sm text-text-secondary">
-          API key management will be available in a future release.
-        </p>
-      </div>
-    </div>
+
+      <ContentSection>
+        <div className="editorial-card p-10 text-center">
+          <p className="text-base font-medium text-foreground">Coming soon</p>
+          <p className="mt-2 text-sm text-text-secondary">
+            API key management will be available in a future release.
+          </p>
+        </div>
+      </ContentSection>
+    </>
   );
 }

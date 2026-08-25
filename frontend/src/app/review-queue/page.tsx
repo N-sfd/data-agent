@@ -14,7 +14,8 @@ import {
   XCircle,
 } from "lucide-react";
 
-import PageHeader from "@/components/page-header";
+import ContentSection from "@/components/layout/ContentSection";
+import PageHero from "@/components/layout/PageHero";
 import ConfidenceBadge from "@/components/confidence-badge";
 import { acceptAllMetadataFields, getReviewQueue } from "@/lib/documents";
 import {
@@ -193,8 +194,9 @@ export default function ReviewQueuePage() {
   );
 
   return (
-    <div className="mx-auto max-w-6xl px-6 py-8">
-      <PageHeader
+    <>
+      <PageHero
+        eyebrow="Review"
         title="Review Queue"
         description="Complete human review for extracted contract fields."
         actions={
@@ -202,7 +204,7 @@ export default function ReviewQueuePage() {
             type="button"
             onClick={() => void load()}
             disabled={loading}
-            className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface px-3 py-2 text-xs font-semibold text-foreground transition hover:bg-background disabled:opacity-50"
+            className="btn-hero-secondary disabled:opacity-50"
           >
             <RefreshCw
               className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`}
@@ -212,6 +214,7 @@ export default function ReviewQueuePage() {
         }
       />
 
+      <ContentSection>
       <div className="mb-4 flex flex-wrap items-center gap-2">
         <button
           type="button"
@@ -219,14 +222,14 @@ export default function ReviewQueuePage() {
           className={[
             "inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-semibold transition",
             activeBucket === "all"
-              ? "bg-blue-600 text-white"
-              : "bg-white text-slate-600 hover:bg-slate-100 border border-slate-200",
+              ? "bg-primary text-white"
+              : "border border-border bg-surface text-text-secondary hover:bg-surface-soft",
           ].join(" ")}
         >
           All
           <span
             className={
-              activeBucket === "all" ? "text-blue-100" : "text-slate-400"
+              activeBucket === "all" ? "text-white/80" : "text-text-muted"
             }
           >
             {filteredEntries.length}
@@ -246,7 +249,7 @@ export default function ReviewQueuePage() {
               "inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-semibold transition",
               activeBucket === section.bucket
                 ? `${section.chipActive} border-transparent`
-                : "border-slate-200 bg-white text-slate-600 hover:bg-slate-100",
+                : "border-border bg-surface text-text-secondary hover:bg-surface-soft",
             ].join(" ")}
           >
             <section.icon className="h-3.5 w-3.5" />
@@ -255,7 +258,7 @@ export default function ReviewQueuePage() {
               className={
                 activeBucket === section.bucket
                   ? "opacity-80"
-                  : "text-slate-400"
+                  : "text-text-muted"
               }
             >
               {bucketCounts[section.bucket]}
@@ -266,20 +269,20 @@ export default function ReviewQueuePage() {
 
       <div className="mb-6 flex flex-wrap items-center gap-3">
         <div className="relative min-w-[240px] flex-1">
-          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-text-muted" />
           <input
             type="text"
             value={query}
             onChange={(event) => setQuery(event.target.value)}
             placeholder="Search by filename..."
-            className="w-full rounded-xl border border-slate-300 py-2 pl-9 pr-3 text-sm text-slate-800"
+            className="w-full rounded-xl border border-border bg-surface py-2 pl-9 pr-3 text-sm text-foreground outline-none focus:border-primary/30"
           />
         </div>
 
         <select
           value={documentType}
           onChange={(event) => setDocumentType(event.target.value)}
-          className="rounded-xl border border-slate-300 px-3 py-2 text-sm text-slate-700"
+          className="rounded-xl border border-border bg-surface px-3 py-2 text-sm text-foreground outline-none focus:border-primary/30"
         >
           <option value="">All types</option>
           {documentTypesInQueue.map((option) => (
@@ -291,7 +294,7 @@ export default function ReviewQueuePage() {
       </div>
 
       {error && (
-        <div className="mb-6 rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+        <div className="mb-6 rounded-xl border border-danger/20 bg-danger/5 p-3 text-sm text-danger">
           {error}
         </div>
       )}
@@ -301,19 +304,19 @@ export default function ReviewQueuePage() {
           {[0, 1, 2].map((index) => (
             <div
               key={index}
-              className="h-16 animate-pulse rounded-2xl border border-slate-200 bg-slate-100"
+              className="h-16 animate-pulse rounded-2xl border border-border bg-surface-soft"
             />
           ))}
         </div>
       )}
 
       {!loading && entries.length === 0 && !error && (
-        <div className="flex flex-col items-center gap-2 rounded-2xl border border-dashed border-slate-200 py-16 text-center">
-          <Inbox className="h-8 w-8 text-slate-300" />
-          <p className="text-sm font-medium text-slate-600">
+        <div className="flex flex-col items-center gap-2 rounded-2xl border border-dashed border-border py-16 text-center">
+          <Inbox className="h-8 w-8 text-text-muted" />
+          <p className="text-sm font-medium text-foreground">
             The review queue is empty.
           </p>
-          <p className="text-xs text-slate-400">
+          <p className="text-xs text-text-secondary">
             Every uploaded document has been fully reviewed.
           </p>
         </div>
@@ -323,7 +326,7 @@ export default function ReviewQueuePage() {
         entries.length > 0 &&
         filteredEntries.length === 0 &&
         !error && (
-          <p className="rounded-2xl border border-dashed border-slate-200 py-10 text-center text-sm text-slate-500">
+          <p className="rounded-2xl border border-dashed border-border py-10 text-center text-sm text-text-secondary">
             No documents match your filters.
           </p>
         )}
@@ -337,41 +340,38 @@ export default function ReviewQueuePage() {
           if (sectionEntries.length === 0) return null;
 
           return (
-            <div
-              key={section.bucket}
-              className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm"
-            >
-              <div className="flex items-center gap-2 border-b border-slate-200 px-6 py-4">
+            <div key={section.bucket} className="editorial-card overflow-hidden">
+              <div className="flex items-center gap-2 border-b border-border px-6 py-4">
                 <section.icon className={`h-4 w-4 ${section.tone}`} />
                 <div>
-                  <p className="text-sm font-semibold text-slate-900">
+                  <p className="text-sm font-semibold text-foreground">
                     {section.label}
-                    <span className="ml-2 text-xs font-normal text-slate-400">
+                    <span className="ml-2 text-xs font-normal text-text-muted">
                       {sectionEntries.length}
                     </span>
                   </p>
-                  <p className="text-xs text-slate-400">
+                  <p className="text-xs text-text-secondary">
                     {section.description}
                   </p>
                 </div>
               </div>
 
-              <div className="divide-y divide-slate-100">
+              <div className="divide-y divide-border">
                 {sectionEntries.map((entry) => (
                   <div
                     key={entry.document_id}
                     className="flex flex-wrap items-center justify-between gap-3 px-6 py-3"
                   >
                     <div className="min-w-0">
-                      <p className="truncate text-sm font-medium text-slate-800">
+                      <p className="truncate text-sm font-medium text-foreground">
                         {entry.original_filename}
                       </p>
-                      <p className="text-xs text-slate-400">
+                      <p className="text-xs text-text-secondary">
                         {entry.document_type ?? "Unclassified"} ·{" "}
                         {new Date(entry.uploaded_at).toLocaleDateString()}
                       </p>
                       {rowErrors[entry.document_id] && (
-                        <p className="mt-1 text-xs text-red-600">
+                        <p className="mt-1 text-xs text-danger">
                           {rowErrors[entry.document_id]}
                         </p>
                       )}
@@ -386,7 +386,7 @@ export default function ReviewQueuePage() {
                         type="button"
                         onClick={() => handleAcceptAll(entry)}
                         disabled={acceptingId === entry.document_id}
-                        className="inline-flex items-center gap-1 rounded-lg border border-slate-300 px-2.5 py-1 text-xs font-semibold text-slate-700 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
+                        className="btn-secondary py-1 text-xs disabled:cursor-not-allowed disabled:opacity-50"
                       >
                         <CheckCheck className="h-3.5 w-3.5" />
                         {acceptingId === entry.document_id
@@ -396,7 +396,7 @@ export default function ReviewQueuePage() {
 
                       <Link
                         href={`/documents/${entry.document_id}/review`}
-                        className="text-xs font-semibold text-blue-700 hover:text-blue-800"
+                        className="text-xs font-semibold text-text-teal hover:text-primary"
                       >
                         Review
                       </Link>
@@ -408,6 +408,7 @@ export default function ReviewQueuePage() {
           );
         })}
       </div>
-    </div>
+      </ContentSection>
+    </>
   );
 }

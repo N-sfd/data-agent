@@ -75,16 +75,16 @@ export default function TableResult({ table }: TableResultProps) {
   }
 
   return (
-    <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 px-6 py-4">
-        <div>
-          <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+    <div className="editorial-card overflow-hidden">
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-6 py-4">
+        <div className="min-w-0">
+          <p className="text-xs font-semibold uppercase tracking-wide text-text-muted">
             {table.title || "Extracted table"}
           </p>
-          <p className="mt-1 font-semibold text-slate-900">
+          <p className="mt-1 font-semibold text-foreground">
             Page {table.page_number}
           </p>
-          <p className="mt-1 text-xs text-slate-500">
+          <p className="mt-1 text-xs text-text-secondary">
             {table.source_reference}
           </p>
         </div>
@@ -92,7 +92,7 @@ export default function TableResult({ table }: TableResultProps) {
         <div className="flex flex-wrap gap-2">
           <a
             href={`#page-${table.page_number}`}
-            className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+            className="btn-secondary py-1.5 text-xs"
           >
             <FileText className="h-3.5 w-3.5" />
             View Source
@@ -101,10 +101,10 @@ export default function TableResult({ table }: TableResultProps) {
           <button
             type="button"
             onClick={copyTable}
-            className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+            className="btn-secondary py-1.5 text-xs"
           >
             {copied ? (
-              <Check className="h-3.5 w-3.5 text-emerald-600" />
+              <Check className="h-3.5 w-3.5 text-success" />
             ) : (
               <Copy className="h-3.5 w-3.5" />
             )}
@@ -114,7 +114,7 @@ export default function TableResult({ table }: TableResultProps) {
           <button
             type="button"
             onClick={exportCsv}
-            className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+            className="btn-secondary py-1.5 text-xs"
           >
             <Download className="h-3.5 w-3.5" />
             Export CSV
@@ -123,7 +123,7 @@ export default function TableResult({ table }: TableResultProps) {
           <button
             type="button"
             onClick={exportJson}
-            className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+            className="btn-secondary py-1.5 text-xs"
           >
             <Download className="h-3.5 w-3.5" />
             Export JSON
@@ -133,12 +133,12 @@ export default function TableResult({ table }: TableResultProps) {
 
       <div className="overflow-x-auto">
         <table className="min-w-full text-sm">
-          <thead className="bg-slate-50">
+          <thead className="bg-surface-soft">
             <tr>
               {table.headers.map((header) => (
                 <th
                   key={header}
-                  className="whitespace-nowrap border-b border-slate-200 px-4 py-3 text-left font-semibold text-slate-700"
+                  className="whitespace-nowrap border-b border-border px-4 py-3 text-left font-semibold text-foreground"
                 >
                   {header}
                 </th>
@@ -150,12 +150,12 @@ export default function TableResult({ table }: TableResultProps) {
             {table.rows.map((row, rowIndex) => (
               <tr
                 key={rowIndex}
-                className="border-b border-slate-100 last:border-0 hover:bg-slate-50"
+                className="border-b border-border last:border-0 hover:bg-surface-soft"
               >
                 {table.headers.map((header) => (
                   <td
                     key={header}
-                    className="whitespace-nowrap px-4 py-3 text-slate-700"
+                    className="whitespace-nowrap px-4 py-3 text-text-secondary"
                   >
                     {String(row[header] ?? "")}
                   </td>

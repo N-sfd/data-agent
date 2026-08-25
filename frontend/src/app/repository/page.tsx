@@ -386,7 +386,7 @@ function ViewToggle({
       className={[
         "inline-flex items-center gap-1.5 rounded-full px-4 py-2 text-xs font-medium transition duration-200",
         active
-          ? "bg-navy text-white"
+          ? "bg-primary text-white"
           : "text-text-secondary hover:text-foreground",
       ].join(" ")}
     >

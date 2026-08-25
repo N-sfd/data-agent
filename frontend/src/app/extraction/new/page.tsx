@@ -79,6 +79,7 @@ export default function NewExtractionPage() {
 
   const [schemaDiscovery, setSchemaDiscovery] =
     useState<DiscoverSchemaResult | null>(null);
+  const [schemaDiscovering, setSchemaDiscovering] = useState(false);
 
   const [targetResult, setTargetResult] =
     useState<ExtractTargetsResult | null>(null);
@@ -198,6 +199,7 @@ export default function NewExtractionPage() {
     setStructuredOutput(null);
     setStructureDetection(null);
     setSchemaDiscovery(null);
+    setSchemaDiscovering(false);
     setProgress(null);
     setElapsedSeconds(0);
     setWaking(false);
@@ -231,12 +233,15 @@ export default function NewExtractionPage() {
       }
 
       try {
+        setSchemaDiscovering(true);
         const discovery = await discoverSchema(uploadedDocument.document_id);
 
         setSchemaDiscovery(discovery);
       } catch {
         // Schema discovery is what drives the target picker — if it
         // fails, the picker just falls back to custom instructions.
+      } finally {
+        setSchemaDiscovering(false);
       }
     } catch (error) {
       setWorkflowError(
@@ -411,179 +416,224 @@ export default function NewExtractionPage() {
 
         <div className="extraction-workspace -mx-[max(1.5rem,3vw)]">
           <div className="extraction-bar-inner">
-        <div className="grid gap-6 lg:grid-cols-[minmax(300px,0.38fr)_minmax(520px,0.62fr)]">
-          <section className="space-y-6">
-            <DocumentUploader onUploadComplete={handleUploadComplete} />
-
-            <ImportSourceTabs />
-
-            {document && (
-              <DocumentOverview
-                document={document}
-                structureDetection={structureDetection}
-                contractAnalysis={contractAnalysis}
-                extraction={extraction}
-                extracting={extracting}
-                progress={progress}
-                elapsedSeconds={elapsedSeconds}
-                waking={waking}
-                onOpenProcessingDetails={() => setProcessingDrawerOpen(true)}
-                onViewResults={
-                  contractAnalysis || universalResult
-                    ? () =>
-                        (contractAnalysis
-                          ? resultsWorkspaceRef
-                          : universalResultRef
-                        ).current?.scrollIntoView({ behavior: "smooth" })
-                    : undefined
-                }
-              />
-            )}
-          </section>
-
-          <section className="space-y-6">
-          {document && (
-            <AnalysisRequest
-              disabled={!extraction || extracting}
-              onAnalyze={handleAnalyze}
-              onExtractTargets={handleExtractTargets}
-              waking={waking}
-              targets={schemaDiscovery?.targets ?? []}
-              documentFamilyLabel={schemaDiscovery?.document_family_label}
-            />
-          )}
-
-          {document && extraction && !contractAnalysis && (
-            <div className="editorial-card animate-fade-in p-8">
-              <p className="text-base font-medium text-foreground">
-                Contract Intelligence
-              </p>
-              <p className="mt-2 text-sm leading-6 text-text-secondary">
-                Classify this document, extract its structured metadata, and
-                detect any parent contract.
-              </p>
-
-              {analyzingContract && (
-                <div className="mt-4 rounded-xl bg-surface-soft px-3.5 py-2.5 text-xs text-text-secondary">
-                  {waking
-                    ? "Waking processing service... this can take up to a minute after a deploy."
-                    : ANALYZE_STAGE_MESSAGES[analyzeStageIndex]}
-                </div>
-              )}
-
-              {extractionModels.length > 0 && (
-                <label className="mt-5 block text-xs text-text-secondary">
-                  Extraction Model (optional)
-                  <select
-                    value={selectedModelId ?? ""}
-                    onChange={(event) =>
-                      setSelectedModelId(
-                        event.target.value
-                          ? Number(event.target.value)
-                          : null,
-                      )
-                    }
-                    className="mt-1.5 w-full rounded-xl border border-border bg-surface px-3 py-2.5 text-sm text-foreground outline-none focus:border-primary/30"
-                  >
-                    <option value="">None</option>
-                    {extractionModels.map((model) => (
-                      <option key={model.id} value={model.id}>
-                        {model.name}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-              )}
-
-              <button
-                type="button"
-                onClick={handleAnalyzeContract}
-                disabled={analyzingContract}
-                className="btn-primary mt-5 disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                {analyzingContract ? (
-                  <span className="h-2 w-2 animate-pulse rounded-full bg-white" />
-                ) : (
-                  <Sparkles className="h-4 w-4" />
-                )}
-                {analyzingContract
-                  ? "Analyzing..."
-                  : "Run Contract Intelligence"}
-              </button>
-
-              {contractAnalysisError && (
-                <div className="mt-4 rounded-xl border border-danger/20 bg-danger/5 p-3 text-sm text-danger">
-                  {contractAnalysisError}
-                </div>
-              )}
-            </div>
-          )}
-
-          {document && contractAnalysis && extraction && (
-            <div className="editorial-card animate-fade-in p-8">
-              <p className="text-base font-medium text-foreground">
-                Ready for review
-              </p>
-
-              <ul className="mt-3 space-y-1 text-sm text-text-secondary">
-                <li>{extraction.pages_processed} pages processed</li>
-                <li>Document classified</li>
-                <li>Relationships analyzed</li>
-                <li>
-                  {contractAnalysis.metadata_fields.length} metadata fields
-                  extracted
-                </li>
-              </ul>
-
-              <button
-                type="button"
-                onClick={() =>
-                  resultsWorkspaceRef.current?.scrollIntoView({
-                    behavior: "smooth",
-                  })
-                }
-                className="btn-primary mt-5"
-              >
-                Review Extraction
-              </button>
-            </div>
-          )}
-
-          {workflowError && (
-            <div className="rounded-xl border border-danger/20 bg-danger/5 p-4">
-              <p className="text-sm font-medium text-danger">
-                Extraction could not be completed
-              </p>
-              <p className="mt-1 text-sm leading-6 text-danger/80">
-                The document was uploaded successfully, but page extraction
-                failed.
-              </p>
-
-              <div className="mt-3 flex flex-wrap items-center gap-3">
-                <button
-                  type="button"
-                  onClick={() => document && handleUploadComplete(document)}
-                  className="btn-secondary text-sm"
-                >
-                  Retry Extraction
-                </button>
-
-                <details className="text-xs text-danger/80">
-                  <summary className="cursor-pointer select-none">
-                    View Details
-                  </summary>
-                  <p className="mt-1">{workflowError}</p>
-                </details>
+            {!document ? (
+              <div className="grid gap-6 lg:grid-cols-[minmax(0,0.48fr)_minmax(0,0.52fr)]">
+                <section className="space-y-4">
+                  <DocumentUploader onUploadComplete={handleUploadComplete} />
+                  <ImportSourceTabs />
+                </section>
+                <section className="editorial-card flex flex-col justify-center p-6 sm:p-8">
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-text-teal">
+                    Workflow
+                  </p>
+                  <h2 className="mt-2 text-lg font-medium text-foreground">
+                    Upload → Understand → Extract → Verify
+                  </h2>
+                  <ol className="mt-4 space-y-3 text-sm leading-6 text-text-secondary">
+                    <li>
+                      <span className="font-medium text-foreground">1.</span>{" "}
+                      Upload a contract to extract pages and detect structure.
+                    </li>
+                    <li>
+                      <span className="font-medium text-foreground">2.</span>{" "}
+                      Discover the document&apos;s actual schema — not static
+                      presets.
+                    </li>
+                    <li>
+                      <span className="font-medium text-foreground">3.</span>{" "}
+                      Choose detected fields, tables, clauses, or contacts.
+                    </li>
+                    <li>
+                      <span className="font-medium text-foreground">4.</span>{" "}
+                      Verify results against source evidence, then review.
+                    </li>
+                  </ol>
+                </section>
               </div>
-            </div>
-          )}
-          </section>
-        </div>
-        </div>
+            ) : (
+              <div className="grid gap-5 lg:grid-cols-[minmax(280px,0.38fr)_minmax(0,0.62fr)]">
+                <section className="space-y-4 lg:sticky lg:top-4 lg:self-start">
+                  <DocumentOverview
+                    document={document}
+                    structureDetection={structureDetection}
+                    contractAnalysis={contractAnalysis}
+                    extraction={extraction}
+                    extracting={extracting}
+                    progress={progress}
+                    elapsedSeconds={elapsedSeconds}
+                    waking={waking}
+                    onOpenProcessingDetails={() => setProcessingDrawerOpen(true)}
+                    onReplaceDocument={() => {
+                      setDocument(null);
+                      setExtraction(null);
+                      setPages([]);
+                      setUniversalResult(null);
+                      setTargetResult(null);
+                      setContractAnalysis(null);
+                      setStructuredOutput(null);
+                      setStructureDetection(null);
+                      setSchemaDiscovery(null);
+                      setWorkflowError("");
+                      setContractAnalysisError("");
+                    }}
+                    onViewResults={
+                      contractAnalysis || universalResult || targetResult
+                        ? () =>
+                            (contractAnalysis
+                              ? resultsWorkspaceRef
+                              : targetResult
+                                ? targetResultRef
+                                : universalResultRef
+                            ).current?.scrollIntoView({ behavior: "smooth" })
+                        : undefined
+                    }
+                  />
+                </section>
+
+                <section className="min-w-0 space-y-5">
+                  <AnalysisRequest
+                    disabled={!extraction || extracting}
+                    onAnalyze={handleAnalyze}
+                    onExtractTargets={handleExtractTargets}
+                    waking={waking}
+                    targets={(schemaDiscovery?.targets ?? []).filter(
+                      (target) => target.source !== "template",
+                    )}
+                    documentFamilyLabel={
+                      schemaDiscovery?.document_family_label
+                    }
+                    schemaDiscovering={schemaDiscovering || extracting}
+                  />
+
+                  {extraction && !contractAnalysis && (
+                    <div className="editorial-card animate-fade-in p-6">
+                      <p className="text-base font-medium text-foreground">
+                        Contract Intelligence
+                      </p>
+                      <p className="mt-2 text-sm leading-6 text-text-secondary">
+                        Classify this document, extract structured metadata, and
+                        detect any parent contract.
+                      </p>
+
+                      {analyzingContract && (
+                        <div className="mt-4 flex items-center gap-2 rounded-xl border border-primary/15 bg-primary/5 px-3.5 py-2.5 text-xs text-text-secondary">
+                          <span className="h-2 w-2 animate-pulse rounded-full bg-primary" />
+                          {waking
+                            ? "Waking processing service... this can take up to a minute after idle."
+                            : ANALYZE_STAGE_MESSAGES[analyzeStageIndex]}
+                        </div>
+                      )}
+
+                      {extractionModels.length > 0 && (
+                        <label className="mt-5 block text-xs text-text-secondary">
+                          Extraction Model (optional)
+                          <select
+                            value={selectedModelId ?? ""}
+                            onChange={(event) =>
+                              setSelectedModelId(
+                                event.target.value
+                                  ? Number(event.target.value)
+                                  : null,
+                              )
+                            }
+                            className="mt-1.5 w-full rounded-xl border border-border bg-surface px-3 py-2.5 text-sm text-foreground outline-none focus:border-primary/30"
+                          >
+                            <option value="">None</option>
+                            {extractionModels.map((model) => (
+                              <option key={model.id} value={model.id}>
+                                {model.name}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                      )}
+
+                      <button
+                        type="button"
+                        onClick={handleAnalyzeContract}
+                        disabled={analyzingContract}
+                        className="btn-primary mt-5 disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        {analyzingContract ? (
+                          <span className="h-2 w-2 animate-pulse rounded-full bg-white" />
+                        ) : (
+                          <Sparkles className="h-4 w-4" />
+                        )}
+                        {analyzingContract
+                          ? "Analyzing..."
+                          : "Run Contract Intelligence"}
+                      </button>
+
+                      {contractAnalysisError && (
+                        <div className="mt-4 rounded-xl border border-danger/20 bg-danger/5 p-3 text-sm text-danger">
+                          {contractAnalysisError}
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {contractAnalysis && extraction && (
+                    <div className="editorial-card animate-fade-in p-6">
+                      <p className="text-base font-medium text-foreground">
+                        Ready for review
+                      </p>
+                      <ul className="mt-3 space-y-1 text-sm text-text-secondary">
+                        <li>{extraction.pages_processed} pages processed</li>
+                        <li>Document classified</li>
+                        <li>Relationships analyzed</li>
+                        <li>
+                          {contractAnalysis.metadata_fields.length} metadata
+                          fields extracted
+                        </li>
+                      </ul>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          resultsWorkspaceRef.current?.scrollIntoView({
+                            behavior: "smooth",
+                          })
+                        }
+                        className="btn-primary mt-5"
+                      >
+                        Review Extraction
+                      </button>
+                    </div>
+                  )}
+
+                  {workflowError && (
+                    <div className="rounded-xl border border-danger/20 bg-danger/5 p-4">
+                      <p className="text-sm font-medium text-danger">
+                        Extraction could not be completed
+                      </p>
+                      <p className="mt-1 text-sm leading-6 text-danger/80">
+                        The document was uploaded successfully, but page
+                        extraction failed.
+                      </p>
+                      <div className="mt-3 flex flex-wrap items-center gap-3">
+                        <button
+                          type="button"
+                          onClick={() => handleUploadComplete(document)}
+                          className="btn-secondary text-sm"
+                        >
+                          Retry Extraction
+                        </button>
+                        <details className="text-xs text-danger/80">
+                          <summary className="cursor-pointer select-none">
+                            View Details
+                          </summary>
+                          <p className="mt-1">{workflowError}</p>
+                        </details>
+                      </div>
+                    </div>
+                  )}
+                </section>
+              </div>
+            )}
+          </div>
         </div>
 
         {document && targetResult && !contractAnalysis && (
-          <div className="extraction-workspace -mx-[max(1.5rem,3vw)] mt-10">
+          <div className="extraction-workspace -mx-[max(1.5rem,3vw)] mt-8">
             <div
               ref={targetResultRef}
               className="extraction-bar-inner animate-fade-in"
@@ -592,14 +642,19 @@ export default function NewExtractionPage() {
                 Extraction Result
               </p>
               <div className="mt-4">
-                <TargetResults result={targetResult} />
+                <TargetResults
+                  result={targetResult}
+                  targets={(schemaDiscovery?.targets ?? []).filter(
+                    (target) => target.source !== "template",
+                  )}
+                />
               </div>
             </div>
           </div>
         )}
 
         {document && universalResult && !contractAnalysis && (
-          <div className="extraction-workspace -mx-[max(1.5rem,3vw)] mt-10">
+          <div className="extraction-workspace -mx-[max(1.5rem,3vw)] mt-8">
             <div
               ref={universalResultRef}
               className="extraction-bar-inner animate-fade-in"
@@ -614,27 +669,27 @@ export default function NewExtractionPage() {
           </div>
         )}
 
-      {contractAnalysis && document && (
-        <div ref={resultsWorkspaceRef}>
-          <ExtractionResultsWorkspace
-            document={document}
-            analysis={contractAnalysis}
-            pages={pages}
-            structuredOutput={structuredOutput}
-            universalResult={universalResult}
-            extractingPages={extracting}
-            pagesError={workflowError}
-            onRetryPages={() => handleUploadComplete(document)}
-            relationshipBusy={relationshipBusy}
-            onRelationshipAction={handleRelationshipAction}
-            onRelationshipChange={(relationship) =>
-              setContractAnalysis((current) =>
-                current ? { ...current, relationship } : current,
-              )
-            }
-          />
-        </div>
-      )}
+        {contractAnalysis && document && (
+          <div ref={resultsWorkspaceRef} className="mt-8">
+            <ExtractionResultsWorkspace
+              document={document}
+              analysis={contractAnalysis}
+              pages={pages}
+              structuredOutput={structuredOutput}
+              universalResult={universalResult}
+              extractingPages={extracting}
+              pagesError={workflowError}
+              onRetryPages={() => handleUploadComplete(document)}
+              relationshipBusy={relationshipBusy}
+              onRelationshipAction={handleRelationshipAction}
+              onRelationshipChange={(relationship) =>
+                setContractAnalysis((current) =>
+                  current ? { ...current, relationship } : current,
+                )
+              }
+            />
+          </div>
+        )}
       </ContentSection>
 
       {document && (

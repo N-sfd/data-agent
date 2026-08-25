@@ -601,8 +601,59 @@ body {
   background: rgba(255, 255, 255, 0.14);
 }
 
+.capability-section {
+  margin-bottom: 0.5rem;
+}
+
+.capability-grid {
+  display: grid;
+  gap: 0.75rem;
+  grid-template-columns: 1fr;
+}
+
+@media (min-width: 640px) {
+  .capability-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (min-width: 1024px) {
+  .capability-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+.capability-tile {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.875rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  background: var(--surface);
+  padding: 1.125rem 1.25rem;
+  transition:
+    border-color 180ms ease,
+    box-shadow 180ms ease;
+}
+
+.capability-tile:hover {
+  border-color: color-mix(in srgb, var(--sirion-teal) 35%, var(--border));
+  box-shadow: var(--shadow-soft);
+}
+
 .extraction-workspace {
   background: var(--background);
+  overflow-x: clip;
+}
+
+@media (max-width: 1023px) {
+  .extraction-workspace .grid {
+    grid-template-columns: 1fr !important;
+  }
+
+  .extraction-workspace .lg\:sticky {
+    position: static;
+  }
 }
 
 .extraction-workspace-inner {

@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import Link from "next/link";
 import { X } from "lucide-react";
 
@@ -34,11 +35,20 @@ export default function MobileNavigation({
 
       <aside className="absolute inset-y-0 left-0 flex w-[min(100%,360px)] flex-col bg-menu-background shadow-2xl">
         <div className="flex items-center justify-between border-b border-black/5 px-5 py-4">
-          <div>
-            <p className="text-sm font-semibold uppercase tracking-wide text-text-dark">
-              Consult America
-            </p>
-            <p className="text-xs text-text-teal">Data Agent</p>
+          <div className="flex min-w-0 items-center gap-3">
+            <Image
+              src="/consult-america-logo.jpg"
+              alt="Consult America"
+              width={36}
+              height={36}
+              className="h-9 w-9 shrink-0 rounded-full object-contain bg-white"
+            />
+            <div className="min-w-0">
+              <p className="text-sm font-semibold uppercase tracking-wide text-text-dark">
+                Consult America
+              </p>
+              <p className="text-xs text-text-teal">Data Agent</p>
+            </div>
           </div>
           <button
             type="button"

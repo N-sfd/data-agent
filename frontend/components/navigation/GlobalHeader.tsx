@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import Link from "next/link";
 import { Bell, Menu, Plus, Search, Sparkles } from "lucide-react";
 import { useState } from "react";
@@ -26,9 +27,14 @@ export default function GlobalHeader({ onOpenSearch }: GlobalHeaderProps) {
       <header className="global-header shrink-0">
         <div className="flex items-center gap-4 lg:gap-8">
           <Link href="/" className="flex shrink-0 items-center gap-3">
-            <div className="flex h-9 w-9 items-center justify-center rounded-full bg-sirion-teal text-[11px] font-semibold text-text-on-dark">
-              CA
-            </div>
+            <Image
+              src="/consult-america-logo.jpg"
+              alt="Consult America"
+              width={36}
+              height={36}
+              className="h-9 w-9 rounded-full object-contain bg-white"
+              priority
+            />
             <div className="hidden min-w-0 sm:block">
               <p className="truncate text-sm font-semibold uppercase tracking-wide text-text-on-dark">
                 Consult America
@@ -101,9 +107,13 @@ export default function GlobalHeader({ onOpenSearch }: GlobalHeaderProps) {
           </button>
 
           <div className="hidden items-center gap-2 border-l border-white/10 pl-3 sm:flex">
-            <div className="flex h-8 w-8 items-center justify-center rounded-full bg-white/10 text-xs font-semibold text-text-on-dark">
-              CA
-            </div>
+            <Image
+              src="/consult-america-logo.jpg"
+              alt="Consult America"
+              width={32}
+              height={32}
+              className="h-8 w-8 rounded-full object-contain bg-white"
+            />
           </div>
         </div>
       </header>

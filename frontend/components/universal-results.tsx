@@ -21,27 +21,26 @@ function ResultMethodSummary({
 }: {
   result: UniversalExtractionResult;
 }) {
-  const hasAi = result.values.some(
-    (item) => item.extraction_method === "ai",
-  ) || Boolean(result.answer);
+  const hasAi =
+    result.values.some((item) => item.extraction_method === "ai") ||
+    Boolean(result.answer);
 
   const verifiedAiCount = result.values.filter(
-    (item) =>
-      item.extraction_method === "ai" && item.verified,
+    (item) => item.extraction_method === "ai" && item.verified,
   ).length;
 
   if (hasAi) {
     return (
-      <div className="mt-4 rounded-xl border border-violet-200 bg-violet-50 px-4 py-3">
-        <p className="text-xs font-semibold uppercase tracking-wide text-violet-700">
+      <div className="mt-4 rounded-xl border border-accent/20 bg-accent/5 px-4 py-3">
+        <p className="text-xs font-semibold uppercase tracking-wide text-accent">
           Extraction method
         </p>
-        <p className="mt-1 inline-flex items-center gap-1.5 text-sm font-semibold text-violet-900">
-          <Sparkles className="h-4 w-4" />
+        <p className="mt-1 inline-flex items-center gap-1.5 text-sm font-semibold text-foreground">
+          <Sparkles className="h-4 w-4 text-accent" />
           AI-assisted
         </p>
         {verifiedAiCount > 0 && (
-          <p className="mt-1 inline-flex items-center gap-1.5 text-xs font-medium text-emerald-700">
+          <p className="mt-1 inline-flex items-center gap-1.5 text-xs font-medium text-success">
             <CheckCircle2 className="h-3.5 w-3.5" />
             Source verified
           </p>
@@ -51,12 +50,12 @@ function ResultMethodSummary({
   }
 
   return (
-    <div className="mt-4 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3">
-      <p className="text-xs font-semibold uppercase tracking-wide text-emerald-700">
+    <div className="mt-4 rounded-xl border border-success/20 bg-success/5 px-4 py-3">
+      <p className="text-xs font-semibold uppercase tracking-wide text-success">
         Extraction method
       </p>
-      <p className="mt-1 inline-flex items-center gap-1.5 text-sm font-semibold text-emerald-900">
-        <CheckCircle2 className="h-4 w-4" />
+      <p className="mt-1 inline-flex items-center gap-1.5 text-sm font-semibold text-foreground">
+        <CheckCircle2 className="h-4 w-4 text-success" />
         Deterministic
       </p>
     </div>
@@ -68,20 +67,20 @@ export default function UniversalResults({
 }: UniversalResultsProps) {
   return (
     <div className="space-y-6">
-      <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+      <div className="editorial-card p-6">
         <div className="flex items-start gap-3">
-          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-50">
-            <Search className="h-5 w-5 text-blue-600" />
+          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary/10">
+            <Search className="h-5 w-5 text-primary" />
           </div>
 
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-wide text-blue-600">
+          <div className="min-w-0">
+            <p className="text-xs font-semibold uppercase tracking-wide text-text-teal">
               Universal extraction
             </p>
-            <h2 className="mt-1 text-lg font-semibold text-slate-950">
+            <h2 className="mt-1 text-lg font-medium text-foreground">
               {result.instruction}
             </h2>
-            <p className="mt-1 text-sm text-slate-500">
+            <p className="mt-1 text-sm text-text-secondary">
               Intent: {result.intent} · Pages used:{" "}
               {result.pages_used.join(", ") || "none"}
             </p>
@@ -95,7 +94,7 @@ export default function UniversalResults({
             {result.warnings.map((warning) => (
               <div
                 key={warning}
-                className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800"
+                className="rounded-xl border border-warning/25 bg-warning/5 p-3 text-sm text-warning"
               >
                 {warning}
               </div>
@@ -105,27 +104,25 @@ export default function UniversalResults({
       </div>
 
       {result.answer && (
-        <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+        <div className="editorial-card p-6">
           <div className="flex items-start gap-3">
-            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-violet-50">
-              <HelpCircle className="h-5 w-5 text-violet-600" />
+            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-accent/10">
+              <HelpCircle className="h-5 w-5 text-accent" />
             </div>
 
             <div className="min-w-0 flex-1">
-              <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+              <p className="text-xs font-semibold uppercase tracking-wide text-text-muted">
                 Answer
               </p>
-              <p className="mt-1 text-sm text-slate-500">
-                Question
-              </p>
-              <p className="mt-1 font-medium text-slate-900">
+              <p className="mt-1 text-sm text-text-secondary">Question</p>
+              <p className="mt-1 font-medium text-foreground">
                 {result.instruction}
               </p>
-              <p className="mt-4 text-base leading-7 text-slate-800">
+              <p className="mt-4 text-base leading-7 text-foreground">
                 {result.answer}
               </p>
-              <div className="mt-4 rounded-xl border border-violet-200 bg-violet-50 px-3 py-2">
-                <p className="inline-flex items-center gap-1.5 text-sm font-semibold text-violet-800">
+              <div className="mt-4 rounded-xl border border-accent/20 bg-accent/5 px-3 py-2">
+                <p className="inline-flex items-center gap-1.5 text-sm font-semibold text-accent">
                   <Sparkles className="h-3.5 w-3.5" />
                   AI-assisted
                 </p>
@@ -136,8 +133,8 @@ export default function UniversalResults({
       )}
 
       {result.values.length > 0 && (
-        <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-          <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+        <div className="editorial-card p-6">
+          <p className="text-xs font-semibold uppercase tracking-wide text-text-muted">
             Extracted data
           </p>
           <div className="mt-4">
@@ -149,8 +146,8 @@ export default function UniversalResults({
       {result.tables.length > 0 && (
         <div className="space-y-4">
           <div className="flex items-center gap-2 px-1">
-            <Table2 className="h-4 w-4 text-slate-500" />
-            <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+            <Table2 className="h-4 w-4 text-text-muted" />
+            <p className="text-xs font-semibold uppercase tracking-wide text-text-muted">
               Extracted tables
             </p>
           </div>
@@ -162,25 +159,25 @@ export default function UniversalResults({
       )}
 
       {result.unresolved_requests.length > 0 && (
-        <div className="rounded-xl border border-slate-200 bg-white p-4 text-sm text-slate-600 shadow-sm">
-          <p className="font-medium text-slate-800">
-            Unresolved requests
-          </p>
-          <p className="mt-1">
-            {result.unresolved_requests.join(", ")}
-          </p>
+        <div className="editorial-card p-4 text-sm text-text-secondary">
+          <p className="font-medium text-foreground">Unresolved requests</p>
+          <ul className="mt-2 list-disc space-y-1 pl-5">
+            {result.unresolved_requests.map((item) => (
+              <li key={item}>{item}</li>
+            ))}
+          </ul>
         </div>
       )}
 
       {result.values.length === 0 &&
         result.tables.length === 0 &&
         !result.answer && (
-          <div className="rounded-2xl border border-slate-200 bg-white p-10 text-center shadow-sm">
-            <Table2 className="mx-auto h-9 w-9 text-slate-300" />
-            <p className="mt-3 font-medium text-slate-700">
+          <div className="editorial-card p-10 text-center">
+            <Table2 className="mx-auto h-9 w-9 text-text-muted" />
+            <p className="mt-3 font-medium text-foreground">
               No structured results yet
             </p>
-            <p className="mt-1 text-sm text-slate-500">
+            <p className="mt-1 text-sm text-text-secondary">
               Try a more specific field, page range, or table request.
             </p>
           </div>
