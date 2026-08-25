@@ -7,20 +7,16 @@ from app.models.document_detected_target import (
     DocumentDetectedTarget,
     DocumentStructureSummary,
 )
-from app.schemas.structure_detection import (
-    ContentStats,
-    DetectedField,
-    DetectedTable,
-    DetectedTarget,
-    DetectionCounts,
-    StructureDetectionResponse,
+from app.schemas.document_target import (
+    DiscoverSchemaResponse,
+    DocumentTarget,
 )
 
 
-def persist_structure_detection(
+def persist_document_targets(
     *,
     database: Session,
-    result: StructureDetectionResponse,
+    result: DiscoverSchemaResponse,
 ) -> None:
     database.execute(
         delete(DocumentDetectedTarget).where(
@@ -41,26 +37,29 @@ def persist_structure_detection(
             document_family=result.document_family,
             document_family_label=result.document_family_label,
             document_family_confidence=result.document_family_confidence,
-            content_stats_json=result.content_stats.model_dump(),
-            detected_contacts_json=result.detected_contacts,
-            detected_obligations_json=result.detected_obligations,
+            content_stats_json={},
+            detected_contacts_json=[],
+            detected_obligations_json=[],
             created_at=now,
             updated_at=now,
         )
     )
 
-    for target in result.detected_targets + result.possible_targets:
+    for target in result.targets:
         database.add(
             DocumentDetectedTarget(
                 document_id=result.document_id,
                 target_key=target.key,
                 label=target.label,
-                extraction_type=target.extraction_type,
-                pages_json=target.pages,
+                target_type=target.target_type,
+                source=target.source,
+                pages_json=target.page_numbers,
                 confidence=target.confidence,
-                evidence_json=target.evidence,
-                suggested_prompt=target.suggested_prompt,
+                source_examples_json=target.source_examples,
+                parent_section=target.parent_section,
                 columns_json=target.columns,
+                occurrence_count=target.occurrence_count,
+                suggested_instruction=target.suggested_instruction,
                 is_primary=target.confidence >= 0.75,
                 created_at=now,
                 updated_at=now,
@@ -70,11 +69,11 @@ def persist_structure_detection(
     database.commit()
 
 
-def load_structure_detection(
+def load_document_targets(
     *,
     database: Session,
     document_id: str,
-) -> StructureDetectionResponse | None:
+) -> DiscoverSchemaResponse | None:
     summary = database.get(DocumentStructureSummary, document_id)
 
     if summary is None:
@@ -89,70 +88,37 @@ def load_structure_detection(
     )
 
     targets = [
-        DetectedTarget(
+        DocumentTarget(
+            id=f"{document_id}:{row.target_key}",
             key=row.target_key,
             label=row.label,
-            extraction_type=row.extraction_type,  # type: ignore[arg-type]
-            pages=list(row.pages_json or []),
+            target_type=row.target_type,  # type: ignore[arg-type]
+            page_numbers=list(row.pages_json or []),
             confidence=row.confidence,
-            evidence=list(row.evidence_json or []),
-            suggested_prompt=row.suggested_prompt,
+            source_examples=list(row.source_examples_json or []),
+            parent_section=row.parent_section,
             columns=list(row.columns_json or []),
+            occurrence_count=row.occurrence_count,
+            suggested_instruction=row.suggested_instruction,
+            source=row.source,  # type: ignore[arg-type]
         )
         for row in rows
     ]
 
-    primary = [target for target in targets if target.confidence >= 0.75]
-    possible = [target for target in targets if target.confidence < 0.75]
+    counts_by_type: dict[str, int] = {}
+    for target in targets:
+        counts_by_type[target.target_type] = (
+            counts_by_type.get(target.target_type, 0) + 1
+        )
 
-    stats = summary.content_stats_json or {}
-
-    return StructureDetectionResponse(
+    return DiscoverSchemaResponse(
         document_id=document_id,
         document_family=summary.document_family,
         document_family_label=summary.document_family_label,
         document_family_confidence=summary.document_family_confidence,
-        detected_fields=[
-            DetectedField(
-                key=target.key,
-                label=target.label,
-                pages=target.pages,
-            )
-            for target in primary
-            if target.extraction_type == "field"
-        ],
-        detected_tables=[
-            DetectedTable(
-                key=target.key,
-                label=target.label,
-                pages=target.pages,
-                confidence=target.confidence,
-                suggested_prompt=target.suggested_prompt,
-                columns=target.columns,
-            )
-            for target in primary
-            if target.extraction_type == "table"
-        ],
-        detected_contacts=list(summary.detected_contacts_json or []),
-        detected_obligations=list(summary.detected_obligations_json or []),
-        detected_targets=primary,
-        possible_targets=possible,
-        content_stats=ContentStats(
-            tables=int(stats.get("tables", 0)),
-            dates=int(stats.get("dates", 0)),
-            currency_values=int(stats.get("currency_values", 0)),
-            organizations=int(stats.get("organizations", 0)),
-        ),
-        counts=DetectionCounts(
-            fields=sum(1 for t in primary if t.extraction_type == "field"),
-            tables=sum(1 for t in primary if t.extraction_type == "table"),
-            contacts=sum(1 for t in primary if t.extraction_type == "contact"),
-            obligations=sum(
-                1 for t in primary if t.extraction_type == "obligation"
-            ),
-            clauses=sum(1 for t in primary if t.extraction_type == "clause"),
-            signatures=sum(
-                1 for t in primary if t.extraction_type == "signature"
-            ),
-        ),
+        targets=targets,
+        counts_by_type=counts_by_type,
+        generated_at=summary.updated_at.replace(tzinfo=timezone.utc)
+        if summary.updated_at.tzinfo is None
+        else summary.updated_at,
     )

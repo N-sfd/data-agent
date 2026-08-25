@@ -17,6 +17,7 @@ from app.services.contract_classifier import classify_contract
 from app.services.generic_entity_extractor import (
     extract_generic_entities,
 )
+from app.services.generic_kv_scanner import scan_page_for_labeled_pairs
 from app.services.generic_label_extractor import (
     extract_labeled_value,
 )
@@ -131,7 +132,10 @@ HEADING_FAMILIES: list[HeadingFamily] = [
     HeadingFamily(
         "pricing_table",
         "Pricing Table",
-        re.compile(r"pricing\s+table|unit\s+price", re.I),
+        # "unit price" alone is too generic — it also appears in ordinary
+        # supplies/services and line-item tables. Only match the literal
+        # heading phrase.
+        re.compile(r"pricing\s+table", re.I),
         "table",
         "Extract the full pricing table with all line items and amounts.",
     ),
@@ -187,6 +191,50 @@ HEADING_FAMILIES: list[HeadingFamily] = [
         "signature",
         "Extract signatory names, titles, and signature dates.",
     ),
+    HeadingFamily(
+        "supplies_services",
+        "Supplies / Services",
+        re.compile(r"supplies\s*(?:/|or)\s*services", re.I),
+        "table",
+        "Extract the supplies/services table with item numbers, quantities, "
+        "units, unit prices, and amounts.",
+    ),
+    HeadingFamily(
+        "clin_delivery_schedule",
+        "CLIN Delivery Schedule",
+        re.compile(
+            r"clin.{0,40}delivery\s+schedule|delivery\s+schedule.{0,40}clin",
+            re.I,
+        ),
+        "table",
+        "Extract the CLIN delivery schedule with delivery dates, quantities, "
+        "and ship-to addresses.",
+    ),
+    HeadingFamily(
+        "wawf_routing_data",
+        "WAWF Routing Data",
+        re.compile(r"wawf\s+routing\s+data|wide\s+area\s+workflow", re.I),
+        "table",
+        "Extract the complete WAWF Routing Data table, preserving all "
+        "detected columns and rows.",
+    ),
+    HeadingFamily(
+        "clauses_incorporated_by_reference",
+        "Clauses Incorporated by Reference",
+        re.compile(r"clauses\s+incorporated\s+by\s+reference", re.I),
+        "clause",
+        "Extract all clauses listed under \"CLAUSES INCORPORATED BY "
+        "REFERENCE\", including clause number, title, date/version, and "
+        "source page where available.",
+    ),
+    HeadingFamily(
+        "clauses_incorporated_full_text",
+        "Clauses Incorporated by Full Text",
+        re.compile(r"clauses\s+incorporated\s+by\s+full\s+text", re.I),
+        "clause",
+        "Extract all clauses listed under \"CLAUSES INCORPORATED BY FULL "
+        "TEXT\", including clause number, title, and full clause text.",
+    ),
 ]
 
 
@@ -237,7 +285,11 @@ TABLE_FAMILIES: dict[str, tuple[str, list[str]]] = {
     ),
     "pricing_table": (
         "Pricing Table",
-        ["unit price", "total price", "pricing table"],
+        # "unit price"/"total price" alone are too generic — they also
+        # appear in ordinary supplies/services or line-item tables that
+        # aren't labeled "Pricing Table" anywhere in the document. Only
+        # match when the document itself uses the term.
+        ["pricing table"],
     ),
     "payment_schedule": (
         "Payment Schedule",
@@ -254,6 +306,27 @@ TABLE_FAMILIES: dict[str, tuple[str, list[str]]] = {
     "line_items": (
         "Line Items",
         ["line item"],
+    ),
+    "supplies_services": (
+        "Supplies / Services",
+        ["supplies or services", "supplies/services",
+         "schedule of supplies"],
+    ),
+    "clin_delivery_schedule": (
+        "CLIN Delivery Schedule",
+        ["clin", "delivery schedule", "delivery date"],
+    ),
+    "wawf_routing_data": (
+        "WAWF Routing Data",
+        ["wawf", "routing data", "dodaac"],
+    ),
+    "clauses_incorporated_by_reference": (
+        "Clauses Incorporated by Reference",
+        ["incorporated by reference", "clauses incorporated"],
+    ),
+    "clauses_incorporated_full_text": (
+        "Clauses Incorporated by Full Text",
+        ["incorporated by full text", "full text clauses"],
     ),
 }
 
@@ -368,6 +441,12 @@ KNOWN_TEMPLATE_KEYS = set(TABLE_FAMILIES) | {
 
 def _keyword_score(text: str, keywords: list[str]) -> int:
     return sum(1 for keyword in keywords if keyword in text)
+
+
+def _slugify(label: str) -> str:
+    slug = re.sub(r"[^a-z0-9]+", "_", label.lower()).strip("_")
+    slug = re.sub(r"_+", "_", slug)
+    return slug[:60] or "field"
 
 
 def _humanize_table_label(page_number: int, headers: list[str]) -> str:
@@ -661,6 +740,27 @@ async def detect_document_structures(
                     evidence=[
                         f"Labeled value '{label}' on pages "
                         + ", ".join(str(n) for n in matching_pages)
+                    ],
+                )
+            )
+
+    known_probe_labels = {probe_label.lower() for _, _, probe_label in FIELD_PROBES}
+
+    for page in scan_pages:
+        for pair in scan_page_for_labeled_pairs(page=page):
+            if pair.normalized_label in known_probe_labels:
+                continue
+
+            detected.append(
+                _target(
+                    key=f"kv_{_slugify(pair.raw_label)}",
+                    label=pair.raw_label,
+                    extraction_type="field",
+                    pages=[page.page_number],
+                    confidence=pair.confidence,
+                    evidence=[
+                        f"'{pair.raw_label}: {pair.value}' on page "
+                        f"{page.page_number} ({pair.method})"
                     ],
                 )
             )

@@ -12,19 +12,25 @@ class ExistingDocumentSummary(BaseModel):
     uploaded_at: datetime
 
 
+class EmbeddedFileSummary(BaseModel):
+    filename: str
+    size_bytes: int
+
+
 class UploadedDocumentResponse(BaseModel):
     document_id: UUID
     original_filename: str
     status: str
     content_type: str
     size_bytes: int = Field(ge=1)
-    checksum_sha256: str
+    checksum_sha256: str | None = None
     page_count: int = Field(ge=1)
     encrypted: bool
     uploaded_at: datetime
     message: str
     duplicate: bool = False
     existing_document: ExistingDocumentSummary | None = None
+    embedded_files: list[EmbeddedFileSummary] | None = None
     pipeline_log: list[str] = Field(default_factory=list)
     approved_by: str | None = None
     approved_at: datetime | None = None
@@ -35,6 +41,10 @@ class UploadedDocumentResponse(BaseModel):
 class ResolveDuplicateRequest(BaseModel):
     action: Literal["use_existing", "upload_anyway"]
     original_filename: str | None = None
+
+
+class SelectPortfolioFileRequest(BaseModel):
+    filename: str
 
 
 class DocumentSummaryResponse(BaseModel):

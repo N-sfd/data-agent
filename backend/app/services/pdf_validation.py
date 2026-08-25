@@ -134,6 +134,45 @@ def extract_primary_embedded_pdf(
             pdf.close()
 
 
+def extract_named_embedded_pdf(
+    portfolio_path: Path,
+    *,
+    filename: str,
+    destination: Path,
+) -> EmbeddedPdf:
+    """
+    Extract a specific, user-chosen embedded PDF from a portfolio and
+    write it to destination. Sibling of extract_primary_embedded_pdf,
+    used when the portfolio contains more than one embedded PDF and the
+    user has picked which one to analyze.
+    """
+
+    pdf: fitz.Document | None = None
+
+    try:
+        pdf = fitz.open(portfolio_path)
+        embedded = list_embedded_pdfs(pdf)
+
+        match = next(
+            (item for item in embedded if item.filename == filename),
+            None,
+        )
+
+        if match is None:
+            raise PDFValidationError(
+                f"'{filename}' was not found among this PDF Portfolio's "
+                "embedded documents."
+            )
+
+        destination.write_bytes(match.data)
+
+        return match
+
+    finally:
+        if pdf is not None:
+            pdf.close()
+
+
 def validate_pdf_structure(
     file_path: Path,
     *,

@@ -11,10 +11,12 @@ import {
 } from "lucide-react";
 
 import DuplicateDialog from "@/components/duplicate-dialog";
+import PortfolioPicker from "@/components/portfolio-picker";
 import { apiFetch } from "@/lib/api";
-import { resolveDuplicate } from "@/lib/documents";
+import { resolveDuplicate, selectPortfolioFile } from "@/lib/documents";
 import { formatBytes } from "@/lib/format";
 import type {
+  EmbeddedFileSummary,
   ExistingDocumentSummary,
   UploadedDocument,
 } from "@/types/document";
@@ -37,6 +39,11 @@ interface PendingDuplicate {
   existingDocument: ExistingDocumentSummary;
 }
 
+interface PendingPortfolio {
+  documentId: string;
+  files: EmbeddedFileSummary[];
+}
+
 export default function DocumentUploader({
   onUploadComplete,
 }: DocumentUploaderProps) {
@@ -47,6 +54,10 @@ export default function DocumentUploader({
   const [pendingDuplicate, setPendingDuplicate] =
     useState<PendingDuplicate | null>(null);
   const [resolving, setResolving] = useState(false);
+  const [pendingPortfolio, setPendingPortfolio] =
+    useState<PendingPortfolio | null>(null);
+  const [selectingPortfolioFile, setSelectingPortfolioFile] =
+    useState(false);
 
   const onDrop = useCallback((acceptedFiles: File[]) => {
     setError("");
@@ -111,6 +122,15 @@ export default function DocumentUploader({
 
       setProgress(80);
 
+      if (result.status === "portfolio_pending" && result.embedded_files) {
+        setPendingPortfolio({
+          documentId: result.document_id,
+          files: result.embedded_files,
+        });
+        setProgress(0);
+        return;
+      }
+
       if (result.duplicate && result.existing_document) {
         setPendingDuplicate({
           documentId: result.document_id,
@@ -168,6 +188,48 @@ export default function DocumentUploader({
 
   function handleCancelDuplicate() {
     setPendingDuplicate(null);
+    setProgress(0);
+  }
+
+  async function handlePortfolioSelection(filename: string) {
+    if (!pendingPortfolio) return;
+
+    setSelectingPortfolioFile(true);
+    setError("");
+
+    try {
+      const result = await selectPortfolioFile(
+        pendingPortfolio.documentId,
+        filename,
+      );
+
+      setProgress(100);
+      setPendingPortfolio(null);
+
+      if (result.duplicate && result.existing_document) {
+        setPendingDuplicate({
+          documentId: result.document_id,
+          originalFilename: result.original_filename,
+          existingDocument: result.existing_document,
+        });
+        setProgress(0);
+        return;
+      }
+
+      onUploadComplete(result);
+    } catch (selectError) {
+      setError(
+        selectError instanceof Error
+          ? selectError.message
+          : "Unable to extract the selected document.",
+      );
+    } finally {
+      setSelectingPortfolioFile(false);
+    }
+  }
+
+  function handleCancelPortfolio() {
+    setPendingPortfolio(null);
     setProgress(0);
   }
 
@@ -318,6 +380,15 @@ export default function DocumentUploader({
             handleDuplicateResolution("upload_anyway")
           }
           onCancel={handleCancelDuplicate}
+        />
+      )}
+
+      {pendingPortfolio && (
+        <PortfolioPicker
+          files={pendingPortfolio.files}
+          busy={selectingPortfolioFile}
+          onSelect={handlePortfolioSelection}
+          onCancel={handleCancelPortfolio}
         />
       )}
     </div>

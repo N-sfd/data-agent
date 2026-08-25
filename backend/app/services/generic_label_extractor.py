@@ -33,7 +33,7 @@ def extract_labeled_value(
         escaped = re.escape(candidate)
 
         patterns = [
-            rf"{escaped}\s*[:#-]\s*([^\n]+)",
+            rf"{escaped}\s*[:#.-]\s*([^\n]+)",
             rf"{escaped}\s+([^\n]{{1,160}})",
         ]
 

@@ -7,21 +7,22 @@ import { Sparkles } from "lucide-react";
 
 import ContentSection from "@/components/layout/ContentSection";
 import PageHero from "@/components/layout/PageHero";
-import ExtractionStatusPanel from "@/components/extraction-status-panel";
 import WorkflowBreadcrumb from "@/components/workflow-breadcrumb";
 import ExtractionResultsWorkspace from "@/components/extraction/extraction-results-workspace";
+import ProcessingDetailsDrawer from "@/components/extraction/processing-details-drawer";
+import TargetResults from "@/components/extraction/target-results";
 import AnalysisRequest from "@/components/analysis-request";
 import UniversalResults from "@/components/universal-results";
 import DocumentOverview from "@/components/document-overview";
 import DocumentUploader from "@/components/document-uploader";
 import ImportSourceTabs from "@/components/import-source-tabs";
-import IngestionChecklist from "@/components/ingestion-checklist";
-import ProcessingStatus from "@/components/processing-status";
 import {
   analyzeContract,
   confirmRelationship,
   detectStructures,
+  discoverSchema,
   extractDocumentPages,
+  extractTargets,
   getDocumentPages,
   getExtractionProgress,
   getStructuredOutput,
@@ -30,7 +31,9 @@ import {
 import { listExtractionModels } from "@/lib/extraction-models";
 import type {
   ContractAnalysisResult,
+  DiscoverSchemaResult,
   DocumentPage,
+  ExtractTargetsResult,
   ExtractionModel,
   ExtractionProgress,
   ExtractionSummary,
@@ -67,9 +70,18 @@ export default function NewExtractionPage() {
 
   const resultsWorkspaceRef = useRef<HTMLDivElement | null>(null);
   const universalResultRef = useRef<HTMLDivElement | null>(null);
+  const targetResultRef = useRef<HTMLDivElement | null>(null);
+
+  const [processingDrawerOpen, setProcessingDrawerOpen] = useState(false);
 
   const [universalResult, setUniversalResult] =
     useState<UniversalExtractionResult | null>(null);
+
+  const [schemaDiscovery, setSchemaDiscovery] =
+    useState<DiscoverSchemaResult | null>(null);
+
+  const [targetResult, setTargetResult] =
+    useState<ExtractTargetsResult | null>(null);
 
   const [workflowError, setWorkflowError] = useState("");
 
@@ -179,11 +191,13 @@ export default function NewExtractionPage() {
     setExtraction(null);
     setPages([]);
     setUniversalResult(null);
+    setTargetResult(null);
     setWorkflowError("");
     setContractAnalysis(null);
     setContractAnalysisError("");
     setStructuredOutput(null);
     setStructureDetection(null);
+    setSchemaDiscovery(null);
     setProgress(null);
     setElapsedSeconds(0);
     setWaking(false);
@@ -212,8 +226,17 @@ export default function NewExtractionPage() {
         setStructureDetection(detection);
       } catch {
         // Structure detection is a convenience layer on top of a
-        // successful extraction — if it fails, the target picker
-        // just falls back to the generic template library.
+        // successful extraction — if it fails, the overview card
+        // just skips the detected-content summary.
+      }
+
+      try {
+        const discovery = await discoverSchema(uploadedDocument.document_id);
+
+        setSchemaDiscovery(discovery);
+      } catch {
+        // Schema discovery is what drives the target picker — if it
+        // fails, the picker just falls back to custom instructions.
       }
     } catch (error) {
       setWorkflowError(
@@ -244,6 +267,34 @@ export default function NewExtractionPage() {
       setUniversalResult(result);
       requestAnimationFrame(() => {
         universalResultRef.current?.scrollIntoView({
+          behavior: "smooth",
+          block: "start",
+        });
+      });
+
+      return result;
+    } finally {
+      setWaking(false);
+    }
+  }
+
+  async function handleExtractTargets(
+    targetIds: string[],
+  ): Promise<ExtractTargetsResult> {
+    if (!document) {
+      throw new Error("Upload a document first.");
+    }
+
+    try {
+      const result = await extractTargets(
+        document.document_id,
+        targetIds,
+        () => setWaking(true),
+      );
+
+      setTargetResult(result);
+      requestAnimationFrame(() => {
+        targetResultRef.current?.scrollIntoView({
           behavior: "smooth",
           block: "start",
         });
@@ -358,8 +409,10 @@ export default function NewExtractionPage() {
           />
         </div>
 
-        <div className="grid gap-8 lg:grid-cols-5">
-          <section className="space-y-8 lg:col-span-2">
+        <div className="extraction-workspace -mx-[max(1.5rem,3vw)]">
+          <div className="extraction-bar-inner">
+        <div className="grid gap-6 lg:grid-cols-[minmax(300px,0.38fr)_minmax(520px,0.62fr)]">
+          <section className="space-y-6">
             <DocumentUploader onUploadComplete={handleUploadComplete} />
 
             <ImportSourceTabs />
@@ -369,6 +422,12 @@ export default function NewExtractionPage() {
                 document={document}
                 structureDetection={structureDetection}
                 contractAnalysis={contractAnalysis}
+                extraction={extraction}
+                extracting={extracting}
+                progress={progress}
+                elapsedSeconds={elapsedSeconds}
+                waking={waking}
+                onOpenProcessingDetails={() => setProcessingDrawerOpen(true)}
                 onViewResults={
                   contractAnalysis || universalResult
                     ? () =>
@@ -382,36 +441,15 @@ export default function NewExtractionPage() {
             )}
           </section>
 
-          <section className="space-y-8 lg:col-span-3">
-            <div className="editorial-card p-8">
-              <ExtractionStatusPanel
-                document={document}
-                extraction={extraction}
-                extracting={extracting}
-                contractAnalyzed={Boolean(contractAnalysis)}
-                progress={progress}
-                elapsedSeconds={elapsedSeconds}
-                waking={waking}
-              />
-
-              {document && (
-                <>
-                  <IngestionChecklist steps={document.pipeline_log ?? []} />
-                  <ProcessingStatus
-                    document={document}
-                    extraction={extraction}
-                    extracting={extracting}
-                  />
-                </>
-              )}
-            </div>
-
+          <section className="space-y-6">
           {document && (
             <AnalysisRequest
               disabled={!extraction || extracting}
               onAnalyze={handleAnalyze}
+              onExtractTargets={handleExtractTargets}
               waking={waking}
-              structureDetection={structureDetection}
+              targets={schemaDiscovery?.targets ?? []}
+              documentFamilyLabel={schemaDiscovery?.document_family_label}
             />
           )}
 
@@ -539,19 +577,42 @@ export default function NewExtractionPage() {
               </div>
             </div>
           )}
-        </section>
-      </div>
-
-      {document && universalResult && !contractAnalysis && (
-        <div ref={universalResultRef} className="animate-fade-in mt-10">
-          <p className="text-base font-medium text-foreground">
-            Extraction Result
-          </p>
-          <div className="mt-4">
-            <UniversalResults result={universalResult} />
-          </div>
+          </section>
         </div>
-      )}
+        </div>
+        </div>
+
+        {document && targetResult && !contractAnalysis && (
+          <div className="extraction-workspace -mx-[max(1.5rem,3vw)] mt-10">
+            <div
+              ref={targetResultRef}
+              className="extraction-bar-inner animate-fade-in"
+            >
+              <p className="text-base font-medium text-foreground">
+                Extraction Result
+              </p>
+              <div className="mt-4">
+                <TargetResults result={targetResult} />
+              </div>
+            </div>
+          </div>
+        )}
+
+        {document && universalResult && !contractAnalysis && (
+          <div className="extraction-workspace -mx-[max(1.5rem,3vw)] mt-10">
+            <div
+              ref={universalResultRef}
+              className="extraction-bar-inner animate-fade-in"
+            >
+              <p className="text-base font-medium text-foreground">
+                Extraction Result
+              </p>
+              <div className="mt-4">
+                <UniversalResults result={universalResult} />
+              </div>
+            </div>
+          </div>
+        )}
 
       {contractAnalysis && document && (
         <div ref={resultsWorkspaceRef}>
@@ -575,6 +636,20 @@ export default function NewExtractionPage() {
         </div>
       )}
       </ContentSection>
+
+      {document && (
+        <ProcessingDetailsDrawer
+          open={processingDrawerOpen}
+          onClose={() => setProcessingDrawerOpen(false)}
+          document={document}
+          extraction={extraction}
+          extracting={extracting}
+          contractAnalyzed={Boolean(contractAnalysis)}
+          progress={progress}
+          elapsedSeconds={elapsedSeconds}
+          waking={waking}
+        />
+      )}
     </>
   );
 }

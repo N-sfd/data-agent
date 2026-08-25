@@ -45,6 +45,18 @@ export const DETECTION_COUNT_KEYS: Record<
   signatures: "signature",
 };
 
+// A single option in the unified Extraction Target list. "named" and
+// "grouped" come from real detection data; "template" is the generic
+// starting-point library used as a fallback when nothing was
+// detected for a type; "custom" is the free-form quick-pick library.
+export interface UnifiedTargetOption {
+  kind: "named" | "grouped" | "template" | "custom";
+  type: DetectionExtractionType;
+  key: string;
+  label: string;
+  prompt: string;
+}
+
 export interface PageGroup {
   page: number;
   count: number;

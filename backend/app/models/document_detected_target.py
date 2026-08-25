@@ -50,9 +50,15 @@ class DocumentDetectedTarget(Base):
         nullable=False,
     )
 
-    extraction_type: Mapped[str] = mapped_column(
+    target_type: Mapped[str] = mapped_column(
         String(30),
         nullable=False,
+    )
+
+    source: Mapped[str] = mapped_column(
+        String(20),
+        nullable=False,
+        default="detected",
     )
 
     pages_json: Mapped[list] = mapped_column(
@@ -66,14 +72,14 @@ class DocumentDetectedTarget(Base):
         nullable=False,
     )
 
-    evidence_json: Mapped[list] = mapped_column(
+    source_examples_json: Mapped[list] = mapped_column(
         JSON,
         nullable=False,
         default=list,
     )
 
-    suggested_prompt: Mapped[str | None] = mapped_column(
-        Text,
+    parent_section: Mapped[str | None] = mapped_column(
+        String(255),
         nullable=True,
     )
 
@@ -81,6 +87,17 @@ class DocumentDetectedTarget(Base):
         JSON,
         nullable=False,
         default=list,
+    )
+
+    occurrence_count: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=1,
+    )
+
+    suggested_instruction: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True,
     )
 
     is_primary: Mapped[bool] = mapped_column(

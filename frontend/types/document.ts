@@ -11,13 +11,14 @@ export interface UploadedDocument {
   status: string;
   content_type: string;
   size_bytes: number;
-  checksum_sha256: string;
+  checksum_sha256: string | null;
   page_count: number;
   encrypted: boolean;
   uploaded_at: string;
   message: string;
   duplicate?: boolean;
   existing_document?: ExistingDocumentSummary | null;
+  embedded_files?: EmbeddedFileSummary[] | null;
   pipeline_log?: string[];
   approved_by?: string | null;
   approved_at?: string | null;
@@ -184,6 +185,77 @@ export interface ContentStats {
   dates: number;
   currency_values: number;
   organizations: number;
+}
+
+export type TargetType =
+  | "field"
+  | "table"
+  | "section"
+  | "contact"
+  | "date"
+  | "amount"
+  | "identifier"
+  | "clause"
+  | "obligation"
+  | "signature"
+  | "custom";
+
+export type TargetSource = "detected" | "template" | "custom";
+
+export interface DocumentTarget {
+  id: string;
+  key: string;
+  label: string;
+  target_type: TargetType;
+  page_numbers: number[];
+  confidence: number;
+  source_examples: string[];
+  parent_section: string | null;
+  columns: string[];
+  occurrence_count: number;
+  suggested_instruction: string | null;
+  source: TargetSource;
+}
+
+export interface DiscoverSchemaResult {
+  document_id: string;
+  document_family: string;
+  document_family_label: string;
+  document_family_confidence: number;
+  targets: DocumentTarget[];
+  counts_by_type: Partial<Record<TargetType, number>>;
+  generated_at: string;
+}
+
+export interface ScalarTargetResult {
+  target: string;
+  normalized_key: string;
+  value: unknown;
+  page: number;
+  confidence: number;
+  verified: boolean;
+  extraction_method: string;
+  evidence: SourceEvidence;
+}
+
+export interface TableTargetResult {
+  target: string;
+  columns: string[];
+  rows: Record<string, unknown>[];
+  pages: number[];
+}
+
+export interface ExtractTargetsResult {
+  document_id: string;
+  scalars: ScalarTargetResult[];
+  tables: TableTargetResult[];
+  unresolved_targets: string[];
+  warnings: string[];
+}
+
+export interface EmbeddedFileSummary {
+  filename: string;
+  size_bytes: number;
 }
 
 export interface StructureDetectionResult {

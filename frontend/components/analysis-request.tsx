@@ -1,500 +1,138 @@
 "use client";
 
-import { ArrowRight, ChevronDown, ChevronRight, Search } from "lucide-react";
+import { ArrowRight, Search } from "lucide-react";
 import { useState } from "react";
 
-import DetectedContentDrawer from "@/components/detected-content-drawer";
-import DetectionCountChips from "@/components/detection-count-chips";
-import {
-  DETECTION_TYPE_LABELS,
-  DETECTION_TYPE_ORDER,
-  DETECTION_TYPE_PLURAL,
-  groupByPage,
-  pageGroupLabel,
-  pageGroupPrompt,
-} from "@/lib/detection";
+import ExtractionInstruction from "@/components/extraction/extraction-instruction";
+import TargetPicker, {
+  type CustomQuickPick,
+} from "@/components/extraction/target-picker";
 import type {
-  DetectionExtractionType,
-  StructureDetectionResult,
+  DocumentTarget,
+  ExtractTargetsResult,
+  TargetType,
   UniversalExtractionResult,
 } from "@/types/document";
 
 interface AnalysisRequestProps {
   disabled?: boolean;
   waking?: boolean;
-  structureDetection?: StructureDetectionResult | null;
+  targets?: DocumentTarget[];
+  documentFamilyLabel?: string | null;
+
+  onExtractTargets: (
+    targetIds: string[],
+  ) => Promise<ExtractTargetsResult>;
 
   onAnalyze: (
     instruction: string,
   ) => Promise<UniversalExtractionResult>;
 }
 
-// The generic starting-point library, shown when a document has no
-// (or very few) real detections. Kept separate from the live
-// detected/grouped flow below, which is what most documents use.
-type TemplateType = "field" | "table" | "contact" | "obligation" | "custom";
-
-interface ExtractionTemplate {
-  id: string;
-  label: string;
-  prompt: string;
-}
-
-interface ExtractionTypeDefinition {
-  label: string;
-  targets: ExtractionTemplate[];
-}
-
-const EXTRACTION_TEMPLATES: Record<TemplateType, ExtractionTypeDefinition> = {
-  field: {
-    label: "Field",
-    targets: [
-      {
-        id: "contract_number",
-        label: "Contract Number",
-        prompt: "Extract the contract number.",
-      },
-      {
-        id: "contract_title",
-        label: "Contract Title",
-        prompt: "Extract the contract title.",
-      },
-      {
-        id: "supplier",
-        label: "Supplier",
-        prompt: "Extract the supplier name.",
-      },
-      {
-        id: "customer",
-        label: "Customer",
-        prompt: "Extract the customer name.",
-      },
-      {
-        id: "effective_date",
-        label: "Effective Date",
-        prompt: "Extract the effective date of the contract.",
-      },
-      {
-        id: "expiration_date",
-        label: "Expiration Date",
-        prompt: "Extract the expiration date of the contract.",
-      },
-      {
-        id: "award_date",
-        label: "Award Date",
-        prompt: "Extract the contract award date.",
-      },
-      {
-        id: "contract_value",
-        label: "Contract Value",
-        prompt: "Extract the total contract value.",
-      },
-      {
-        id: "payment_terms",
-        label: "Payment Terms",
-        prompt: "Extract the payment terms.",
-      },
-      {
-        id: "governing_law",
-        label: "Governing Law",
-        prompt: "Extract the governing law clause.",
-      },
-      {
-        id: "naics_code",
-        label: "NAICS Code",
-        prompt: "Extract the NAICS code and size standard.",
-      },
-      {
-        id: "contracting_officer",
-        label: "Contracting Officer",
-        prompt:
-          "Extract the contracting officer's name and contact information.",
-      },
-    ],
+const CUSTOM_QUICK_PICKS: CustomQuickPick[] = [
+  { key: "custom_field", label: "Custom Field", prompt: "" },
+  { key: "custom_table", label: "Custom Table", prompt: "" },
+  { key: "custom_question", label: "Custom Question", prompt: "" },
+  {
+    key: "custom_instruction",
+    label: "Custom Extraction Instruction",
+    prompt: "",
   },
-  table: {
-    label: "Table",
-    targets: [
-      {
-        id: "clins",
-        label: "CLINs",
-        prompt:
-          "Extract all CLINs with quantities, unit prices, total prices, and descriptions.",
-      },
-      {
-        id: "pricing_table",
-        label: "Pricing Table",
-        prompt:
-          "Extract the full pricing table with all line items and amounts.",
-      },
-      {
-        id: "rate_card",
-        label: "Rate Card",
-        prompt:
-          "Extract the rate card with labor categories and hourly rates.",
-      },
-      {
-        id: "payment_schedule",
-        label: "Payment Schedule",
-        prompt:
-          "Extract the payment schedule with due dates and amounts.",
-      },
-      {
-        id: "delivery_schedule",
-        label: "Delivery Schedule",
-        prompt:
-          "Extract the delivery schedule with milestones and dates.",
-      },
-      {
-        id: "line_items",
-        label: "Line Items",
-        prompt:
-          "Extract all line items with descriptions, quantities, and prices.",
-      },
-      {
-        id: "funding_table",
-        label: "Funding Table",
-        prompt:
-          "Extract the funding table with allocations and amounts.",
-      },
-      {
-        id: "milestones",
-        label: "Milestones",
-        prompt: "Extract all milestones with dates and deliverables.",
-      },
-    ],
-  },
-  contact: {
-    label: "Contacts",
-    targets: [
-      {
-        id: "all_contacts",
-        label: "All Contacts",
-        prompt:
-          "Extract all contacts mentioned in the document, including names, roles, emails, and phone numbers.",
-      },
-      {
-        id: "names",
-        label: "Names",
-        prompt: "Extract every person's name mentioned in the document.",
-      },
-      {
-        id: "emails",
-        label: "Emails",
-        prompt:
-          "Find every email address in the document and identify the associated person or organization where possible.",
-      },
-      {
-        id: "phone_numbers",
-        label: "Phone Numbers",
-        prompt:
-          "Find every telephone number in the document and identify the associated person or organization where possible.",
-      },
-      {
-        id: "addresses",
-        label: "Addresses",
-        prompt: "Extract all mailing addresses in the document.",
-      },
-      {
-        id: "contracting_officer",
-        label: "Contracting Officer",
-        prompt:
-          "Extract the contracting officer's name and contact information.",
-      },
-      {
-        id: "cor_cotr",
-        label: "COR / COTR",
-        prompt: "Extract the COR/COTR name and contact information.",
-      },
-      {
-        id: "signatories",
-        label: "Signatories",
-        prompt:
-          "Extract the names and titles of all signatories on the document.",
-      },
-    ],
-  },
-  obligation: {
-    label: "Obligations",
-    targets: [
-      {
-        id: "payment_obligations",
-        label: "Payment Obligations",
-        prompt: "Extract all payment obligations and terms.",
-      },
-      {
-        id: "delivery_obligations",
-        label: "Delivery Obligations",
-        prompt: "Extract all delivery obligations and deadlines.",
-      },
-      {
-        id: "reporting_requirements",
-        label: "Reporting Requirements",
-        prompt:
-          "Extract all reporting requirements and their frequency.",
-      },
-      {
-        id: "renewal_obligations",
-        label: "Renewal Obligations",
-        prompt: "Extract all renewal obligations and notice periods.",
-      },
-      {
-        id: "notice_requirements",
-        label: "Notice Requirements",
-        prompt:
-          "Extract all notice requirements, including required lead time and delivery method.",
-      },
-      {
-        id: "insurance_requirements",
-        label: "Insurance Requirements",
-        prompt:
-          "Extract all insurance requirements, including coverage types and minimum amounts.",
-      },
-      {
-        id: "compliance_requirements",
-        label: "Compliance Requirements",
-        prompt: "Extract all compliance requirements referenced in the document.",
-      },
-      {
-        id: "performance_obligations",
-        label: "Performance Obligations",
-        prompt: "Extract all performance obligations and standards.",
-      },
-    ],
-  },
-  custom: {
-    label: "Custom",
-    targets: [
-      { id: "custom_field", label: "Custom Field", prompt: "" },
-      { id: "custom_table", label: "Custom Table", prompt: "" },
-      { id: "custom_question", label: "Custom Question", prompt: "" },
-      {
-        id: "custom_extraction_instruction",
-        label: "Custom Extraction Instruction",
-        prompt: "",
-      },
-    ],
-  },
-};
-
-const TEMPLATE_TYPES = Object.keys(EXTRACTION_TEMPLATES) as TemplateType[];
-
-// A detected option is either a real, named target the backend
-// recognized (e.g. "Pricing Table"), or a synthetic grouping of
-// several low-confidence, unlabeled detections on the same page
-// (e.g. "Page 11 — 9 tables") — collapsed so near-duplicate raw
-// detections don't flood the picker.
-interface DetectedOption {
-  kind: "named" | "grouped";
-  type: DetectionExtractionType;
-  key: string;
-  label: string;
-  prompt: string;
-}
-
-function buildOptionsForType(
-  detection: StructureDetectionResult,
-  type: DetectionExtractionType,
-): DetectedOption[] {
-  const named: DetectedOption[] = detection.detected_targets
-    .filter((target) => target.extraction_type === type)
-    .map((target) => ({
-      kind: "named",
-      type,
-      key: target.key,
-      label: target.label,
-      prompt: target.suggested_prompt || `Extract the ${target.label}.`,
-    }));
-
-  const typeLabel = DETECTION_TYPE_PLURAL[type];
-  const grouped: DetectedOption[] = groupByPage(
-    detection.possible_targets,
-    type,
-  ).map((group) => ({
-    kind: "grouped",
-    type,
-    key: `other:${type}:${group.page}`,
-    label: pageGroupLabel(group, typeLabel),
-    prompt: pageGroupPrompt(group, typeLabel),
-  }));
-
-  return [...named, ...grouped];
-}
-
-function detectedTypesFor(
-  detection: StructureDetectionResult | null,
-): DetectionExtractionType[] {
-  if (!detection) return [];
-  return DETECTION_TYPE_ORDER.filter(
-    (type) => buildOptionsForType(detection, type).length > 0,
-  );
-}
+];
 
 export default function AnalysisRequest({
   disabled = false,
   waking = false,
-  structureDetection = null,
+  targets = [],
+  documentFamilyLabel = null,
+  onExtractTargets,
   onAnalyze,
 }: AnalysisRequestProps) {
-  const detectedTypes = detectedTypesFor(structureDetection);
-  const hasDetections = detectedTypes.length > 0;
-  const isKnownEmpty = Boolean(structureDetection) && !hasDetections;
-
-  const [initializedFor, setInitializedFor] =
-    useState<StructureDetectionResult | null>(null);
-
-  const [detectedType, setDetectedType] =
-    useState<DetectionExtractionType | null>(null);
-  const [detectedTargetKey, setDetectedTargetKey] =
-    useState<string | null>(null);
-
-  const [templateType, setTemplateType] =
-    useState<TemplateType>("field");
-  const [templateTargetId, setTemplateTargetId] = useState(
-    EXTRACTION_TEMPLATES.field.targets[0].id,
-  );
-
-  const [instruction, setInstruction] = useState(
-    EXTRACTION_TEMPLATES.field.targets[0].prompt,
-  );
-  const [badgeLabel, setBadgeLabel] = useState(
-    EXTRACTION_TEMPLATES.field.label,
-  );
-
-  const [moreOptionsOpen, setMoreOptionsOpen] = useState(false);
-  const [instructionExpanded, setInstructionExpanded] = useState(false);
-  const [drawerOpen, setDrawerOpen] = useState(false);
-  const [analyzing, setAnalyzing] = useState(false);
-  const [error, setError] = useState("");
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [extracting, setExtracting] = useState(false);
+  const [extractError, setExtractError] = useState("");
   const [noMatch, setNoMatch] = useState(false);
 
-  // Once detection results land (or come back empty), switch the
-  // picker into the document-aware view instead of the generic
-  // template it started on. Runs once per new detection result.
-  if (structureDetection !== initializedFor) {
-    setInitializedFor(structureDetection);
-    setNoMatch(false);
+  const [instruction, setInstruction] = useState("");
+  const [instructionExpanded, setInstructionExpanded] = useState(false);
+  const [asking, setAsking] = useState(false);
+  const [askError, setAskError] = useState("");
 
-    if (structureDetection && detectedTypes.length > 0) {
-      const firstType = detectedTypes[0];
-      const firstOption = buildOptionsForType(structureDetection, firstType)[0];
+  const busy = disabled || extracting || asking;
 
-      if (firstOption) {
-        setDetectedType(firstType);
-        setDetectedTargetKey(firstOption.key);
-        setInstruction(firstOption.prompt);
-        setBadgeLabel(DETECTION_TYPE_LABELS[firstType]);
+  function toggleTarget(targetId: string) {
+    setSelectedIds((current) => {
+      const next = new Set(current);
+      if (next.has(targetId)) {
+        next.delete(targetId);
+      } else {
+        next.add(targetId);
       }
-    } else if (Boolean(structureDetection)) {
-      setTemplateType("custom");
-      setTemplateTargetId(EXTRACTION_TEMPLATES.custom.targets[0].id);
-      setInstruction(EXTRACTION_TEMPLATES.custom.targets[0].prompt);
-      setBadgeLabel(EXTRACTION_TEMPLATES.custom.label);
-    }
-  }
-
-  function applyDetected(option: DetectedOption) {
-    setDetectedType(option.type);
-    setDetectedTargetKey(option.key);
-    setInstruction(option.prompt);
-    setBadgeLabel(DETECTION_TYPE_LABELS[option.type]);
+      return next;
+    });
     setNoMatch(false);
   }
 
-  function handleDetectedTypeChange(nextType: DetectionExtractionType) {
-    if (!structureDetection) return;
-    const firstOption = buildOptionsForType(structureDetection, nextType)[0];
-    if (firstOption) applyDetected(firstOption);
+  function clearSelection() {
+    setSelectedIds(new Set());
   }
 
-  function handleDetectedTargetChange(nextKey: string) {
-    if (!structureDetection || !detectedType) return;
-    const option = buildOptionsForType(structureDetection, detectedType).find(
-      (item) => item.key === nextKey,
-    );
-    if (option) applyDetected(option);
-  }
+  async function runExtraction(targetIds: string[]) {
+    if (targetIds.length === 0) return;
 
-  function applyTemplate(type: TemplateType, template: ExtractionTemplate) {
-    setTemplateType(type);
-    setTemplateTargetId(template.id);
-    setInstruction(template.prompt);
-    setBadgeLabel(EXTRACTION_TEMPLATES[type].label);
-    setNoMatch(false);
-  }
-
-  function handleTemplateTypeChange(nextType: TemplateType) {
-    applyTemplate(nextType, EXTRACTION_TEMPLATES[nextType].targets[0]);
-  }
-
-  function handleTemplateTargetChange(nextTargetId: string) {
-    const template = EXTRACTION_TEMPLATES[templateType].targets.find(
-      (item) => item.id === nextTargetId,
-    );
-
-    if (template) {
-      applyTemplate(templateType, template);
-    }
-  }
-
-  function switchToCustom() {
-    setMoreOptionsOpen(true);
-    applyTemplate("custom", EXTRACTION_TEMPLATES.custom.targets[0]);
-    setInstruction("");
-  }
-
-  function chooseFirstDetected() {
-    if (!structureDetection) return;
-    for (const type of detectedTypes) {
-      const first = buildOptionsForType(structureDetection, type)[0];
-      if (first) {
-        applyDetected(first);
-        return;
-      }
-    }
-  }
-
-  async function continueAnalysis() {
-    if (!instruction.trim()) {
-      return;
-    }
-
-    setAnalyzing(true);
-    setError("");
+    setExtracting(true);
+    setExtractError("");
     setNoMatch(false);
 
     try {
-      const result = await onAnalyze(instruction.trim());
-
+      const result = await onExtractTargets(targetIds);
       if (
-        result.values.length === 0 &&
-        result.tables.length === 0 &&
-        !result.answer
+        result.scalars.length === 0 &&
+        result.tables.length === 0
       ) {
         setNoMatch(true);
       }
-    } catch (analysisError) {
-      setError(
-        analysisError instanceof Error
-          ? analysisError.message
-          : "Analysis failed.",
+    } catch (error) {
+      setExtractError(
+        error instanceof Error ? error.message : "Extraction failed.",
       );
     } finally {
-      setAnalyzing(false);
+      setExtracting(false);
     }
   }
 
-  const busy = disabled || analyzing;
-  const detectedTargetOptions =
-    structureDetection && detectedType
-      ? buildOptionsForType(structureDetection, detectedType)
-      : [];
-  const namedTargetOptions = detectedTargetOptions.filter(
-    (option) => option.kind === "named",
-  );
-  const otherTargetOptions = detectedTargetOptions.filter(
-    (option) => option.kind === "grouped",
-  );
+  function selectAllOfType(targetType: TargetType) {
+    const ids = targets
+      .filter((target) => target.target_type === targetType)
+      .map((target) => target.id);
+
+    if (ids.length === 0) return;
+
+    setSelectedIds(new Set(ids));
+    void runExtraction(ids);
+  }
+
+  function selectCustomQuickPick(pick: CustomQuickPick) {
+    setInstruction(pick.prompt);
+    setInstructionExpanded(true);
+  }
+
+  async function askQuestion() {
+    if (!instruction.trim()) return;
+
+    setAsking(true);
+    setAskError("");
+
+    try {
+      await onAnalyze(instruction.trim());
+    } catch (error) {
+      setAskError(
+        error instanceof Error ? error.message : "Analysis failed.",
+      );
+    } finally {
+      setAsking(false);
+    }
+  }
 
   return (
     <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
@@ -505,266 +143,53 @@ export default function AnalysisRequest({
 
         <div>
           <h2 className="text-lg font-semibold text-slate-950">
-            What do you want to know or extract?
+            Universal Extraction
           </h2>
-
+          <p className="mt-0.5 text-base font-medium text-slate-800">
+            What do you want to extract?
+          </p>
           <p className="mt-1 text-sm leading-6 text-slate-500">
-            Ask for fields, tables, contacts, obligations,
-            or any custom information in the document.
+            Search fields, tables, sections, clauses, and other
+            information actually detected in this document.
           </p>
         </div>
       </div>
 
-      {hasDetections && (
-        <>
-          {structureDetection && (
-            <p className="mt-4 text-xs text-slate-500">
-              Detected as{" "}
-              <span className="font-medium text-slate-700">
-                {structureDetection.document_family_label}
-              </span>
-            </p>
-          )}
-
-          <div className="mt-3 grid gap-4 sm:grid-cols-2">
-            <label className="block text-xs font-medium text-slate-500">
-              Extraction Type
-              <select
-                value={detectedType ?? ""}
-                disabled={busy}
-                onChange={(event) =>
-                  handleDetectedTypeChange(
-                    event.target.value as DetectionExtractionType,
-                  )
-                }
-                className="mt-1.5 w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none transition focus:border-blue-500 focus:ring-4 focus:ring-blue-50 disabled:bg-slate-50"
-              >
-                {detectedTypes.map((type) => (
-                  <option key={type} value={type}>
-                    {DETECTION_TYPE_LABELS[type]}
-                  </option>
-                ))}
-              </select>
-            </label>
-
-            <label className="block text-xs font-medium text-slate-500">
-              Extraction Target
-              <select
-                value={detectedTargetKey ?? ""}
-                disabled={busy}
-                onChange={(event) =>
-                  handleDetectedTargetChange(event.target.value)
-                }
-                className="mt-1.5 w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none transition focus:border-blue-500 focus:ring-4 focus:ring-blue-50 disabled:bg-slate-50"
-              >
-                {namedTargetOptions.length > 0 && (
-                  <optgroup label="Named">
-                    {namedTargetOptions.map((option) => (
-                      <option key={option.key} value={option.key}>
-                        {option.label}
-                      </option>
-                    ))}
-                  </optgroup>
-                )}
-
-                {otherTargetOptions.length > 0 && (
-                  <optgroup
-                    label={`Other detected ${
-                      detectedType
-                        ? DETECTION_TYPE_PLURAL[detectedType].toLowerCase()
-                        : ""
-                    }`}
-                  >
-                    {otherTargetOptions.map((option) => (
-                      <option key={option.key} value={option.key}>
-                        {option.label}
-                      </option>
-                    ))}
-                  </optgroup>
-                )}
-              </select>
-            </label>
-          </div>
-
-          <div className="mt-5 border-t border-slate-100 pt-4">
-            <p className="text-xs font-medium text-slate-500">
-              Detected Content
-            </p>
-            <div className="mt-2">
-              <DetectionCountChips
-                counts={structureDetection!.counts}
-                tableTotal={structureDetection!.content_stats.tables}
-              />
-            </div>
-            <button
-              type="button"
-              onClick={() => setDrawerOpen(true)}
-              className="mt-3 text-xs font-semibold text-blue-700 hover:text-blue-800"
-            >
-              View detected content →
-            </button>
-          </div>
-        </>
+      {documentFamilyLabel && (
+        <p className="mt-4 text-xs text-slate-500">
+          Detected as{" "}
+          <span className="font-medium text-slate-700">
+            {documentFamilyLabel}
+          </span>
+        </p>
       )}
 
-      {isKnownEmpty && structureDetection && (
-        <div className="mt-4 rounded-xl bg-slate-50 p-4">
-          <p className="text-xs font-medium text-slate-500">
-            Document type
-          </p>
-          <p className="text-sm font-semibold text-slate-900">
-            {structureDetection.document_family_label}
-          </p>
-
-          <p className="mt-3 text-xs font-medium text-slate-500">
-            Detected content
-          </p>
-          <p className="mt-1 text-sm text-slate-700">
-            {structureDetection.content_stats.tables} tables,{" "}
-            {structureDetection.content_stats.dates} dates,{" "}
-            {structureDetection.content_stats.currency_values} currency
-            values, {structureDetection.content_stats.organizations}{" "}
-            organizations
-          </p>
-        </div>
-      )}
-
-      {(!hasDetections || moreOptionsOpen) && (
-        <div className={hasDetections ? "mt-5 border-t border-slate-100 pt-5" : "mt-5"}>
-          {hasDetections && (
-            <p className="mb-3 text-xs font-medium text-slate-500">
-              More extraction options
-            </p>
-          )}
-
-          <div className="flex flex-wrap gap-2">
-            {EXTRACTION_TEMPLATES.custom.targets.map((template) => (
-              <button
-                key={template.id}
-                type="button"
-                disabled={busy}
-                onClick={() => applyTemplate("custom", template)}
-                className="rounded-full border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-slate-600 transition hover:border-blue-300 hover:bg-blue-50 hover:text-blue-700 disabled:opacity-50"
-              >
-                {template.label}
-              </button>
-            ))}
-          </div>
-
-          <div className="mt-4 grid gap-4 sm:grid-cols-2">
-            <label className="block text-xs font-medium text-slate-500">
-              Extraction Type
-              <select
-                value={templateType}
-                disabled={busy}
-                onChange={(event) =>
-                  handleTemplateTypeChange(
-                    event.target.value as TemplateType,
-                  )
-                }
-                className="mt-1.5 w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none transition focus:border-blue-500 focus:ring-4 focus:ring-blue-50 disabled:bg-slate-50"
-              >
-                {TEMPLATE_TYPES.map((type) => (
-                  <option key={type} value={type}>
-                    {EXTRACTION_TEMPLATES[type].label}
-                  </option>
-                ))}
-              </select>
-            </label>
-
-            <label className="block text-xs font-medium text-slate-500">
-              Extraction Target
-              <select
-                value={templateTargetId}
-                disabled={busy}
-                onChange={(event) =>
-                  handleTemplateTargetChange(event.target.value)
-                }
-                className="mt-1.5 w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none transition focus:border-blue-500 focus:ring-4 focus:ring-blue-50 disabled:bg-slate-50"
-              >
-                {EXTRACTION_TEMPLATES[templateType].targets.map(
-                  (target) => (
-                    <option key={target.id} value={target.id}>
-                      {target.label}
-                    </option>
-                  ),
-                )}
-              </select>
-            </label>
-          </div>
-        </div>
-      )}
-
-      {hasDetections && !moreOptionsOpen && (
-        <button
-          type="button"
-          onClick={() => setMoreOptionsOpen(true)}
-          className="mt-4 flex items-center gap-1 text-xs font-medium text-slate-500 hover:text-slate-700"
-        >
-          <ChevronRight className="h-3.5 w-3.5" />
-          More extraction options
-        </button>
-      )}
-
-      {hasDetections && moreOptionsOpen && (
-        <button
-          type="button"
-          onClick={() => setMoreOptionsOpen(false)}
-          className="mt-3 flex items-center gap-1 text-xs font-medium text-slate-500 hover:text-slate-700"
-        >
-          <ChevronDown className="h-3.5 w-3.5" />
-          Hide extraction options
-        </button>
-      )}
-
-      <label className="mt-5 block text-xs font-medium text-slate-500">
-        Instruction
-        <textarea
-          value={instruction}
+      <div className="mt-4">
+        <TargetPicker
+          targets={targets}
+          customQuickPicks={CUSTOM_QUICK_PICKS}
+          selectedIds={selectedIds}
           disabled={busy}
-          onChange={(event) =>
-            setInstruction(event.target.value)
-          }
-          rows={instructionExpanded ? 8 : 3}
-          style={{ minHeight: instructionExpanded ? undefined : "110px" }}
-          placeholder="Describe what to extract, or pick a target above to prefill this."
-          className="mt-1.5 w-full resize-none rounded-xl border border-slate-200 bg-white p-4 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-blue-500 focus:ring-4 focus:ring-blue-50 disabled:bg-slate-50"
+          onToggle={toggleTarget}
+          onSelectAll={selectAllOfType}
+          onClear={clearSelection}
+          onSelectCustom={selectCustomQuickPick}
         />
-      </label>
-
-      <button
-        type="button"
-        onClick={() => setInstructionExpanded((value) => !value)}
-        className="mt-1.5 text-xs font-medium text-blue-700 hover:text-blue-800"
-      >
-        {instructionExpanded ? "Collapse instruction" : "Expand instruction"}
-      </button>
-
-      <div className="mt-4 flex items-center gap-2">
-        <span className="text-xs font-medium text-slate-500">
-          Extraction Mode
-        </span>
-        <span className="rounded-full border border-blue-200 bg-blue-50 px-2.5 py-1 text-xs font-semibold text-blue-700">
-          {badgeLabel}
-        </span>
       </div>
 
       <button
         type="button"
-        disabled={busy || !instruction.trim()}
-        onClick={continueAnalysis}
-        className="mt-5 inline-flex items-center gap-2 rounded-xl bg-slate-950 px-5 py-3 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-40"
+        disabled={busy || selectedIds.size === 0}
+        onClick={() => void runExtraction(Array.from(selectedIds))}
+        className="mt-4 inline-flex items-center gap-2 rounded-xl bg-slate-950 px-5 py-3 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-40"
       >
-        {analyzing
-          ? "Analyzing..."
-          : "Analyze Document"}
-
-        {!analyzing && (
-          <ArrowRight className="h-4 w-4" />
-        )}
+        {extracting
+          ? "Extracting..."
+          : `Extract Selected${selectedIds.size ? ` (${selectedIds.size})` : ""}`}
+        {!extracting && <ArrowRight className="h-4 w-4" />}
       </button>
 
-      {analyzing && waking && (
+      {extracting && waking && (
         <div className="mt-4 rounded-xl bg-slate-50 p-3 text-sm text-slate-600">
           Waking processing service... this can take up to a minute
           after a deploy.
@@ -772,61 +197,49 @@ export default function AnalysisRequest({
       )}
 
       {noMatch && (
-        <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 p-4">
-          <p className="text-sm font-semibold text-amber-800">
-            No matching structure found
-          </p>
-          <p className="mt-1 text-sm text-amber-700">
-            That request didn&apos;t match anything in this document.
-          </p>
-
-          {structureDetection && structureDetection.detected_tables.length > 0 && (
-            <>
-              <p className="mt-3 text-xs font-medium text-amber-700">
-                Detected tables
-              </p>
-              <ul className="mt-1 space-y-0.5 text-sm text-amber-800">
-                {structureDetection.detected_tables.map((table) => (
-                  <li key={table.key}>&bull; {table.label}</li>
-                ))}
-              </ul>
-            </>
-          )}
-
-          <div className="mt-3 flex flex-wrap gap-2">
-            {hasDetections && (
-              <button
-                type="button"
-                onClick={chooseFirstDetected}
-                className="rounded-lg border border-amber-300 bg-white px-3 py-1.5 text-xs font-medium text-amber-800 transition hover:bg-amber-100"
-              >
-                Choose Detected Table
-              </button>
-            )}
-            <button
-              type="button"
-              onClick={switchToCustom}
-              className="rounded-lg border border-amber-300 bg-white px-3 py-1.5 text-xs font-medium text-amber-800 transition hover:bg-amber-100"
-            >
-              Try Custom Extraction
-            </button>
-          </div>
+        <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-700">
+          That selection didn&apos;t resolve to any values in this
+          document.
         </div>
       )}
 
-      {error && (
+      {extractError && (
         <div className="mt-4 rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">
-          {error}
+          {extractError}
         </div>
       )}
 
-      {structureDetection && (
-        <DetectedContentDrawer
-          open={drawerOpen}
-          onClose={() => setDrawerOpen(false)}
-          structureDetection={structureDetection}
-        />
-      )}
+      <div className="mt-6 border-t border-slate-100 pt-5">
+        <p className="text-xs font-medium text-slate-500">
+          Custom — ask anything
+        </p>
+        <div className="mt-2">
+          <ExtractionInstruction
+            value={instruction}
+            disabled={busy}
+            expanded={instructionExpanded}
+            onChange={setInstruction}
+            onToggleExpand={() =>
+              setInstructionExpanded((value) => !value)
+            }
+          />
+        </div>
+
+        <button
+          type="button"
+          disabled={busy || !instruction.trim()}
+          onClick={() => void askQuestion()}
+          className="mt-3 inline-flex items-center gap-2 rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          {asking ? "Analyzing..." : "Ask / Extract Custom"}
+        </button>
+
+        {askError && (
+          <div className="mt-3 rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+            {askError}
+          </div>
+        )}
+      </div>
     </div>
   );
 }

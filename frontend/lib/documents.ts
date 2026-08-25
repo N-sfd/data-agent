@@ -11,11 +11,13 @@ import type {
   ContractClassification,
   DashboardStats,
   DetectedRelationship,
+  DiscoverSchemaResult,
   DocumentHierarchyResult,
   DocumentPage,
   DocumentSearchResponse,
   DocumentSummary,
   DuplicateResolution,
+  ExtractTargetsResult,
   ExtractionProgress,
   ExtractionSummary,
   FieldAuditEntry,
@@ -429,4 +431,55 @@ export async function universalExtract(
     },
     onRetry,
   );
+}
+
+export async function discoverSchema(
+  documentId: string,
+  onRetry?: (attempt: number, total: number) => void,
+): Promise<DiscoverSchemaResult> {
+  return apiFetch(
+    `/api/documents/${documentId}/discover-schema`,
+    { method: "POST" },
+    onRetry,
+  );
+}
+
+export async function getTargets(
+  documentId: string,
+): Promise<DiscoverSchemaResult> {
+  return apiFetch(`/api/documents/${documentId}/targets`);
+}
+
+export async function extractTargets(
+  documentId: string,
+  targetIds: string[],
+  onRetry?: (attempt: number, total: number) => void,
+): Promise<ExtractTargetsResult> {
+  return apiFetch(
+    `/api/documents/${documentId}/extract-targets`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        target_ids: targetIds,
+        use_ai_fallback: true,
+      }),
+    },
+    onRetry,
+  );
+}
+
+export async function selectPortfolioFile(
+  documentId: string,
+  filename: string,
+): Promise<UploadedDocument> {
+  return apiFetch(`/api/documents/${documentId}/portfolio/select`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ filename }),
+  });
 }

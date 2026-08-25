@@ -1,9 +1,36 @@
 import re
+import unicodedata
+
+_PUNCTUATION_VARIANTS = {
+    "‐": "-",  # hyphen
+    "‑": "-",  # non-breaking hyphen
+    "‒": "-",  # figure dash
+    "–": "-",  # en dash
+    "—": "-",  # em dash
+    "‘": "'",  # left single quote
+    "’": "'",  # right single quote
+    "“": '"',  # left double quote
+    "”": '"',  # right double quote
+    " ": " ",  # non-breaking space
+}
 
 
 def normalize_text(
     value: str,
 ) -> str:
+
+    value = unicodedata.normalize(
+        "NFKC",
+        value,
+    )
+
+    for variant, replacement in (
+        _PUNCTUATION_VARIANTS.items()
+    ):
+        value = value.replace(
+            variant,
+            replacement,
+        )
 
     value = value.lower()
 

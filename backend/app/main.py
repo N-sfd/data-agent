@@ -36,6 +36,9 @@ from app.models import (  # noqa: F401
     document_delivery_schedule as document_delivery_schedule_model,
 )
 from app.models import (  # noqa: F401
+    document_detected_target as document_detected_target_model,
+)
+from app.models import (  # noqa: F401
     document_funding_line as document_funding_line_model,
 )
 from app.models import (  # noqa: F401

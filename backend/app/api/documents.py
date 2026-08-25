@@ -3,6 +3,7 @@ from hashlib import sha256
 from pathlib import Path
 from uuid import UUID, uuid4
 
+import fitz
 from fastapi import APIRouter, Depends, File, HTTPException, Response, UploadFile
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
@@ -23,9 +24,11 @@ from app.schemas.document import (
     DocumentHierarchyResponse,
     DocumentSearchResponse,
     DocumentSummaryResponse,
+    EmbeddedFileSummary,
     ExistingDocumentSummary,
     HierarchyNode,
     ResolveDuplicateRequest,
+    SelectPortfolioFileRequest,
     UploadedDocumentResponse,
 )
 from app.services.dashboard_stats import (
@@ -39,8 +42,12 @@ from app.services.file_upload import (
     validate_upload_metadata,
 )
 from app.services.pdf_validation import (
+    EmbeddedPdf,
     PDFMetadata,
     PDFValidationError,
+    detect_pdf_portfolio,
+    extract_named_embedded_pdf,
+    list_embedded_pdfs,
     validate_pdf_structure,
 )
 from app.services.security_validation import (
@@ -85,6 +92,16 @@ def _find_staged_upload(
             return candidate, spec
 
     return None
+
+
+def _peek_portfolio_embedded_files(file_path: Path) -> list[EmbeddedPdf]:
+    try:
+        with fitz.open(file_path) as pdf:
+            if not pdf.is_pdf or not detect_pdf_portfolio(pdf):
+                return []
+            return list_embedded_pdfs(pdf)
+    except Exception:
+        return []
 
 
 def _extract_metadata(
@@ -258,6 +275,41 @@ async def upload_document(
             "Ran security validation "
             "(signature, extension, and MIME checks)"
         )
+
+        if spec.kind == "pdf":
+            portfolio_files = _peek_portfolio_embedded_files(destination)
+
+            if len(portfolio_files) > 1:
+                log.append(
+                    f"Detected a PDF Portfolio with "
+                    f"{len(portfolio_files)} embedded documents"
+                )
+
+                response.status_code = 200
+
+                return UploadedDocumentResponse(
+                    document_id=document_id,
+                    original_filename=display_filename,
+                    status="portfolio_pending",
+                    content_type=spec.content_type,
+                    size_bytes=destination.stat().st_size,
+                    checksum_sha256=None,
+                    page_count=1,
+                    encrypted=False,
+                    uploaded_at=datetime.now(timezone.utc),
+                    message=(
+                        f"This PDF contains {len(portfolio_files)} "
+                        "embedded documents. Choose one to analyze."
+                    ),
+                    embedded_files=[
+                        EmbeddedFileSummary(
+                            filename=item.filename,
+                            size_bytes=len(item.data),
+                        )
+                        for item in portfolio_files
+                    ],
+                    pipeline_log=log,
+                )
 
         metadata = _extract_metadata(spec, destination)
 
@@ -524,6 +576,118 @@ async def resolve_duplicate(
         raise HTTPException(
             status_code=500,
             detail="The file could not be stored securely.",
+        ) from exc
+
+
+@router.post(
+    "/{document_id}/portfolio/select",
+    response_model=UploadedDocumentResponse,
+)
+async def select_portfolio_file(
+    document_id: UUID,
+    payload: SelectPortfolioFileRequest,
+    database: Session = Depends(get_database),
+) -> UploadedDocumentResponse:
+    staged = _find_staged_upload(document_id)
+
+    if staged is None:
+        raise HTTPException(
+            status_code=404,
+            detail="No pending portfolio upload found for this document id.",
+        )
+
+    destination, spec = staged
+
+    if spec.kind != "pdf":
+        raise HTTPException(
+            status_code=409,
+            detail="The staged upload is not a PDF Portfolio.",
+        )
+
+    log = ["Selected embedded document from PDF Portfolio"]
+
+    try:
+        extract_named_embedded_pdf(
+            destination,
+            filename=payload.filename,
+            destination=destination,
+        )
+        log.append(f"Extracted embedded document '{payload.filename}'")
+
+        metadata = _extract_metadata(spec, destination)
+        log.append("Extracted PDF metadata")
+
+        file_bytes = destination.read_bytes()
+        size_bytes = len(file_bytes)
+        checksum = sha256(file_bytes).hexdigest()
+
+        duplicate = _find_duplicate(database, checksum)
+
+        if duplicate is not None:
+            return UploadedDocumentResponse(
+                document_id=document_id,
+                original_filename=duplicate.original_filename,
+                status="duplicate_pending",
+                content_type=spec.content_type,
+                size_bytes=size_bytes,
+                checksum_sha256=checksum,
+                page_count=metadata.page_count,
+                encrypted=metadata.encrypted,
+                uploaded_at=datetime.now(timezone.utc),
+                message=(
+                    "A document with identical contents was already "
+                    "uploaded. Choose whether to use the existing "
+                    "document or upload this one anyway."
+                ),
+                duplicate=True,
+                existing_document=_existing_document_summary(duplicate),
+                pipeline_log=log,
+            )
+
+        display_filename = f"Portfolio → {payload.filename}"
+
+        document, uploaded_at = _create_document_record(
+            database=database,
+            document_id=document_id,
+            stored_filename=destination.name,
+            display_filename=display_filename,
+            content_type=spec.content_type,
+            size_bytes=size_bytes,
+            checksum=checksum,
+            metadata=metadata,
+        )
+
+        log.append("Stored embedded document")
+
+        return UploadedDocumentResponse(
+            document_id=document_id,
+            original_filename=display_filename,
+            status="ready",
+            content_type=spec.content_type,
+            size_bytes=size_bytes,
+            checksum_sha256=checksum,
+            page_count=metadata.page_count,
+            encrypted=metadata.encrypted,
+            uploaded_at=uploaded_at,
+            message=(
+                f"Extracted '{payload.filename}' from the PDF Portfolio "
+                "for analysis."
+            ),
+            pipeline_log=log,
+        )
+
+    except (PDFValidationError, SecurityValidationError) as exc:
+        raise HTTPException(
+            status_code=422,
+            detail=str(exc),
+        ) from exc
+
+    except Exception as exc:
+        database.rollback()
+
+        raise HTTPException(
+            status_code=500,
+            detail="The embedded document could not be stored securely.",
         ) from exc
 
 
