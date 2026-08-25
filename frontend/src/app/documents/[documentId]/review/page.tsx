@@ -525,6 +525,33 @@ export default function ReviewWorkspacePage({
     }
   }
 
+  async function handleAnalyze() {
+    setAnalyzing(true);
+    setAnalyzeError("");
+
+    try {
+      const result = await analyzeContract(documentId);
+      setAnalysis(result);
+      setNotAnalyzed(false);
+
+      const firstField = result.metadata_fields[0];
+
+      if (firstField) {
+        setActiveFieldKey(firstField.field_key);
+        setCurrentPage(firstField.evidence.page_number);
+        setHighlightText(firstField.evidence.source_text);
+      }
+    } catch (error) {
+      setAnalyzeError(
+        error instanceof Error
+          ? error.message
+          : "Unable to analyze this document.",
+      );
+    } finally {
+      setAnalyzing(false);
+    }
+  }
+
   async function handleExtractClauses() {
     setExtractingClauses(true);
     setClausesError("");
@@ -592,6 +619,39 @@ export default function ReviewWorkspacePage({
         >
           <ArrowLeft className="h-4 w-4" />
           Back to dashboard
+        </Link>
+      </div>
+    );
+  }
+
+  if (document && notAnalyzed) {
+    return (
+      <div className="mx-auto flex max-w-lg flex-col items-center gap-4 px-6 py-24 text-center">
+        <p className="text-sm font-medium text-foreground">
+          This document has not been analyzed yet.
+        </p>
+        <p className="text-sm text-text-secondary">
+          Run contract analysis to extract metadata fields, classify the
+          document, and detect relationships.
+        </p>
+        {analyzeError && (
+          <p className="text-xs text-red-700">{analyzeError}</p>
+        )}
+        <button
+          type="button"
+          onClick={handleAnalyze}
+          disabled={analyzing}
+          className="btn-primary px-4 py-2 text-sm disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          {analyzing && <Loader2 className="h-4 w-4 animate-spin" />}
+          {analyzing ? "Analyzing..." : "Analyze Document"}
+        </button>
+        <Link
+          href="/repository"
+          className="inline-flex items-center gap-1.5 text-sm font-medium text-primary hover:underline"
+        >
+          <ArrowLeft className="h-4 w-4" />
+          Back to repository
         </Link>
       </div>
     );
