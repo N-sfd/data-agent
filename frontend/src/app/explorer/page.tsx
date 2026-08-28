@@ -7,6 +7,7 @@ import { ChevronRight, Loader2, Search } from "lucide-react";
 
 import ContentSection from "@/components/layout/ContentSection";
 import PageHero from "@/components/layout/PageHero";
+import { LoadingState } from "@/components/layout/StatusState";
 import ConfidenceIndicator from "@/components/confidence-indicator";
 import {
   aggregateFieldAcrossRepository,
@@ -308,10 +309,10 @@ export default function FieldExplorerPage() {
   return (
     <Suspense
       fallback={
-        <div className="flex items-center justify-center py-24 text-sm text-text-secondary">
-          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-          Loading Field Explorer...
-        </div>
+        <LoadingState
+          title="Loading Field Explorer..."
+          description="Aggregating extracted scalar fields across all repository contracts."
+        />
       }
     >
       <ExplorerContent />

@@ -4,6 +4,8 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 
+import EmptyState from "@/components/illustrations/empty-state";
+import { LoadingState } from "@/components/layout/StatusState";
 import PageHeader from "@/components/page-header";
 import { getGlobalAuditLog } from "@/lib/documents";
 import type { GlobalAuditEntry, ReviewAction } from "@/types/document";
@@ -83,13 +85,16 @@ export default function AuditLogPage() {
 
       <div className="editorial-card overflow-hidden">
         {loading && entries.length === 0 ? (
-          <p className="p-10 text-center text-sm text-text-secondary">
-            Loading audit entries...
-          </p>
+          <LoadingState
+            title="Loading audit history..."
+            description="Querying provenance logs, human verification stamps, and field modification records."
+          />
         ) : entries.length === 0 ? (
-          <p className="p-10 text-center text-sm text-text-secondary">
-            No review actions recorded yet.
-          </p>
+          <EmptyState
+            variant="documents"
+            title="No audit actions recorded yet"
+            description="Human review activities, field edits, and extraction acceptance events will appear here with full provenance timestamps."
+          />
         ) : (
           <div className="overflow-x-auto">
             <table className="min-w-full text-sm">

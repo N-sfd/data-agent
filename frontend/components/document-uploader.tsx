@@ -282,7 +282,7 @@ export default function DocumentUploader({
           </span>
 
           <p className="mt-5 text-xs text-text-muted">
-            PDF · DOCX · PNG · JPG
+            <span className="font-medium text-text-secondary">PDF</span> (Full Source Verification) · DOCX, PNG, JPG (Text Extraction)
           </p>
         </div>
       ) : (

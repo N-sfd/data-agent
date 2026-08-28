@@ -13,6 +13,7 @@ import {
   Search,
   Settings,
   Sparkles,
+  Workflow,
 } from "lucide-react";
 
 export interface NavTile {
@@ -150,6 +151,12 @@ export const GOVERNANCE_SECTIONS: MegaMenuSection[] = [
   {
     title: "Governance",
     tiles: [
+      {
+        label: "Integration Center",
+        description: "Oracle ERP, n8n workflows & approved data",
+        href: "/integrations",
+        icon: Workflow,
+      },
       {
         label: "Audit Log",
         description: "Track all review and edit actions",

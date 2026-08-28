@@ -5,6 +5,8 @@ import { Plus, Trash2 } from "lucide-react";
 
 import ContentSection from "@/components/layout/ContentSection";
 import PageHero from "@/components/layout/PageHero";
+import EmptyState from "@/components/illustrations/empty-state";
+import { LoadingState } from "@/components/layout/StatusState";
 import {
   addExtractionField,
   createExtractionModel,
@@ -167,13 +169,18 @@ export default function ExtractionModelsPage() {
 
       <div className="mt-6 space-y-4">
         {loading && (
-          <p className="text-sm text-text-secondary">Loading...</p>
+          <LoadingState
+            title="Loading extraction models..."
+            description="Retrieving custom enterprise extraction schemas and field rules."
+          />
         )}
 
         {!loading && models.length === 0 && (
-          <div className="rounded-2xl border border-border bg-surface p-10 text-center text-sm text-text-secondary shadow-sm">
-            No extraction models yet. Create one above.
-          </div>
+          <EmptyState
+            variant="fields"
+            title="No extraction models configured"
+            description="Define custom target field groups and schemas to tailor extraction to your organization's contracts."
+          />
         )}
 
         {models.map((model) => (

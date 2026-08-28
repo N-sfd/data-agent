@@ -5,6 +5,8 @@ import { GitBranch, List, Loader2 } from "lucide-react";
 
 import ContractHierarchy from "@/components/contract-hierarchy";
 import DocumentResultsTable from "@/components/document-results-table";
+import EmptyState from "@/components/illustrations/empty-state";
+import { LoadingState } from "@/components/layout/StatusState";
 import PageHeader from "@/components/page-header";
 import { getDocumentHierarchy, searchDocuments } from "@/lib/documents";
 import type { DocumentSummary, HierarchyNode } from "@/types/document";
@@ -95,12 +97,20 @@ export default function RelationshipsPage() {
 
       <div className="overflow-hidden rounded-xl border border-border bg-surface">
         {loading ? (
-          <div className="flex items-center justify-center gap-2 p-12 text-sm text-text-secondary">
-            <Loader2 className="h-4 w-4 animate-spin" />
-            Detecting relationships...
-          </div>
+          <LoadingState
+            title="Detecting document relationships..."
+            description="Analyzing parent-child contracts, SOWs, task orders, and amendment lineages."
+          />
         ) : view === "tree" ? (
-          <ContractHierarchy roots={roots} />
+          roots.length > 0 ? (
+            <ContractHierarchy roots={roots} />
+          ) : (
+            <EmptyState
+              variant="relationships"
+              title="No document relationships detected"
+              description="Upload master agreements and related amendments to view contract trees and dependencies."
+            />
+          )
         ) : (
           <DocumentResultsTable
             documents={documents}

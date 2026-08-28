@@ -16,7 +16,7 @@ import {
 
 import ContentSection from "@/components/layout/ContentSection";
 import PageHero from "@/components/layout/PageHero";
-import ContractHierarchy from "@/components/contract-hierarchy";
+import { LoadingState } from "@/components/layout/StatusState";
 import DocumentResultsTable from "@/components/document-results-table";
 import { getDocumentHierarchy, searchDocuments } from "@/lib/documents";
 import {
@@ -319,10 +319,10 @@ export default function RepositoryPage() {
 
       <div className="editorial-card overflow-hidden">
         {loading ? (
-          <div className="flex items-center justify-center gap-2 p-16 text-sm text-text-secondary">
-            <Loader2 className="h-4 w-4 animate-spin" />
-            Indexing repository...
-          </div>
+          <LoadingState
+            title="Indexing repository contracts..."
+            description="Querying verified document metadata, family hierarchies, and extraction status."
+          />
         ) : view === "table" ? (
           <DocumentResultsTable
             documents={documents}
