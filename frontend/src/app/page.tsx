@@ -57,13 +57,13 @@ export default function HomePage() {
         actions={
           <>
             <Link href="/extraction/new" className="btn-hero-primary">
-              <Upload className="h-4 w-4" />
-              New Extraction
+              <Upload className="h-4 w-4 shrink-0" />
+              <span className="whitespace-nowrap">New Extraction</span>
             </Link>
             <Link href="/ask" className="btn-hero-secondary">
-              <Sparkles className="h-4 w-4" />
-              Ask Data Agent
-              <ArrowRight className="h-4 w-4" />
+              <Sparkles className="h-4 w-4 shrink-0" />
+              <span className="whitespace-nowrap">Ask Data Agent</span>
+              <ArrowRight className="h-4 w-4 shrink-0" />
             </Link>
           </>
         }

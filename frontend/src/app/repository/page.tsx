@@ -185,12 +185,12 @@ export default function RepositoryPage() {
         actions={
           <>
             <Link href="/extraction/new" className="btn-hero-primary">
-              <Plus className="h-4 w-4" />
-              Add Contract
+              <Plus className="h-4 w-4 shrink-0" />
+              <span className="whitespace-nowrap">Add Contract</span>
             </Link>
             <button type="button" className="btn-hero-secondary">
-              <Upload className="h-4 w-4" />
-              Import
+              <Upload className="h-4 w-4 shrink-0" />
+              <span className="whitespace-nowrap">Import</span>
             </button>
           </>
         }

@@ -2,10 +2,8 @@ name: Keep Render backend alive
 
 on:
   schedule:
-    # Every 10 minutes — Render's free tier spins a service down after
-    # ~15 minutes idle, so this keeps it from ever going fully cold
-    # during active hours. Costs nothing beyond GitHub Actions minutes
-    # (well within the free tier for a single scheduled curl).
+    # Every 10 minutes — Render's free tier can spin a service down after
+    # ~15 minutes idle. This is a convenience warm-up, not a production SLA.
     - cron: "*/10 * * * *"
   workflow_dispatch: {}
 
@@ -14,4 +12,19 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Ping backend health endpoint
-        run: curl -sf --max-time 60 https://data-agent-backend-35uj.onrender.com/health
+        run: |
+          echo "Pinging Render backend..."
+
+          curl \
+            --fail \
+            --show-error \
+            --silent \
+            --retry 4 \
+            --retry-delay 15 \
+            --retry-all-errors \
+            --connect-timeout 20 \
+            --max-time 180 \
+            https://data-agent-backend-35uj.onrender.com/health
+
+          echo ""
+          echo "Backend responded successfully."

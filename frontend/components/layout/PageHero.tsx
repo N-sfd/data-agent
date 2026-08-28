@@ -23,11 +23,13 @@ export default function PageHero({
           visual ? "page-hero-split" : "",
         ].join(" ")}
       >
-        <div className="page-hero-copy">
+        <div className="page-hero-copy min-w-0 w-full">
           {eyebrow && <p className="page-hero-eyebrow">{eyebrow}</p>}
           <h1 className="page-hero-title">{title}</h1>
           {description && (
-            <p className="page-hero-description">{description}</p>
+            <div className="page-hero-description-wrap max-w-2xl">
+              <p className="page-hero-description">{description}</p>
+            </div>
           )}
           {actions && <div className="page-hero-actions">{actions}</div>}
         </div>
