@@ -25,35 +25,28 @@ export default function GlobalHeader({ onOpenSearch }: GlobalHeaderProps) {
   return (
     <>
       <header className="global-header shrink-0">
-        <div className="flex items-center gap-4 lg:gap-8">
-          <Link href="/" className="flex shrink-0 items-center gap-3">
+        {/* Left: Logo & Brand, plus desktop navigation links */}
+        <div className="flex min-w-0 items-center gap-3 lg:gap-8">
+          <Link href="/" className="flex shrink-0 items-center gap-2.5 sm:gap-3">
             <Image
               src="/consult-america-logo.jpg"
               alt="Consult America"
               width={36}
               height={36}
-              className="h-9 w-9 rounded-full object-contain bg-white"
+              className="h-8 w-8 rounded-full object-contain bg-white sm:h-9 sm:w-9"
               priority
             />
-            <div className="hidden min-w-0 sm:block">
-              <p className="truncate text-sm font-semibold uppercase tracking-wide text-text-on-dark">
+            <div className="min-w-0">
+              <p className="truncate text-xs font-bold uppercase tracking-wide text-text-on-dark sm:text-sm">
                 Consult America
               </p>
-              <p className="truncate text-xs text-sirion-teal-soft">
+              <p className="truncate text-[11px] text-sirion-teal-soft sm:text-xs">
                 Data Agent
               </p>
             </div>
           </Link>
 
-          <button
-            type="button"
-            className="nav-menu-button ml-auto lg:hidden"
-            aria-label="Open navigation"
-            onClick={() => setMobileOpen(true)}
-          >
-            <Menu className="h-4 w-4" strokeWidth={1.75} />
-          </button>
-
+          {/* Desktop mega menu dropdowns (lg+ only) */}
           <nav
             className="hidden items-center gap-1 lg:flex"
             aria-label="Main navigation"
@@ -82,15 +75,16 @@ export default function GlobalHeader({ onOpenSearch }: GlobalHeaderProps) {
           </nav>
         </div>
 
-        <div className="flex items-center gap-2 sm:gap-3">
-          <Link href="/extraction/new" className="btn-new-extraction hidden sm:inline-flex">
-            <Plus className="h-4 w-4" strokeWidth={2} />
-            New Extraction
+        {/* Right side: Desktop actions (lg+ only) */}
+        <div className="hidden items-center gap-3 lg:flex">
+          <Link href="/extraction/new" className="btn-new-extraction">
+            <Plus className="h-4 w-4 shrink-0" strokeWidth={2} />
+            <span className="whitespace-nowrap">New Extraction</span>
           </Link>
 
-          <Link href="/ask" className="btn-ask-agent hidden md:inline-flex">
-            <Sparkles className="h-4 w-4" strokeWidth={1.75} />
-            Ask Data Agent
+          <Link href="/ask" className="btn-ask-agent">
+            <Sparkles className="h-4 w-4 shrink-0" strokeWidth={1.75} />
+            <span className="whitespace-nowrap">Ask Data Agent</span>
           </Link>
 
           <button
@@ -106,7 +100,7 @@ export default function GlobalHeader({ onOpenSearch }: GlobalHeaderProps) {
             <Bell className="h-4 w-4" strokeWidth={1.75} />
           </button>
 
-          <div className="hidden items-center gap-2 border-l border-white/10 pl-3 sm:flex">
+          <div className="flex items-center gap-2 border-l border-white/10 pl-3">
             <Image
               src="/consult-america-logo.jpg"
               alt="Consult America"
@@ -115,6 +109,35 @@ export default function GlobalHeader({ onOpenSearch }: GlobalHeaderProps) {
               className="h-8 w-8 rounded-full object-contain bg-white"
             />
           </div>
+        </div>
+
+        {/* Right side: Mobile & Tablet triggers (<lg only) */}
+        <div className="flex items-center gap-1.5 sm:gap-2 lg:hidden">
+          <button
+            type="button"
+            onClick={onOpenSearch}
+            aria-label="Search"
+            className="nav-icon-button"
+          >
+            <Search className="h-4 w-4" strokeWidth={1.75} />
+          </button>
+
+          <button
+            type="button"
+            aria-label="Notifications"
+            className="nav-icon-button"
+          >
+            <Bell className="h-4 w-4" strokeWidth={1.75} />
+          </button>
+
+          <button
+            type="button"
+            className="nav-menu-button"
+            aria-label="Open menu"
+            onClick={() => setMobileOpen(true)}
+          >
+            <Menu className="h-4 w-4" strokeWidth={1.75} />
+          </button>
         </div>
       </header>
 

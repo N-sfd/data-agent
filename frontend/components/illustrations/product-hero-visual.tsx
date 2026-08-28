@@ -3,13 +3,13 @@ export default function ProductHeroVisual() {
   return (
     <div
       aria-hidden
-      className="product-hero-visual relative mx-auto w-full max-w-xl lg:max-w-none"
+      className="product-hero-visual relative mx-auto w-full overflow-hidden"
     >
       <svg
         viewBox="0 0 520 320"
         fill="none"
         xmlns="http://www.w3.org/2000/svg"
-        className="h-auto w-full drop-shadow-2xl"
+        className="h-auto w-full object-contain drop-shadow-2xl"
       >
         <defs>
           <linearGradient id="docGrad" x1="0" y1="0" x2="0" y2="1">

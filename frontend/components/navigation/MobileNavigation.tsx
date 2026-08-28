@@ -2,7 +2,7 @@
 
 import Image from "next/image";
 import Link from "next/link";
-import { X } from "lucide-react";
+import { Plus, Sparkles, X } from "lucide-react";
 
 import MegaMenu from "@/components/navigation/MegaMenu";
 import {
@@ -60,20 +60,28 @@ export default function MobileNavigation({
           </button>
         </div>
 
-        <div className="flex-1 space-y-6 overflow-y-auto p-4">
-          <Link
-            href="/extraction/new"
-            onClick={onClose}
-            className="btn-ask-agent w-full justify-center"
-          >
-            + New Extraction
-          </Link>
+        <div className="flex-1 space-y-4 overflow-y-auto p-4">
+          <div className="space-y-2.5 pb-2">
+            <Link
+              href="/extraction/new"
+              onClick={onClose}
+              className="flex w-full items-center justify-center gap-2 rounded-xl border border-black/10 bg-black/5 px-4 py-3 text-sm font-semibold text-text-dark transition hover:bg-black/10 dark:border-white/15 dark:bg-white/5 dark:text-white dark:hover:bg-white/10"
+            >
+              <Plus className="h-4 w-4 shrink-0" strokeWidth={2} />
+              <span className="whitespace-nowrap">New Extraction</span>
+            </Link>
 
-          <Link href="/ask" onClick={onClose} className="btn-secondary w-full justify-center">
-            Ask Data Agent
-          </Link>
+            <Link
+              href="/ask"
+              onClick={onClose}
+              className="flex w-full items-center justify-center gap-2 rounded-xl bg-accent-purple px-4 py-3 text-sm font-semibold text-white transition hover:bg-accent-purple-dark"
+            >
+              <Sparkles className="h-4 w-4 shrink-0" strokeWidth={1.75} />
+              <span className="whitespace-nowrap">Ask Data Agent</span>
+            </Link>
+          </div>
 
-          <div className="space-y-4">
+          <div className="space-y-4 border-t border-black/5 pt-4">
             <p className="px-1 text-xs font-semibold uppercase tracking-wider text-text-teal">
               Platform
             </p>
