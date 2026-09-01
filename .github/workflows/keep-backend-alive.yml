@@ -24,7 +24,7 @@ jobs:
             --retry-all-errors \
             --connect-timeout 20 \
             --max-time 180 \
-            https://data-agent-backend-35uj.onrender.com/health
+            https://data-agent-7jxa.onrender.com/health
 
           echo ""
           echo "Backend responded successfully."
