@@ -50,6 +50,7 @@ export default function DocumentUploader({
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [uploading, setUploading] = useState(false);
   const [progress, setProgress] = useState(0);
+  const [waking, setWaking] = useState(false);
   const [error, setError] = useState("");
   const [pendingDuplicate, setPendingDuplicate] =
     useState<PendingDuplicate | null>(null);
@@ -103,6 +104,7 @@ export default function DocumentUploader({
 
     setUploading(true);
     setError("");
+    setWaking(false);
     setProgress(15);
 
     try {
@@ -118,6 +120,7 @@ export default function DocumentUploader({
           method: "POST",
           body: formData,
         },
+        () => setWaking(true),
       );
 
       setProgress(80);
@@ -154,6 +157,7 @@ export default function DocumentUploader({
       );
     } finally {
       setUploading(false);
+      setWaking(false);
     }
   }
 
@@ -320,7 +324,9 @@ export default function DocumentUploader({
                 <span className="text-text-secondary">
                   {progress === 100
                     ? "Upload complete"
-                    : "Uploading and validating"}
+                    : waking
+                      ? "Waking processing service..."
+                      : "Uploading and validating"}
                 </span>
 
                 <span className="font-medium text-foreground">
@@ -334,6 +340,13 @@ export default function DocumentUploader({
                   style={{ width: `${progress}%` }}
                 />
               </div>
+
+              {waking && (
+                <p className="mt-2 text-xs text-text-muted">
+                  The backend was idle and is spinning back up — this
+                  can take up to a minute.
+                </p>
+              )}
             </div>
           )}
 
