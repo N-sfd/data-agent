@@ -81,6 +81,97 @@ def _looks_like_noise(label: str) -> bool:
     return False
 
 
+_PROSE_PHRASES = (
+    " shall ",
+    " will ",
+    " must ",
+    " hereby ",
+    " pursuant ",
+    " whereas ",
+    " provided that ",
+    " in the event ",
+    " for those ",
+    " those ",
+    " requiring ",
+    " prevail ",
+    " upon ",
+    " hereinafter ",
+    " thereof ",
+    " hereunder ",
+    " pursuant to ",
+    " in accordance ",
+    " subject to ",
+    " in the ",
+    " of the ",
+    " to the ",
+    " for the ",
+    " and the ",
+    " that the ",
+)
+
+_FILLER_WORDS = {
+    "the",
+    "in",
+    "for",
+    "those",
+    "that",
+    "this",
+    "with",
+    "from",
+    "to",
+    "of",
+    "be",
+    "and",
+    "or",
+    "a",
+    "an",
+    "as",
+    "at",
+    "by",
+    "on",
+    "is",
+    "are",
+    "requiring",
+    "prevail",
+    "such",
+    "any",
+    "all",
+    "each",
+    "their",
+    "these",
+    "upon",
+}
+
+_FORM_LABEL_SUFFIXES = (
+    "no.",
+    "no",
+    "cd",
+    "amt",
+    "date",
+    "code",
+    "type",
+    "id",
+    "name",
+    "office",
+    "dodaac",
+    "cage",
+    "naics",
+    "psc",
+)
+
+
+def _looks_like_form_label(label: str) -> bool:
+    normalized = label.strip().lower()
+    words = normalized.split()
+
+    if len(normalized) <= 28 and len(words) <= 4:
+        return True
+
+    return any(
+        normalized.endswith(suffix) for suffix in _FORM_LABEL_SUFFIXES
+    )
+
+
 def is_plausible_kv_label(label: str) -> bool:
     """
     Reject contract prose misread as label/value pairs during discovery.
@@ -91,26 +182,23 @@ def is_plausible_kv_label(label: str) -> bool:
         return False
 
     lowered = f" {normalized.lower()} "
-    if any(
-        token in lowered
-        for token in (
-            " shall ",
-            " will ",
-            " must ",
-            " hereby ",
-            " pursuant ",
-            " whereas ",
-            " provided that ",
-            " in the event ",
-        )
-    ):
+    if any(token in lowered for token in _PROSE_PHRASES):
         return False
 
     words = normalized.split()
-    if len(words) > 8:
+    if len(words) > 6 and not _looks_like_form_label(normalized):
         return False
 
-    if len(normalized) > 50 and not _ALL_CAPS.match(normalized):
+    if len(normalized) > 42 and not _looks_like_form_label(normalized):
+        return False
+
+    filler_count = sum(1 for word in words if word.lower() in _FILLER_WORDS)
+    if filler_count >= 2 and not _looks_like_form_label(normalized):
+        return False
+
+    # Repeated substantive tokens (e.g. "task orders ... task orders").
+    substantive = [word.lower() for word in words if len(word) > 3]
+    if len(substantive) != len(set(substantive)):
         return False
 
     # Mixed-case sentence fragments (not title-case form labels).

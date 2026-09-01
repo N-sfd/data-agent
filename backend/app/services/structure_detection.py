@@ -506,6 +506,20 @@ def _slugify(label: str) -> str:
     return slug[:60] or "field"
 
 
+def _kv_slug_looks_like_prose(slug: str) -> bool:
+    prose_fragments = (
+        "shall_be",
+        "in_the_",
+        "for_those",
+        "requiring_",
+        "prevail_in",
+        "_those_",
+        "_task_orders_for",
+        "_for_those_",
+    )
+    return any(fragment in slug for fragment in prose_fragments)
+
+
 def _humanize_table_label(page_number: int, headers: list[str]) -> str:
     if headers:
         first = headers[0].strip()
@@ -847,9 +861,13 @@ async def detect_document_structures(
             if not is_plausible_kv_label(pair.raw_label):
                 continue
 
+            slug = _slugify(pair.raw_label)
+            if _kv_slug_looks_like_prose(slug):
+                continue
+
             detected.append(
                 _target(
-                    key=f"kv_{_slugify(pair.raw_label)}",
+                    key=f"kv_{slug}",
                     label=pair.raw_label,
                     extraction_type="field",
                     pages=[page.page_number],

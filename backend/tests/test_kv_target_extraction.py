@@ -69,10 +69,31 @@ def test_resolve_scalar_target_prefers_source_evidence_over_label_search() -> No
 
 def test_prose_fragments_are_not_plausible_kv_labels() -> None:
     assert is_plausible_kv_label("Administrative Contracting Officer") is True
+    assert is_plausible_kv_label("SOLICITATION NO.") is True
+    assert is_plausible_kv_label("PSC CD") is True
     assert (
         is_plausible_kv_label(
             "labor category in the task order shall be proposed"
         )
         is False
     )
+    assert (
+        is_plausible_kv_label(
+            "LABOR CATEGORY IN THE TASK ORDER SHALL BE PROPO"
+        )
+        is False
+    )
     assert is_plausible_kv_label("prevail in the locality") is False
+    assert is_plausible_kv_label("PREVAIL IN THE LOCALIT") is False
+    assert (
+        is_plausible_kv_label(
+            "task orders for those task orders requiring tra"
+        )
+        is False
+    )
+    assert (
+        is_plausible_kv_label(
+            "TASK ORDERS FOR THOSE TASK ORDERS REQUIRING TRA"
+        )
+        is False
+    )
