@@ -123,3 +123,13 @@ export async function apiFetch<T = unknown>(
 
   return (await response.json()) as T;
 }
+
+/**
+ * Ping the backend health endpoint before uploads or long-running work.
+ * Render free-tier cold starts can take 30-90s; retries surface wake-up UI.
+ */
+export async function wakeBackend(
+  onRetry?: (attempt: number, total: number) => void,
+): Promise<void> {
+  await apiFetch("/health", { cache: "no-store" }, onRetry);
+}

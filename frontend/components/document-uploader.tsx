@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useDropzone } from "react-dropzone";
 import {
   CheckCircle2,
@@ -12,7 +12,7 @@ import {
 
 import DuplicateDialog from "@/components/duplicate-dialog";
 import PortfolioPicker from "@/components/portfolio-picker";
-import { apiFetch } from "@/lib/api";
+import { apiFetch, wakeBackend } from "@/lib/api";
 import { resolveDuplicate, selectPortfolioFile } from "@/lib/documents";
 import { formatBytes } from "@/lib/format";
 import type {
@@ -99,17 +99,40 @@ export default function DocumentUploader({
     maxFiles: 1,
   });
 
+  const progressTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const clearProgressTimer = useCallback(() => {
+    if (progressTimerRef.current) {
+      clearInterval(progressTimerRef.current);
+      progressTimerRef.current = null;
+    }
+  }, []);
+
+  const startSlowProgress = useCallback(() => {
+    clearProgressTimer();
+    progressTimerRef.current = setInterval(() => {
+      setProgress((current) => (current < 72 ? current + 1 : current));
+    }, 2500);
+  }, [clearProgressTimer]);
+
+  useEffect(() => () => clearProgressTimer(), [clearProgressTimer]);
+
   async function uploadDocument() {
     if (!selectedFile) return;
 
     setUploading(true);
     setError("");
-    setWaking(false);
-    setProgress(15);
+    setWaking(true);
+    setProgress(10);
+    startSlowProgress();
+
+    const onWakeRetry = () => setWaking(true);
 
     try {
-      const formData = new FormData();
+      await wakeBackend(onWakeRetry);
+      setProgress(25);
 
+      const formData = new FormData();
       formData.append("file", selectedFile);
 
       setProgress(35);
@@ -120,9 +143,10 @@ export default function DocumentUploader({
           method: "POST",
           body: formData,
         },
-        () => setWaking(true),
+        onWakeRetry,
       );
 
+      clearProgressTimer();
       setProgress(80);
 
       if (result.status === "portfolio_pending" && result.embedded_files) {
@@ -148,14 +172,16 @@ export default function DocumentUploader({
 
       onUploadComplete(result);
     } catch (uploadError) {
+      clearProgressTimer();
       setProgress(0);
 
       setError(
         uploadError instanceof Error
           ? uploadError.message
-          : "Unable to upload the PDF.",
+          : "Unable to upload the document.",
       );
     } finally {
+      clearProgressTimer();
       setUploading(false);
       setWaking(false);
     }
@@ -326,7 +352,9 @@ export default function DocumentUploader({
                     ? "Upload complete"
                     : waking
                       ? "Waking processing service..."
-                      : "Uploading and validating"}
+                      : progress < 35
+                        ? "Connecting to backend..."
+                        : "Uploading and validating"}
                 </span>
 
                 <span className="font-medium text-foreground">
@@ -343,8 +371,9 @@ export default function DocumentUploader({
 
               {waking && (
                 <p className="mt-2 text-xs text-text-muted">
-                  The backend was idle and is spinning back up — this
-                  can take up to a minute.
+                  The backend was idle and is spinning back up. This can
+                  take up to 90 seconds on the free tier — please keep
+                  this tab open.
                 </p>
               )}
             </div>
