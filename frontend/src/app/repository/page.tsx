@@ -18,6 +18,7 @@ import ContentSection from "@/components/layout/ContentSection";
 import PageHero from "@/components/layout/PageHero";
 import { LoadingState } from "@/components/layout/StatusState";
 import DocumentResultsTable from "@/components/document-results-table";
+import ContractHierarchy from "@/components/contract-hierarchy";
 import { getDocumentHierarchy, searchDocuments } from "@/lib/documents";
 import {
   DOCUMENT_TYPE_OPTIONS,
