@@ -20,6 +20,8 @@ interface AnalysisRequestProps {
   targets?: DocumentTarget[];
   documentFamilyLabel?: string | null;
   schemaDiscovering?: boolean;
+  schemaDiscoveryError?: string;
+  onRetryDiscovery?: () => void;
 
   onExtractTargets: (
     targetIds: string[],
@@ -44,6 +46,8 @@ export default function AnalysisRequest({
   targets = [],
   documentFamilyLabel = null,
   schemaDiscovering = false,
+  schemaDiscoveryError = "",
+  onRetryDiscovery,
   onExtractTargets,
   onAnalyze,
 }: AnalysisRequestProps) {
@@ -181,6 +185,24 @@ export default function AnalysisRequest({
             Only structures with source evidence appear — Detected means Data Agent
             can show where it exists in this file, not that AI thinks it might.
             </p>
+          </div>
+        ) : schemaDiscoveryError ? (
+          <div className="space-y-3 rounded-xl border border-danger/20 bg-danger/5 p-4">
+            <p className="text-sm font-medium text-danger">
+              Couldn&apos;t discover this document&apos;s schema
+            </p>
+            <p className="text-sm leading-6 text-danger/80">
+              {schemaDiscoveryError}
+            </p>
+            {onRetryDiscovery && (
+              <button
+                type="button"
+                onClick={onRetryDiscovery}
+                className="btn-secondary text-sm"
+              >
+                Retry
+              </button>
+            )}
           </div>
         ) : (
           <TargetPicker

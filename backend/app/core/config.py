@@ -106,6 +106,51 @@ class Settings(BaseSettings):
         return origins
 
     @property
+    def resolved_database_url(self) -> str:
+        """Normalize database_url for the driver actually installed.
+
+        Two independent fixups:
+
+        - A relative sqlite:/// path (e.g. "sqlite:///./data_agent.db")
+          resolves against the process's current working directory,
+          which is not stable across restarts (different launch
+          method, IDE run config, shell cwd, ...). SQLite silently
+          creates a fresh empty database at the new location instead
+          of erroring, so every previously stored row appears to
+          vanish even though the original file is untouched. Anchor it
+          to the backend directory instead, mirroring upload_path.
+
+        - Render (and Heroku-style) Postgres connection strings are
+          handed out as postgres:// or postgresql://, which
+          SQLAlchemy's default dialect maps to psycopg2 — but this
+          project only installs psycopg (v3). Rewrite to
+          postgresql+psycopg:// so the installed driver is used.
+        """
+        url = self.database_url
+
+        if url.startswith("sqlite:///"):
+            raw_path = url.removeprefix("sqlite:///")
+
+            if raw_path in ("", ":memory:"):
+                return url
+
+            path = Path(raw_path)
+            if not path.is_absolute():
+                path = Path(__file__).resolve().parents[2] / path
+
+            return f"sqlite:///{path.resolve().as_posix()}"
+
+        if url.startswith("postgres://"):
+            url = "postgresql://" + url.removeprefix("postgres://")
+
+        if url.startswith("postgresql://"):
+            url = "postgresql+psycopg://" + url.removeprefix(
+                "postgresql://"
+            )
+
+        return url
+
+    @property
     def upload_path(self) -> Path:
         """Create and return the private upload directory."""
         path = Path(self.upload_directory)

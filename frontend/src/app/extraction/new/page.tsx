@@ -83,6 +83,7 @@ export default function NewExtractionPage() {
   const [schemaDiscovery, setSchemaDiscovery] =
     useState<DiscoverSchemaResult | null>(null);
   const [schemaDiscovering, setSchemaDiscovering] = useState(false);
+  const [schemaDiscoveryError, setSchemaDiscoveryError] = useState("");
 
   const [targetResult, setTargetResult] =
     useState<ExtractTargetsResult | null>(null);
@@ -188,6 +189,29 @@ export default function NewExtractionPage() {
     return () => clearInterval(interval);
   }, [analyzingContract]);
 
+  async function runSchemaDiscovery(documentId: string) {
+    setSchemaDiscovering(true);
+    setSchemaDiscoveryError("");
+
+    try {
+      const discovery = await discoverSchema(
+        documentId,
+        () => setWaking(true),
+      );
+
+      setSchemaDiscovery(discovery);
+    } catch (error) {
+      setSchemaDiscoveryError(
+        error instanceof Error
+          ? error.message
+          : "Schema discovery failed.",
+      );
+    } finally {
+      setSchemaDiscovering(false);
+      setWaking(false);
+    }
+  }
+
   async function handleUploadComplete(
     uploadedDocument: UploadedDocument,
   ) {
@@ -203,6 +227,7 @@ export default function NewExtractionPage() {
     setStructureDetection(null);
     setSchemaDiscovery(null);
     setSchemaDiscovering(false);
+    setSchemaDiscoveryError("");
     setProgress(null);
     setElapsedSeconds(0);
     setWaking(false);
@@ -235,17 +260,7 @@ export default function NewExtractionPage() {
         // just skips the detected-content summary.
       }
 
-      try {
-        setSchemaDiscovering(true);
-        const discovery = await discoverSchema(uploadedDocument.document_id);
-
-        setSchemaDiscovery(discovery);
-      } catch {
-        // Schema discovery is what drives the target picker — if it
-        // fails, the picker just falls back to custom instructions.
-      } finally {
-        setSchemaDiscovering(false);
-      }
+      await runSchemaDiscovery(uploadedDocument.document_id);
     } catch (error) {
       setWorkflowError(
         error instanceof Error
@@ -476,6 +491,7 @@ export default function NewExtractionPage() {
                       setStructuredOutput(null);
                       setStructureDetection(null);
                       setSchemaDiscovery(null);
+                      setSchemaDiscoveryError("");
                       setWorkflowError("");
                       setContractAnalysisError("");
                     }}
@@ -508,6 +524,10 @@ export default function NewExtractionPage() {
                       schemaDiscovery?.document_family_label
                     }
                     schemaDiscovering={schemaDiscovering || extracting}
+                    schemaDiscoveryError={schemaDiscoveryError}
+                    onRetryDiscovery={() =>
+                      document && runSchemaDiscovery(document.document_id)
+                    }
                   />
 
                   {extraction && !contractAnalysis && (

@@ -13,7 +13,7 @@ if settings.database_url.startswith("sqlite"):
     }
 
 engine = create_engine(
-    settings.database_url,
+    settings.resolved_database_url,
     connect_args=connect_args,
 )
 

@@ -450,25 +450,58 @@ export async function getTargets(
   return apiFetch(`/api/documents/${documentId}/targets`);
 }
 
+// The backend caps a single extract-targets request at 50 target IDs
+// (app/schemas/document_target.py). "Extract All" can easily select
+// more than that, so split into sequential batches and merge the
+// results rather than surfacing a 422 for selecting too much at once.
+const MAX_TARGET_IDS_PER_REQUEST = 50;
+
+function chunk<T>(items: T[], size: number): T[][] {
+  const chunks: T[][] = [];
+  for (let index = 0; index < items.length; index += size) {
+    chunks.push(items.slice(index, index + size));
+  }
+  return chunks;
+}
+
 export async function extractTargets(
   documentId: string,
   targetIds: string[],
   onRetry?: (attempt: number, total: number) => void,
 ): Promise<ExtractTargetsResult> {
-  return apiFetch(
-    `/api/documents/${documentId}/extract-targets`,
-    {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
+  const batches = chunk(targetIds, MAX_TARGET_IDS_PER_REQUEST);
+
+  const merged: ExtractTargetsResult = {
+    document_id: documentId,
+    scalars: [],
+    tables: [],
+    unresolved_targets: [],
+    warnings: [],
+  };
+
+  for (const batch of batches) {
+    const result = await apiFetch<ExtractTargetsResult>(
+      `/api/documents/${documentId}/extract-targets`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          target_ids: batch,
+          use_ai_fallback: true,
+        }),
       },
-      body: JSON.stringify({
-        target_ids: targetIds,
-        use_ai_fallback: true,
-      }),
-    },
-    onRetry,
-  );
+      onRetry,
+    );
+
+    merged.scalars.push(...result.scalars);
+    merged.tables.push(...result.tables);
+    merged.unresolved_targets.push(...result.unresolved_targets);
+    merged.warnings.push(...result.warnings);
+  }
+
+  return merged;
 }
 
 export async function selectPortfolioFile(
