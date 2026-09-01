@@ -81,6 +81,46 @@ def _looks_like_noise(label: str) -> bool:
     return False
 
 
+def is_plausible_kv_label(label: str) -> bool:
+    """
+    Reject contract prose misread as label/value pairs during discovery.
+    Real form labels are short, directive, and rarely read like sentences.
+    """
+    normalized = " ".join(label.split())
+    if not normalized or _looks_like_noise(normalized):
+        return False
+
+    lowered = f" {normalized.lower()} "
+    if any(
+        token in lowered
+        for token in (
+            " shall ",
+            " will ",
+            " must ",
+            " hereby ",
+            " pursuant ",
+            " whereas ",
+            " provided that ",
+            " in the event ",
+        )
+    ):
+        return False
+
+    words = normalized.split()
+    if len(words) > 8:
+        return False
+
+    if len(normalized) > 50 and not _ALL_CAPS.match(normalized):
+        return False
+
+    # Mixed-case sentence fragments (not title-case form labels).
+    lowercase_words = sum(1 for word in words if word.islower() and len(word) > 2)
+    if lowercase_words >= 3 and not _ALL_CAPS.match(normalized):
+        return False
+
+    return True
+
+
 def _scan_form_fields(page: DocumentPage) -> list[ScannedPair]:
     pairs: list[ScannedPair] = []
     for raw_label, value in (page.form_fields_json or {}).items():

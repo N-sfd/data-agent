@@ -126,9 +126,11 @@ export default function TargetResults({
   onViewSource,
 }: TargetResultsProps) {
   const typeByLabel = new Map<string, TargetType>();
+  const labelByKey = new Map<string, string>();
   for (const target of targets) {
     typeByLabel.set(target.label.toLowerCase(), target.target_type);
     typeByLabel.set(target.key.toLowerCase(), target.target_type);
+    labelByKey.set(target.key, target.label);
   }
 
   const contactScalars: ScalarTargetResult[] = [];
@@ -167,8 +169,15 @@ export default function TargetResults({
             resolved in this document.
           </p>
           <ul className="mt-2 list-disc space-y-1 pl-5">
-            {result.unresolved_targets.map((target) => (
-              <li key={target}>{target}</li>
+            {result.unresolved_targets.map((targetKey) => (
+              <li key={targetKey}>
+                {labelByKey.get(targetKey) ?? targetKey}
+                {labelByKey.has(targetKey) && (
+                  <span className="ml-1 text-xs text-warning/80">
+                    ({targetKey})
+                  </span>
+                )}
+              </li>
             ))}
           </ul>
         </div>

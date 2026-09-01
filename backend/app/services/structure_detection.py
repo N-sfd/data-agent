@@ -17,7 +17,10 @@ from app.services.contract_classifier import classify_contract
 from app.services.generic_entity_extractor import (
     extract_generic_entities,
 )
-from app.services.generic_kv_scanner import scan_page_for_labeled_pairs
+from app.services.generic_kv_scanner import (
+    is_plausible_kv_label,
+    scan_page_for_labeled_pairs,
+)
 from app.services.generic_label_extractor import (
     extract_labeled_value,
 )
@@ -840,6 +843,8 @@ async def detect_document_structures(
     for page in scan_pages:
         for pair in scan_page_for_labeled_pairs(page=page):
             if pair.normalized_label in known_probe_labels:
+                continue
+            if not is_plausible_kv_label(pair.raw_label):
                 continue
 
             detected.append(

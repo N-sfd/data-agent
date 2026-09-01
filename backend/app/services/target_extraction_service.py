@@ -1,4 +1,5 @@
 import asyncio
+import re
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -27,12 +28,66 @@ settings = get_settings()
 _TABLE_LIKE_TYPES = {"table", "section", "clause"}
 _MAX_CONCURRENT_AI_CALLS = 3
 
+_KV_SOURCE_EVIDENCE = re.compile(
+    r"^'(?P<label>[^:]+):\s*(?P<value>.+)'\s+on page\s+(?P<page>\d+)\s+\(",
+)
+
+
+def _resolve_scalar_from_source_examples(
+    target: DocumentTarget,
+    page_lookup: dict[int, DocumentPage],
+) -> ScalarTargetResult | None:
+    """Use discovery-time evidence before re-parsing page text."""
+    for example in target.source_examples or []:
+        match = _KV_SOURCE_EVIDENCE.match(example.strip())
+        if not match:
+            continue
+
+        value = match.group("value").strip()
+        if not value:
+            continue
+
+        page_number = int(match.group("page"))
+        page = page_lookup.get(page_number)
+        page_text = page.final_text if page else ""
+        label = match.group("label").strip()
+        snippet = f"{label}: {value}"
+
+        verified = validate_source_value(
+            value=value,
+            source_text=snippet,
+            page_text=page_text,
+        )
+        if not verified:
+            continue
+
+        return ScalarTargetResult(
+            target=target.key,
+            normalized_key=target.key,
+            value=value,
+            page=page_number,
+            confidence=max(target.confidence, 0.85),
+            verified=True,
+            extraction_method="source_evidence",
+            evidence={
+                "page_number": page_number,
+                "source_text": snippet,
+                "source_reference": f"page {page_number}",
+            },
+        )
+
+    return None
+
 
 def _resolve_scalar_target(
     target: DocumentTarget,
     page_lookup: dict[int, DocumentPage],
     all_pages: list[DocumentPage],
 ) -> ScalarTargetResult | None:
+    from_evidence = _resolve_scalar_from_source_examples(target, page_lookup)
+    if from_evidence is not None:
+        return from_evidence
+
     candidate_pages = [
         page_lookup[number]
         for number in target.page_numbers
