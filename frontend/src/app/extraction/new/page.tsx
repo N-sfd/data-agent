@@ -16,6 +16,7 @@ import UniversalResults from "@/components/universal-results";
 import type { SourceViewRequest } from "@/components/source-verification-panel";
 import DocumentOverview from "@/components/document-overview";
 import DocumentUploader from "@/components/document-uploader";
+import BackendStatusBanner from "@/components/backend-status-banner";
 import ImportSourceTabs from "@/components/import-source-tabs";
 import {
   analyzeContract,
@@ -418,6 +419,7 @@ export default function NewExtractionPage() {
       />
 
       <ContentSection>
+        <BackendStatusBanner />
         <div className="mb-8">
           <WorkflowBreadcrumb
             activeStep={

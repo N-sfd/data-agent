@@ -1,6 +1,10 @@
 export const API_URL =
   process.env.NEXT_PUBLIC_API_URL ?? "http://127.0.0.1:8001";
 
+export type BackendProbeResult =
+  | { state: "healthy" }
+  | { state: "unavailable"; message: string; retryable: boolean };
+
 export function apiUrl(path: string): string {
   return `${API_URL}${path}`;
 }
@@ -10,13 +14,34 @@ function sleep(ms: number): Promise<void> {
 }
 
 // Render's free tier spins the backend down after ~15 minutes idle;
-// the first request after that can take 30-60s to wake it. Retry
+// the first request after that can take 30-90s to wake it. Retry
 // through that window with backoff instead of surfacing an error for
 // what is really just a slow cold start. A failed fetch() always
 // rejects with a TypeError (network failure, DNS, CORS block, ...) —
 // there is no way from JS to tell those apart, so we retry on any of
 // them and only give up once the backoff window is exhausted.
-const COLD_START_RETRY_DELAYS_MS = [2000, 4000, 8000, 16000, 30000];
+const COLD_START_RETRY_DELAYS_MS = [2000, 4000, 8000, 16000, 30000, 45000];
+
+function isRenderBackend(): boolean {
+  return API_URL.includes("onrender.com");
+}
+
+function unreachableBackendMessage(): string {
+  if (isRenderBackend()) {
+    return (
+      `Cannot reach the Data Agent API at ${API_URL}. ` +
+      "The Render backend may be suspended, redeploying, or waking from idle — " +
+      "wait 60–90 seconds and retry. If this persists, open the Render dashboard " +
+      "and resume or redeploy the data-agent-backend service."
+    );
+  }
+
+  return (
+    `Cannot reach the Data Agent API at ${API_URL}. ` +
+    "The processing service may be waking up, offline, or blocked — " +
+    "retry in a moment, or confirm the FastAPI backend is running."
+  );
+}
 
 async function fetchWithRetry(
   path: string,
@@ -105,9 +130,7 @@ export async function apiFetch<T = unknown>(
     response = await fetchWithRetry(path, init, onRetry);
   } catch (error) {
     if (error instanceof TypeError) {
-      throw new Error(
-        `Cannot reach the Data Agent API at ${API_URL}. The processing service may be waking up, offline, or blocked — retry in a moment, or confirm the FastAPI backend is running.`,
-      );
+      throw new Error(unreachableBackendMessage());
     }
 
     throw error;
@@ -132,4 +155,41 @@ export async function wakeBackend(
   onRetry?: (attempt: number, total: number) => void,
 ): Promise<void> {
   await apiFetch("/health", { cache: "no-store" }, onRetry);
+}
+
+/**
+ * Lightweight connectivity probe for UI banners (no retries).
+ */
+export async function probeBackend(): Promise<BackendProbeResult> {
+  try {
+    const response = await fetch(apiUrl("/health"), {
+      cache: "no-store",
+      method: "GET",
+    });
+
+    if (response.ok) {
+      return { state: "healthy" };
+    }
+
+    if (response.status === 404 && isRenderBackend()) {
+      return {
+        state: "unavailable",
+        retryable: false,
+        message:
+          "The Render backend has no active server at this URL. Resume or redeploy the data-agent-backend service in the Render dashboard, then retry.",
+      };
+    }
+
+    return {
+      state: "unavailable",
+      retryable: true,
+      message: `Backend responded with HTTP ${response.status}. Wait a moment and retry.`,
+    };
+  } catch {
+    return {
+      state: "unavailable",
+      retryable: true,
+      message: unreachableBackendMessage(),
+    };
+  }
 }
