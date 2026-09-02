@@ -59,6 +59,24 @@ def upload_object(
         )
 
 
+def _is_not_found_response(response: httpx.Response) -> bool:
+    if response.status_code == 404:
+        return True
+
+    # Supabase Storage's API gateway wraps many object-store errors
+    # (including a missing key) in an HTTP 400 response, with the
+    # real status embedded in the JSON body instead of the header.
+    try:
+        body = response.json()
+    except ValueError:
+        return False
+
+    return (
+        str(body.get("statusCode")) == "404"
+        or body.get("error") in {"not_found", "NoSuchKey"}
+    )
+
+
 def download_object(
     settings: Settings, object_name: str
 ) -> bytes | None:
@@ -71,10 +89,10 @@ def download_object(
         timeout=REQUEST_TIMEOUT_SECONDS,
     )
 
-    if response.status_code == 404:
-        return None
-
     if response.status_code >= 400:
+        if _is_not_found_response(response):
+            return None
+
         raise DocumentStorageError(
             f"Failed to fetch '{object_name}' from remote storage: "
             f"{response.text}"
@@ -109,7 +127,9 @@ def ensure_local_copy(
 
     if data is None:
         raise DocumentStorageError(
-            "The stored document file could not be found."
+            "The original file for this document is no longer available "
+            "on the server and was never backed up to remote storage. "
+            "Please re-upload the document."
         )
 
     local_path.parent.mkdir(parents=True, exist_ok=True)
