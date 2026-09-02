@@ -72,6 +72,13 @@ export default function DuplicateDialog({
             <p className="mt-2 text-sm text-slate-500">
               Similarity: <span className="font-medium text-slate-800">100%</span>
             </p>
+
+            {!existingDocument.file_available && (
+              <p className="mt-2 text-sm text-amber-700">
+                The original file for this document is no longer available
+                on the server, so it can&apos;t be reused.
+              </p>
+            )}
           </div>
         </div>
 
@@ -80,19 +87,25 @@ export default function DuplicateDialog({
             type="button"
             onClick={onUploadAnyway}
             disabled={busy}
-            className="rounded-xl border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+            className={
+              existingDocument.file_available
+                ? "rounded-xl border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+                : "rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
+            }
           >
             Upload Anyway
           </button>
 
-          <button
-            type="button"
-            onClick={onUseExisting}
-            disabled={busy}
-            className="rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
-          >
-            Use Existing
-          </button>
+          {existingDocument.file_available && (
+            <button
+              type="button"
+              onClick={onUseExisting}
+              disabled={busy}
+              className="rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              Use Existing
+            </button>
+          )}
         </div>
       </div>
     </div>

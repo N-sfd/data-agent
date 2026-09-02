@@ -3,6 +3,7 @@ export interface ExistingDocumentSummary {
   original_filename: string;
   size_bytes: number;
   uploaded_at: string;
+  file_available: boolean;
 }
 
 export interface UploadedDocument {

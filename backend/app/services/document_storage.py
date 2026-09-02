@@ -101,6 +101,41 @@ def download_object(
     return response.content
 
 
+def object_exists(settings: Settings, object_name: str) -> bool:
+    if not is_remote_storage_configured(settings):
+        return False
+
+    # Streamed rather than a plain GET so a large file's bytes are never
+    # pulled into memory just to answer an existence check; the error
+    # body Supabase sends on a miss (see _is_not_found_response) is
+    # small enough to read in full.
+    with httpx.stream(
+        "GET",
+        _object_url(settings, object_name),
+        headers=_headers(settings),
+        timeout=REQUEST_TIMEOUT_SECONDS,
+    ) as response:
+        if response.status_code >= 400:
+            response.read()
+            return not _is_not_found_response(response)
+
+        return True
+
+
+def is_file_available(
+    settings: Settings, *, stored_filename: str
+) -> bool:
+    """Check whether a stored file can still be recovered, either from
+    Render's local disk or from the Supabase Storage backup."""
+
+    local_path = settings.upload_path / stored_filename
+
+    if local_path.exists():
+        return True
+
+    return object_exists(settings, stored_filename)
+
+
 def delete_object(settings: Settings, object_name: str) -> None:
     if not is_remote_storage_configured(settings):
         return

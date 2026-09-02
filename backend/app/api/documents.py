@@ -35,7 +35,7 @@ from app.services.dashboard_stats import (
     compute_document_confidence,
     compute_document_status,
 )
-from app.services.document_storage import upload_object
+from app.services.document_storage import is_file_available, upload_object
 from app.services.file_upload import (
     UploadValidationError,
     sanitize_display_filename,
@@ -70,6 +70,9 @@ def _existing_document_summary(
         original_filename=document.original_filename,
         size_bytes=document.size_bytes,
         uploaded_at=document.uploaded_at,
+        file_available=is_file_available(
+            settings, stored_filename=document.stored_filename
+        ),
     )
 
 

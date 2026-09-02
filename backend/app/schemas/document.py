@@ -10,6 +10,7 @@ class ExistingDocumentSummary(BaseModel):
     original_filename: str
     size_bytes: int
     uploaded_at: datetime
+    file_available: bool
 
 
 class EmbeddedFileSummary(BaseModel):
