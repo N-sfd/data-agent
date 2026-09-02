@@ -51,7 +51,7 @@ class DocumentSummaryResponse(BaseModel):
     document_id: str
     original_filename: str
     document_type: str | None
-    status: Literal["processing", "review_required", "completed"]
+    status: Literal["processing", "review_required", "completed", "failed"]
     confidence: float | None
     uploaded_at: datetime
     page_count: int

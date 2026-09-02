@@ -46,6 +46,12 @@ import type {
   UploadedDocument,
 } from "@/types/document";
 
+function confidenceQualifier(confidence: number): string {
+  if (confidence >= 0.85) return "High confidence";
+  if (confidence >= 0.6) return "Medium confidence";
+  return "Low confidence";
+}
+
 const ANALYZE_STAGE_MESSAGES = [
   "Classifying document... Identifying document type, contract side, language, and status.",
   "Detecting related agreements... Checking parent and child contract relationships.",
@@ -117,9 +123,12 @@ export default function NewExtractionPage() {
   >(null);
 
   useEffect(() => {
+    const documentFamily = schemaDiscovery?.document_family;
+    if (!documentFamily) return;
+
     let active = true;
 
-    listExtractionModels()
+    listExtractionModels(documentFamily)
       .then((models) => {
         if (active) setExtractionModels(models);
       })
@@ -130,7 +139,7 @@ export default function NewExtractionPage() {
     return () => {
       active = false;
     };
-  }, []);
+  }, [schemaDiscovery?.document_family]);
 
   useEffect(() => {
     if (!extracting || !document) {
@@ -535,8 +544,18 @@ export default function NewExtractionPage() {
                   {extraction && !contractAnalysis && (
                     <div className="editorial-card animate-fade-in p-6">
                       <p className="text-base font-medium text-foreground">
-                        Contract Intelligence
+                        Document Intelligence
                       </p>
+                      {schemaDiscovery &&
+                        schemaDiscovery.document_family !== "unknown" && (
+                          <p className="mt-1 text-xs text-text-secondary">
+                            Detected: {schemaDiscovery.document_family_label}
+                            {" · "}
+                            {confidenceQualifier(
+                              schemaDiscovery.document_family_confidence,
+                            )}
+                          </p>
+                        )}
                       <p className="mt-2 text-sm leading-6 text-text-secondary">
                         Classify this document, extract structured metadata, and
                         detect any parent contract.
@@ -588,7 +607,7 @@ export default function NewExtractionPage() {
                         )}
                         {analyzingContract
                           ? "Analyzing..."
-                          : "Run Contract Intelligence"}
+                          : "Run Document Intelligence"}
                       </button>
 
                       {contractAnalysisError && (

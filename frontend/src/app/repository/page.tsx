@@ -16,7 +16,7 @@ import {
 
 import ContentSection from "@/components/layout/ContentSection";
 import PageHero from "@/components/layout/PageHero";
-import { LoadingState } from "@/components/layout/StatusState";
+import { ErrorState, LoadingState } from "@/components/layout/StatusState";
 import DocumentResultsTable from "@/components/document-results-table";
 import ContractHierarchy from "@/components/contract-hierarchy";
 import { getDocumentHierarchy, searchDocuments } from "@/lib/documents";
@@ -63,6 +63,7 @@ export default function RepositoryPage() {
   const [hierarchyRoots, setHierarchyRoots] = useState<HierarchyNode[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [reloadKey, setReloadKey] = useState(0);
 
   useEffect(() => {
     if (quickFilter === "all") {
@@ -141,6 +142,7 @@ export default function RepositoryPage() {
     confidenceMin,
     repositoryStatus,
     offset,
+    reloadKey,
   ]);
 
   useEffect(() => {
@@ -172,7 +174,7 @@ export default function RepositoryPage() {
     return () => {
       active = false;
     };
-  }, [view]);
+  }, [view, reloadKey]);
 
   const from = total === 0 ? 0 : offset + 1;
   const to = Math.min(offset + PAGE_SIZE, total);
@@ -198,7 +200,8 @@ export default function RepositoryPage() {
       />
 
       <ContentSection>
-      <div className="mb-8 flex flex-wrap items-center justify-between gap-4">
+      <div className="sticky top-0 z-10 -mx-4 mb-8 bg-background px-4 pb-4 pt-2 sm:-mx-6 sm:px-6">
+      <div className="flex flex-wrap items-center justify-between gap-4">
         {view === "table" && (
           <div className="relative min-w-[280px] flex-1 max-w-2xl">
             <Search className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-text-secondary" />
@@ -274,9 +277,10 @@ export default function RepositoryPage() {
                 }}
                 options={[
                   { value: "", label: "All statuses" },
-                  { value: "completed", label: "Completed" },
-                  { value: "review_required", label: "Review required" },
+                  { value: "completed", label: "Ready" },
+                  { value: "review_required", label: "Needs review" },
                   { value: "processing", label: "Processing" },
+                  { value: "failed", label: "Failed" },
                 ]}
               />
               <AdvancedSelect
@@ -311,11 +315,13 @@ export default function RepositoryPage() {
           )}
         </>
       )}
+      </div>
 
       {error && (
-        <div className="mb-6 rounded-2xl border border-danger/20 bg-danger/5 p-4 text-sm text-danger">
-          {error}
-        </div>
+        <ErrorState
+          error={error}
+          onRetry={() => setReloadKey((key) => key + 1)}
+        />
       )}
 
       <div className="editorial-card overflow-hidden">

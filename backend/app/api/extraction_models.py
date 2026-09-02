@@ -33,6 +33,7 @@ def _to_response(
         id=model.id,
         name=model.name,
         description=model.description,
+        document_types=model.document_types or ["*"],
         created_at=model.created_at,
         fields=[
             ExtractionFieldResponse(
@@ -50,6 +51,7 @@ def _to_response(
 
 @router.get("", response_model=list[ExtractionModelResponse])
 async def list_extraction_models(
+    document_type: str | None = None,
     database: Session = Depends(get_database),
 ) -> list[ExtractionModelResponse]:
     models = list(
@@ -59,6 +61,14 @@ async def list_extraction_models(
             )
         )
     )
+
+    if document_type:
+        models = [
+            model
+            for model in models
+            if document_type in (model.document_types or ["*"])
+            or "*" in (model.document_types or ["*"])
+        ]
 
     return [_to_response(database, model) for model in models]
 
@@ -71,6 +81,7 @@ async def create_extraction_model(
     model = ExtractionModel(
         name=payload.name,
         description=payload.description,
+        document_types=payload.document_types or ["*"],
     )
 
     database.add(model)

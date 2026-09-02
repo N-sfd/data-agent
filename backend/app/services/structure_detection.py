@@ -406,6 +406,24 @@ DOCUMENT_FAMILIES: dict[str, tuple[str, list[str]]] = {
         ["this agreement", "the parties", "effective date",
          "governing law", "whereas"],
     ),
+    "laboratory_report": (
+        "Laboratory Report",
+        ["complete blood count", "cbc", "iron studies", "reference range",
+         "patient information", "specimen", "hematology",
+         "laboratory report"],
+    ),
+    "business_requirements": (
+        "Business Requirements Document",
+        ["business requirements", "functional requirements",
+         "non-functional requirements", "business objectives",
+         "project scope", "requirements document"],
+    ),
+    "research_idea": (
+        "Research / Idea Document",
+        ["market opportunity", "target audience", "competitors",
+         "feasibility", "monetization", "go-to-market",
+         "value proposition"],
+    ),
 }
 
 FIELD_PROBES: list[tuple[str, str, str]] = [

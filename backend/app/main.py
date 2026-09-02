@@ -17,6 +17,7 @@ from app.database.migrate import (
     ensure_document_metadata_field_columns,
     ensure_document_page_columns,
     ensure_documents_columns,
+    ensure_extraction_model_columns,
 )
 from app.database.session import engine
 from app.models import (  # noqa: F401
@@ -158,6 +159,7 @@ async def create_database_tables() -> None:
     ensure_document_page_columns(engine)
     ensure_documents_columns(engine)
     ensure_document_metadata_field_columns(engine)
+    ensure_extraction_model_columns(engine)
 
 
 @app.get("/")

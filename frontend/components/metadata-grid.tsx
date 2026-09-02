@@ -5,10 +5,15 @@ import { Eye, LayoutGrid } from "lucide-react";
 
 import ClickableFieldValue from "@/components/clickable-field-value";
 import ConfidenceBadge from "@/components/confidence-badge";
+import SourcePreviewDrawer, {
+  type SourcePreviewRequest,
+} from "@/components/source-preview-drawer";
 import type { MetadataField } from "@/types/document";
 
 interface MetadataGridProps {
   fields: MetadataField[];
+  documentId: string;
+  pageCount: number;
 }
 
 const GROUP_ORDER = [
@@ -21,7 +26,14 @@ const GROUP_ORDER = [
   "Compliance",
 ];
 
-export default function MetadataGrid({ fields }: MetadataGridProps) {
+export default function MetadataGrid({
+  fields,
+  documentId,
+  pageCount,
+}: MetadataGridProps) {
+  const [sourceRequest, setSourceRequest] =
+    useState<SourcePreviewRequest | null>(null);
+
   if (fields.length === 0) {
     return null;
   }
@@ -60,17 +72,41 @@ export default function MetadataGrid({ fields }: MetadataGridProps) {
 
             <div className="mt-3 grid gap-3 sm:grid-cols-2">
               {groups.get(group)!.map((field) => (
-                <FieldTile key={field.field_key} field={field} />
+                <FieldTile
+                  key={field.field_key}
+                  field={field}
+                  onViewSource={() =>
+                    setSourceRequest({
+                      pageNumber: field.evidence.page_number,
+                      highlightText: field.evidence.source_text,
+                      label: field.label,
+                    })
+                  }
+                />
               ))}
             </div>
           </div>
         ))}
       </div>
+
+      <SourcePreviewDrawer
+        open={sourceRequest !== null}
+        onClose={() => setSourceRequest(null)}
+        documentId={documentId}
+        pageCount={pageCount}
+        request={sourceRequest}
+      />
     </div>
   );
 }
 
-function FieldTile({ field }: { field: MetadataField }) {
+function FieldTile({
+  field,
+  onViewSource,
+}: {
+  field: MetadataField;
+  onViewSource: () => void;
+}) {
   const [showSource, setShowSource] = useState(false);
 
   return (
@@ -88,14 +124,24 @@ function FieldTile({ field }: { field: MetadataField }) {
         />
       </div>
 
-      <button
-        type="button"
-        onClick={() => setShowSource((value) => !value)}
-        className="mt-2 inline-flex items-center gap-1 text-xs font-medium text-primary hover:underline"
-      >
-        <Eye className="h-3 w-3" />
-        {showSource ? "Hide source" : "View source"}
-      </button>
+      <div className="mt-2 flex items-center gap-3">
+        <button
+          type="button"
+          onClick={() => setShowSource((value) => !value)}
+          className="inline-flex items-center gap-1 text-xs font-medium text-primary hover:underline"
+        >
+          <Eye className="h-3 w-3" />
+          {showSource ? "Hide source" : "View source"}
+        </button>
+
+        <button
+          type="button"
+          onClick={onViewSource}
+          className="text-xs font-medium text-text-secondary hover:text-primary hover:underline"
+        >
+          View page
+        </button>
+      </div>
 
       {showSource && (
         <div className="mt-2 rounded-lg border border-border bg-surface p-2 text-xs leading-5 text-text-secondary">

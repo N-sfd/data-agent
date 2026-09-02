@@ -1,4 +1,5 @@
-﻿import sys
+﻿import os
+import sys
 from pathlib import Path
 
 import pytest
@@ -8,12 +9,22 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+# Give the test suite its own SQLite file. app.core.config.get_settings()
+# is @lru_cache'd and reads DATABASE_URL on first call, so this must be
+# set before anything below imports app.main (which triggers that first
+# call) — otherwise every test run writes real rows into the dev DB the
+# uvicorn server is also reading from.
+os.environ.setdefault(
+    "DATABASE_URL", f"sqlite:///{ROOT / 'test_data_agent.db'}"
+)
+
 from app.main import app  # noqa: E402
 from app.database.base import Base  # noqa: E402
 from app.database.migrate import (  # noqa: E402
     ensure_document_metadata_field_columns,
     ensure_document_page_columns,
     ensure_documents_columns,
+    ensure_extraction_model_columns,
 )
 from app.database.session import engine  # noqa: E402
 from app.models import (  # noqa: E402,F401
@@ -98,6 +109,7 @@ def _initialize_database() -> None:
     ensure_document_page_columns(engine)
     ensure_documents_columns(engine)
     ensure_document_metadata_field_columns(engine)
+    ensure_extraction_model_columns(engine)
 
 
 @pytest.fixture

@@ -7,8 +7,9 @@ import { ChevronRight, Loader2, Search } from "lucide-react";
 
 import ContentSection from "@/components/layout/ContentSection";
 import PageHero from "@/components/layout/PageHero";
-import { LoadingState } from "@/components/layout/StatusState";
+import { ErrorState, LoadingState } from "@/components/layout/StatusState";
 import ConfidenceIndicator from "@/components/confidence-indicator";
+import EmptyState from "@/components/illustrations/empty-state";
 import {
   aggregateFieldAcrossRepository,
   filterMatchesByValue,
@@ -37,6 +38,7 @@ function ExplorerContent() {
   );
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [reloadKey, setReloadKey] = useState(0);
 
   const filteredFields = useMemo(() => {
     const q = fieldQuery.trim().toLowerCase();
@@ -82,7 +84,7 @@ function ExplorerContent() {
     return () => {
       active = false;
     };
-  }, [selectedField, initialField, initialValue]);
+  }, [selectedField, initialField, initialValue, reloadKey]);
 
   const matches =
     aggregation && selectedValue
@@ -106,6 +108,7 @@ function ExplorerContent() {
       />
 
       <ContentSection>
+        <div className="sticky top-0 z-10 -mx-4 bg-background px-4 pb-2 pt-2 sm:-mx-6 sm:px-6">
         <div className="editorial-card p-5 sm:p-6">
           <div className="flex flex-wrap items-end gap-4">
             <div className="min-w-[240px] flex-1">
@@ -148,11 +151,13 @@ function ExplorerContent() {
             </p>
           )}
         </div>
+        </div>
 
       {error && (
-        <div className="mt-6 rounded-2xl border border-danger/20 bg-danger/5 p-4 text-sm text-danger">
-          {error}
-        </div>
+        <ErrorState
+          error={error}
+          onRetry={() => setReloadKey((key) => key + 1)}
+        />
       )}
 
       {loading ? (
@@ -287,15 +292,11 @@ function ExplorerContent() {
                 </div>
               </>
             ) : (
-              <div className="flex flex-col items-center justify-center px-8 py-16 text-center">
-                <p className="font-medium text-foreground">
-                  Select a value to explore matching contracts
-                </p>
-                <p className="mt-2 max-w-sm text-sm text-text-secondary">
-                  Click any distribution row to open the cross-contract results
-                  table.
-                </p>
-              </div>
+              <EmptyState
+                variant="fields"
+                title="Select a value to explore matching contracts"
+                description="Click any distribution row to open the cross-contract results table."
+              />
             )}
           </div>
         </div>

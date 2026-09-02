@@ -31,12 +31,14 @@ class ExtractionFieldResponse(BaseModel):
 class ExtractionModelCreate(BaseModel):
     name: str = Field(min_length=1, max_length=120)
     description: str = ""
+    document_types: list[str] = Field(default_factory=lambda: ["*"])
 
 
 class ExtractionModelResponse(BaseModel):
     id: int
     name: str
     description: str
+    document_types: list[str]
     created_at: datetime
     fields: list[ExtractionFieldResponse] = Field(
         default_factory=list

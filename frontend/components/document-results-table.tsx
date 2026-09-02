@@ -3,20 +3,12 @@
 import { useRouter } from "next/navigation";
 
 import ConfidenceIndicator from "@/components/confidence-indicator";
+import DocumentTypeBadge from "@/components/document-type-badge";
 import EmptyState from "@/components/illustrations/empty-state";
+import StatusBadge from "@/components/status-badge";
 import { getDocumentTypeAppearance } from "@/lib/document-type-icon";
-import { STATUS_LABELS, STATUS_STYLES } from "@/lib/document-status";
 import { formatRelativeTime } from "@/lib/format";
-import type {
-  DocumentSummary,
-  RepositoryStatus,
-} from "@/types/document";
-
-const REPOSITORY_STATUS_LABELS: Record<RepositoryStatus, string> = {
-  not_approved: "Needs review",
-  approved: "Reviewed",
-  repository: "In repository",
-};
+import type { DocumentSummary } from "@/types/document";
 
 function contractTitle(document: DocumentSummary): string {
   return document.original_filename.replace(/\.[^.]+$/, "");
@@ -147,8 +139,8 @@ export default function DocumentResultsTable({
                   {document.counterparty ?? "—"}
                 </td>
               )}
-              <td className="px-4 py-5 text-sm text-text-secondary">
-                {document.document_type ?? "—"}
+              <td className="px-4 py-5">
+                <DocumentTypeBadge documentType={document.document_type} size="sm" />
               </td>
               {fullRepository && (
                 <>
@@ -171,24 +163,16 @@ export default function DocumentResultsTable({
                 )}
               </td>
               {fullRepository && (
-                <td className="px-5 py-[18px] text-sm text-text-secondary">
-                  {
-                    REPOSITORY_STATUS_LABELS[
-                      document.repository_status ?? "not_approved"
-                    ]
-                  }
+                <td className="px-5 py-[18px]">
+                  <StatusBadge
+                    kind="repository"
+                    status={document.repository_status ?? "not_approved"}
+                  />
                 </td>
               )}
               {dashboardMode && (
                 <td className="px-5 py-[18px]">
-                  <span
-                    className={[
-                      "rounded-full px-2.5 py-0.5 text-xs font-medium",
-                      STATUS_STYLES[document.status],
-                    ].join(" ")}
-                  >
-                    {STATUS_LABELS[document.status]}
-                  </span>
+                  <StatusBadge kind="document" status={document.status} />
                 </td>
               )}
               {fullRepository && (
@@ -198,14 +182,7 @@ export default function DocumentResultsTable({
               )}
               {!dashboardMode && showExtendedColumns && !fullRepository && (
                 <td className="px-5 py-[18px]">
-                  <span
-                    className={[
-                      "rounded-full px-2.5 py-0.5 text-xs font-medium",
-                      STATUS_STYLES[document.status],
-                    ].join(" ")}
-                  >
-                    {STATUS_LABELS[document.status]}
-                  </span>
+                  <StatusBadge kind="document" status={document.status} />
                 </td>
               )}
               <td className="px-8 py-5 text-sm text-text-secondary">

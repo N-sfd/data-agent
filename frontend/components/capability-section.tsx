@@ -7,6 +7,7 @@ import {
   Scale,
   ScanSearch,
   ShieldCheck,
+  Sparkles,
 } from "lucide-react";
 
 const CAPABILITIES = [
@@ -52,6 +53,13 @@ const CAPABILITIES = [
     href: "/review-queue",
     icon: ShieldCheck,
   },
+  {
+    title: "Ask for anything",
+    description:
+      "Don't see the field, clause, table, date, party, or amount you need? Request any custom concept and Data Agent extracts it with the same source-page evidence.",
+    href: "/extraction/new",
+    icon: Sparkles,
+  },
 ] as const;
 
 export default function CapabilitySection() {
@@ -73,7 +81,7 @@ export default function CapabilitySection() {
       <div className="capability-grid">
         {CAPABILITIES.map((item) => (
           <Link
-            key={item.href}
+            key={item.title}
             href={item.href}
             className="capability-tile group"
           >

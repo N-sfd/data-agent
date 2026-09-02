@@ -19,6 +19,11 @@ DOCUMENT_METADATA_FIELD_COLUMNS: dict[str, str] = {
 }
 
 
+EXTRACTION_MODEL_COLUMNS: dict[str, str] = {
+    "document_types": "JSON",
+}
+
+
 DOCUMENT_COLUMNS: dict[str, str] = {
     "document_type": "VARCHAR(60)",
     "industry": "VARCHAR(60)",
@@ -133,6 +138,35 @@ def ensure_document_metadata_field_columns(engine: Engine) -> None:
             connection.execute(
                 text(
                     "ALTER TABLE document_metadata_fields "
+                    f"ADD COLUMN {column_name} {column_type}"
+                )
+            )
+
+
+def ensure_extraction_model_columns(engine: Engine) -> None:
+    """Add missing extraction_models columns for existing SQLite databases."""
+
+    if engine.dialect.name != "sqlite":
+        return
+
+    with engine.begin() as connection:
+        existing = {
+            row[1]
+            for row in connection.execute(
+                text("PRAGMA table_info(extraction_models)")
+            )
+        }
+
+        if not existing:
+            return
+
+        for column_name, column_type in EXTRACTION_MODEL_COLUMNS.items():
+            if column_name in existing:
+                continue
+
+            connection.execute(
+                text(
+                    "ALTER TABLE extraction_models "
                     f"ADD COLUMN {column_name} {column_type}"
                 )
             )

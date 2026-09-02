@@ -70,7 +70,15 @@ export default function WorkflowDiagram({
           return (
             <li key={step.id} className="workflow-diagram-step">
               {index > 0 && (
-                <span className="workflow-diagram-connector" aria-hidden />
+                <span
+                  className={[
+                    "workflow-diagram-connector",
+                    isActive ? "workflow-diagram-connector-active" : "",
+                  ]
+                    .filter(Boolean)
+                    .join(" ")}
+                  aria-hidden
+                />
               )}
               <div
                 className={[

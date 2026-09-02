@@ -14,12 +14,12 @@ import {
 
 import ConfidenceBadge from "@/components/confidence-badge";
 import ClickableFieldValue from "@/components/clickable-field-value";
+import StatusBadge from "@/components/status-badge";
 import { getFieldAuditLog } from "@/lib/documents";
 import type {
   FieldAuditEntry,
   MetadataField,
   ReviewAction,
-  ReviewStatus,
 } from "@/types/document";
 
 interface ReviewFieldListProps {
@@ -46,22 +46,6 @@ const GROUP_ORDER = [
   "Commercial",
   "Compliance",
 ];
-
-const STATUS_STYLES: Record<ReviewStatus, string> = {
-  pending: "bg-surface-soft text-text-secondary",
-  accepted: "bg-success/10 text-success",
-  edited: "bg-primary-soft text-primary",
-  rejected: "bg-danger/10 text-danger",
-  unknown: "bg-warning/10 text-warning",
-};
-
-const STATUS_LABELS: Record<ReviewStatus, string> = {
-  pending: "Pending",
-  accepted: "Accepted",
-  edited: "Edited",
-  rejected: "Rejected",
-  unknown: "Unknown",
-};
 
 const ACTION_LABELS: Record<ReviewAction, string> = {
   accept: "Accepted",
@@ -323,14 +307,12 @@ function FieldRow({
         </td>
 
         <td className="px-4 py-2.5">
-          <span
-            className={[
-              "rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide",
-              STATUS_STYLES[field.review_status],
-            ].join(" ")}
-          >
-            {STATUS_LABELS[field.review_status]}
-          </span>
+          <StatusBadge
+            kind="field"
+            status={field.review_status}
+            verified={field.verified}
+            size="sm"
+          />
         </td>
 
         <td className="px-4 py-2.5">

@@ -601,6 +601,34 @@ body {
   }
 }
 
+/* Shaped document containers — the app's recurring "clipped document
+   corner + layered card" motif, first used in the hero preview. */
+.doc-shape-corner-clip {
+  clip-path: polygon(
+    0 0,
+    100% 0,
+    100% calc(100% - 22px),
+    calc(100% - 22px) 100%,
+    0 100%
+  );
+}
+
+.doc-shape-layered {
+  position: relative;
+}
+
+.doc-shape-layer-back {
+  position: absolute;
+  inset: 0;
+  transform: rotate(-1.5deg) translate(10px, 10px);
+  z-index: 0;
+}
+
+.doc-shape-layer-front {
+  position: relative;
+  z-index: 1;
+}
+
 /* Workflow diagram */
 .workflow-diagram-steps {
   display: flex;
@@ -642,11 +670,38 @@ body {
   border: 1px solid var(--border);
   background: var(--surface-soft);
   min-width: 0;
+  transition: border-color 0.5s ease, background-color 0.5s ease;
 }
 
 .workflow-diagram-node-active {
   border-color: color-mix(in srgb, var(--primary) 35%, var(--border));
   background: color-mix(in srgb, var(--primary) 6%, var(--surface));
+}
+
+.workflow-diagram-connector-active {
+  background: linear-gradient(
+    90deg,
+    var(--primary),
+    color-mix(in srgb, var(--primary) 20%, transparent)
+  );
+  background-size: 200% 100%;
+  opacity: 1;
+  animation: workflow-connector-sweep 2.2s ease-in-out infinite;
+}
+
+@keyframes workflow-connector-sweep {
+  0% {
+    background-position: 100% 0;
+  }
+  100% {
+    background-position: -100% 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .workflow-diagram-connector-active {
+    animation: none;
+  }
 }
 
 .workflow-diagram-icon-wrap {

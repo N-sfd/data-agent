@@ -8,6 +8,10 @@ import PageHero from "@/components/layout/PageHero";
 import EmptyState from "@/components/illustrations/empty-state";
 import { LoadingState } from "@/components/layout/StatusState";
 import {
+  DOCUMENT_FAMILY_LABELS,
+  documentFamilyLabel,
+} from "@/lib/document-families";
+import {
   addExtractionField,
   createExtractionModel,
   deleteExtractionField,
@@ -18,6 +22,10 @@ import type {
   ExtractionFieldDataType,
   ExtractionModel,
 } from "@/types/document";
+
+const TAGGABLE_DOCUMENT_TYPES = Object.keys(DOCUMENT_FAMILY_LABELS).filter(
+  (key) => key !== "*",
+);
 
 const DATA_TYPES: ExtractionFieldDataType[] = [
   "text",
@@ -36,6 +44,9 @@ export default function ExtractionModelsPage() {
   const [newModelName, setNewModelName] = useState("");
   const [newModelDescription, setNewModelDescription] =
     useState("");
+  const [newModelDocumentTypes, setNewModelDocumentTypes] = useState<
+    string[]
+  >([]);
   const [creatingModel, setCreatingModel] = useState(false);
 
   useEffect(() => {
@@ -77,10 +88,12 @@ export default function ExtractionModelsPage() {
       const model = await createExtractionModel(
         newModelName.trim(),
         newModelDescription.trim(),
+        newModelDocumentTypes.length > 0 ? newModelDocumentTypes : ["*"],
       );
       setModels((current) => [model, ...current]);
       setNewModelName("");
       setNewModelDescription("");
+      setNewModelDocumentTypes([]);
     } catch (err) {
       setError(
         err instanceof Error
@@ -158,6 +171,38 @@ export default function ExtractionModelsPage() {
             <Plus className="h-4 w-4" />
             Create
           </button>
+        </div>
+
+        <div className="mt-3">
+          <p className="text-xs text-text-secondary">
+            Document types (leave blank to show for every document type)
+          </p>
+          <div className="mt-1.5 flex flex-wrap gap-1.5">
+            {TAGGABLE_DOCUMENT_TYPES.map((key) => {
+              const active = newModelDocumentTypes.includes(key);
+              return (
+                <button
+                  key={key}
+                  type="button"
+                  onClick={() =>
+                    setNewModelDocumentTypes((current) =>
+                      active
+                        ? current.filter((value) => value !== key)
+                        : [...current, key],
+                    )
+                  }
+                  className={[
+                    "rounded-full px-2.5 py-1 text-xs font-medium transition",
+                    active
+                      ? "bg-primary text-white"
+                      : "bg-surface-soft text-text-secondary hover:bg-border",
+                  ].join(" ")}
+                >
+                  {documentFamilyLabel(key)}
+                </button>
+              );
+            })}
+          </div>
         </div>
       </div>
 
@@ -269,6 +314,19 @@ function ModelCard({
               {model.description}
             </p>
           )}
+          <div className="mt-1.5 flex flex-wrap gap-1">
+            {(model.document_types.length > 0
+              ? model.document_types
+              : ["*"]
+            ).map((key) => (
+              <span
+                key={key}
+                className="rounded-full bg-surface-soft px-2 py-0.5 text-[10px] font-medium text-text-secondary"
+              >
+                {documentFamilyLabel(key)}
+              </span>
+            ))}
+          </div>
         </div>
 
         <button

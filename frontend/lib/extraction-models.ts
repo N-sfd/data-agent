@@ -6,22 +6,30 @@ import type {
   ExtractionModel,
 } from "@/types/document";
 
-export async function listExtractionModels(): Promise<
-  ExtractionModel[]
-> {
-  return apiFetch("/api/extraction-models");
+export async function listExtractionModels(
+  documentType?: string,
+): Promise<ExtractionModel[]> {
+  const query = documentType
+    ? `?document_type=${encodeURIComponent(documentType)}`
+    : "";
+  return apiFetch(`/api/extraction-models${query}`);
 }
 
 export async function createExtractionModel(
   name: string,
   description: string,
+  documentTypes: string[] = ["*"],
 ): Promise<ExtractionModel> {
   return apiFetch("/api/extraction-models", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
     },
-    body: JSON.stringify({ name, description }),
+    body: JSON.stringify({
+      name,
+      description,
+      document_types: documentTypes,
+    }),
   });
 }
 

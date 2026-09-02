@@ -15,7 +15,10 @@ NEEDS_ATTENTION_STATUSES = frozenset({"rejected", "unknown"})
 def compute_document_status(
     database: Session, document: Document
 ) -> str:
-    """One of "processing" | "review_required" | "completed"."""
+    """One of "processing" | "review_required" | "completed" | "failed"."""
+
+    if document.processing_status == "failed":
+        return "failed"
 
     if document.processing_status not in (
         COMPLETED_PROCESSING_STATUSES

@@ -31,7 +31,8 @@ export type DuplicateResolution = "use_existing" | "upload_anyway";
 export type DocumentStatus =
   | "processing"
   | "review_required"
-  | "completed";
+  | "completed"
+  | "failed";
 
 export type RepositoryStatus =
   | "not_approved"
@@ -687,6 +688,7 @@ export interface ExtractionModel {
   id: number;
   name: string;
   description: string;
+  document_types: string[];
   created_at: string;
   fields: ExtractionField[];
 }

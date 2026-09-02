@@ -5,6 +5,7 @@ import Link from "next/link";
 import { Bell, Menu, Plus, Search, Sparkles } from "lucide-react";
 import { useState } from "react";
 
+import BackendStatusPill from "@/components/navigation/BackendStatusPill";
 import MobileNavigation from "@/components/navigation/MobileNavigation";
 import NavDropdown from "@/components/navigation/NavDropdown";
 import {
@@ -100,7 +101,8 @@ export default function GlobalHeader({ onOpenSearch }: GlobalHeaderProps) {
             <Bell className="h-4 w-4" strokeWidth={1.75} />
           </button>
 
-          <div className="flex items-center gap-2 border-l border-white/10 pl-3">
+          <div className="flex items-center gap-3 border-l border-white/10 pl-3">
+            <BackendStatusPill />
             <Image
               src="/consult-america-logo.jpg"
               alt="Consult America"
@@ -113,6 +115,8 @@ export default function GlobalHeader({ onOpenSearch }: GlobalHeaderProps) {
 
         {/* Right side: Mobile & Tablet triggers (<lg only) */}
         <div className="flex items-center gap-1.5 sm:gap-2 lg:hidden">
+          <BackendStatusPill />
+
           <button
             type="button"
             onClick={onOpenSearch}
