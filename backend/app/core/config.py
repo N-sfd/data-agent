@@ -19,6 +19,14 @@ class Settings(BaseSettings):
     max_pdf_pages: int = 1000
     allow_encrypted_pdf: bool = False
 
+    # Backs up uploaded files to Supabase Storage so they survive Render's
+    # free-tier ephemeral disk being wiped on every redeploy/idle restart.
+    # Local disk is still used as a working cache; when unset, storage
+    # stays local-only (e.g. local development).
+    supabase_url: str | None = None
+    supabase_service_role_key: str | None = None
+    supabase_storage_bucket: str = "documents"
+
     database_url: str = "sqlite:///./data_agent.db"
 
     oracle_base_url: str = "https://example.fa.oraclecloud.com"

@@ -35,6 +35,7 @@ from app.services.dashboard_stats import (
     compute_document_confidence,
     compute_document_status,
 )
+from app.services.document_storage import upload_object
 from app.services.file_upload import (
     UploadValidationError,
     sanitize_display_filename,
@@ -372,6 +373,9 @@ async def upload_document(
             checksum=checksum,
             metadata=metadata,
         )
+        upload_object(
+            settings, stored_filename, file_bytes, spec.content_type
+        )
         log.append("Stored original document")
 
         if spec.kind == "docx":
@@ -540,6 +544,9 @@ async def resolve_duplicate(
             checksum=checksum,
             metadata=metadata,
         )
+        upload_object(
+            settings, destination.name, file_bytes, spec.content_type
+        )
 
         log.append("Stored as a new document")
 
@@ -655,6 +662,9 @@ async def select_portfolio_file(
             size_bytes=size_bytes,
             checksum=checksum,
             metadata=metadata,
+        )
+        upload_object(
+            settings, destination.name, file_bytes, spec.content_type
         )
 
         log.append("Stored embedded document")

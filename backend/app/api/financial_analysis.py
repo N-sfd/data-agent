@@ -3,6 +3,7 @@ from fastapi import (
     Depends,
     HTTPException,
 )
+from fastapi.concurrency import run_in_threadpool
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
@@ -13,6 +14,10 @@ from app.models.document import Document
 from app.schemas.financial_analysis import (
     FinancialAnalysisRequest,
     FinancialAnalysisResponse,
+)
+from app.services.document_storage import (
+    DocumentStorageError,
+    ensure_local_copy,
 )
 from app.services.financial_scope import (
     select_relevant_pages,
@@ -81,10 +86,17 @@ async def analyze_financial_document(
             ),
         )
 
-    file_path = (
-        settings.upload_path
-        / document.stored_filename
-    )
+    try:
+        file_path = await run_in_threadpool(
+            ensure_local_copy,
+            settings,
+            stored_filename=document.stored_filename,
+        )
+    except DocumentStorageError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail=str(exc),
+        ) from exc
 
     tables = extract_tables_from_pages(
         file_path=file_path,

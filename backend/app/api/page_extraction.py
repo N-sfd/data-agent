@@ -1,4 +1,5 @@
 import base64
+from pathlib import Path
 
 import fitz
 from fastapi import (
@@ -26,6 +27,10 @@ from app.schemas.page_extraction import (
 from app.services.document_extraction import (
     DocumentExtractionError,
     process_document_pages,
+)
+from app.services.document_storage import (
+    DocumentStorageError,
+    ensure_local_copy,
 )
 
 router = APIRouter()
@@ -60,9 +65,20 @@ async def extract_document_pages(
             ),
         )
 
-    file_path = (
-        settings.upload_path / document.stored_filename
-    )
+    try:
+        # Render's free-tier disk is wiped on every redeploy/idle
+        # restart; restore the file from Supabase Storage first if the
+        # local copy is already gone.
+        file_path = await run_in_threadpool(
+            ensure_local_copy,
+            settings,
+            stored_filename=document.stored_filename,
+        )
+    except DocumentStorageError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail=str(exc),
+        ) from exc
 
     try:
         # PDF rendering and OCR are CPU-bound and can take a long time for
@@ -338,18 +354,25 @@ async def render_document_page(
             detail="Document not found.",
         )
 
-    file_path = settings.upload_path / document.stored_filename
-
-    if (
-        not file_path.exists()
-        or file_path.suffix.lower() != ".pdf"
-    ):
+    if Path(document.stored_filename).suffix.lower() != ".pdf":
         raise HTTPException(
             status_code=422,
             detail=(
                 "Page rendering is only available for PDF documents."
             ),
         )
+
+    try:
+        file_path = await run_in_threadpool(
+            ensure_local_copy,
+            settings,
+            stored_filename=document.stored_filename,
+        )
+    except DocumentStorageError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail=str(exc),
+        ) from exc
 
     pdf: fitz.Document | None = None
 

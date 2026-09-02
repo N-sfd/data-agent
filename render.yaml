@@ -23,6 +23,12 @@ services:
         value: "1000"
       - key: ALLOW_ENCRYPTED_PDF
         value: "false"
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: SUPABASE_STORAGE_BUCKET
+        value: documents
       - key: ORACLE_BASE_URL
         sync: false
       - key: ORACLE_DRY_RUN
