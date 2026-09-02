@@ -50,7 +50,11 @@ class Settings(BaseSettings):
     openai_api_key: str | None = None
     openai_model: str | None = None
 
-    ollama_base_url: str = "http://localhost:11434"
+    # No default: an always-truthy base_url would make
+    # ai_provider_factory always add Ollama as a fallback provider,
+    # even on deployments (e.g. Render) that never intended to use it
+    # and have no Ollama server reachable.
+    ollama_base_url: str | None = None
     ollama_model: str | None = None
 
     ai_fallback_enabled: bool = True

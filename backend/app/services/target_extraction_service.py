@@ -15,7 +15,7 @@ from app.schemas.document_target import (
     TableTargetResult,
 )
 from app.services.ai_context import build_page_context
-from app.services.ai_provider import AIProvider
+from app.services.ai_provider import AIProvider, AIProviderError
 from app.services.ai_value_mapping import map_ai_value
 from app.services.clause_citation_scanner import scan_pages_for_clause_citations
 from app.services.detected_target_store import load_document_targets
@@ -263,9 +263,12 @@ async def _run_batched_scalar_ai_fallback(
         all_pages, maximum_characters=settings.ai_max_context_chars
     )
 
-    ai_result = await ai_provider.extract(
-        instruction=instruction, page_context=context
-    )
+    try:
+        ai_result = await ai_provider.extract(
+            instruction=instruction, page_context=context
+        )
+    except AIProviderError as exc:
+        return [], [f"AI fallback unavailable: {exc}"]
 
     scalars: list[ScalarTargetResult] = []
     warnings: list[str] = []
@@ -340,9 +343,12 @@ async def _run_per_target_ai_fallback(
             target_pages, maximum_characters=settings.ai_max_context_chars
         )
 
-        ai_result = await ai_provider.extract(
-            instruction=instruction, page_context=context
-        )
+        try:
+            ai_result = await ai_provider.extract(
+                instruction=instruction, page_context=context
+            )
+        except AIProviderError as exc:
+            return None, [f"AI fallback unavailable for '{target.label}': {exc}"]
 
         warnings = list(ai_result.get("warnings", []))
 
