@@ -107,3 +107,33 @@ def test_prose_fragments_are_not_plausible_kv_labels() -> None:
         is_plausible_kv_label("form1[0].Page2[0].TextField[3]")
         is False
     )
+
+
+def test_field_probe_evidence_resolves_via_source_examples() -> None:
+    """WAWF Payment Office and similar field-probe targets store evidence
+    in the format  'PROBE_LABEL: value' on page N (field_probe)  and
+    should resolve from that evidence string."""
+    page = _page(
+        5,
+        "PAYMENT OFFICE: HQ0338\nSome other contract text.",
+    )
+    target = _kv_target(
+        id="doc:wawf_payment_office",
+        key="wawf_payment_office",
+        label="WAWF Payment Office",
+        page_numbers=[5],
+        confidence=0.86,
+        source_examples=[
+            "'PAYMENT OFFICE: HQ0338' on page 5 (field_probe)"
+        ],
+    )
+
+    result = _resolve_scalar_from_source_examples(
+        target,
+        page_lookup={5: page},
+    )
+
+    assert result is not None
+    assert result.value == "HQ0338"
+    assert result.extraction_method == "source_evidence"
+    assert result.verified is True

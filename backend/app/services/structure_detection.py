@@ -839,16 +839,20 @@ async def detect_document_structures(
     detected_fields: list[DetectedField] = []
 
     for key, label, probe_label in FIELD_PROBES:
-        matching_pages = [
-            page.page_number
-            for page in scan_pages
-            if extract_labeled_value(
+        probe_hits: list[tuple[int, str]] = []
+        for page in scan_pages:
+            value = extract_labeled_value(
                 text=page.final_text or "",
                 requested_label=probe_label,
             )
-        ]
+            if value:
+                probe_hits.append((page.page_number, value))
 
-        if matching_pages:
+        if probe_hits:
+            matching_pages = [page_num for page_num, _ in probe_hits]
+            first_value = probe_hits[0][1]
+            first_page = probe_hits[0][0]
+
             detected_fields.append(
                 DetectedField(
                     key=key,
@@ -864,8 +868,8 @@ async def detect_document_structures(
                     pages=matching_pages,
                     confidence=0.86,
                     evidence=[
-                        f"Labeled value '{label}' on pages "
-                        + ", ".join(str(n) for n in matching_pages)
+                        f"'{probe_label}: {first_value}' on page "
+                        f"{first_page} (field_probe)"
                     ],
                 )
             )
