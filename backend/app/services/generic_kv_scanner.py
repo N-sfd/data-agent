@@ -56,8 +56,33 @@ _ALL_CAPS = re.compile(r"^[A-Z0-9 /#.'\-]+$")
 
 _NUMERIC_ONLY = re.compile(r"^[\s\d.,$%()-]+$")
 
-# XFA / AcroForm internal field paths like topmostSubform[0].Page1[0].PG11I[0]
-_XFA_FIELD_PATH = re.compile(r"\[[\d]+\]")
+# Internal PDF form field names (XFA, AcroForm, LiveCycle).
+# These are never meaningful business labels.
+_INTERNAL_FORM_PATTERNS = [
+    re.compile(r"\[\d+\]"),                     # array indices: [0], [1]
+    re.compile(r"\btopmostsubform\b", re.I),    # XFA root
+    re.compile(r"\bsubform\b", re.I),           # XFA subform nodes
+    re.compile(r"\bPage\d+\b"),                 # Page1, Page2
+    re.compile(r"\bPG\d+[A-Z]*\b"),             # PG11I, PG2A
+    re.compile(r"\bxfa\b", re.I),               # xfa namespace
+    re.compile(r"\bform\d*\b", re.I),           # form1, Form
+    re.compile(r"\bTextField\b", re.I),          # generic field names
+    re.compile(r"\bCheckBox\d*\b", re.I),
+    re.compile(r"\bRadioButton\d*\b", re.I),
+    re.compile(r"\bSignatureField\d*\b", re.I),
+    re.compile(r"\bNumericField\d*\b", re.I),
+    re.compile(r"\bDateTimeField\d*\b", re.I),
+    re.compile(r"\bDropDownList\d*\b", re.I),
+    re.compile(r"\bTextField\d*\b", re.I),
+    re.compile(r"^#", re.I),                    # #subform, #field
+]
+
+
+def is_internal_form_name(name: str) -> bool:
+    """Return True if the name looks like an internal PDF form field path."""
+    if not name or not name.strip():
+        return True
+    return any(pattern.search(name) for pattern in _INTERNAL_FORM_PATTERNS)
 
 
 @dataclass(frozen=True)
@@ -184,8 +209,7 @@ def is_plausible_kv_label(label: str) -> bool:
     if not normalized or _looks_like_noise(normalized):
         return False
 
-    # XFA / AcroForm internal field paths (e.g. topmostSubform[0].Page1[0])
-    if _XFA_FIELD_PATH.search(normalized):
+    if is_internal_form_name(normalized):
         return False
 
     lowered = f" {normalized.lower()} "
@@ -221,10 +245,13 @@ def _scan_form_fields(page: DocumentPage) -> list[ScannedPair]:
     for raw_label, value in (page.form_fields_json or {}).items():
         if not value or not str(value).strip():
             continue
+        label_str = str(raw_label).strip()
+        if is_internal_form_name(label_str):
+            continue
         pairs.append(
             ScannedPair(
-                raw_label=str(raw_label).strip(),
-                normalized_label=_normalize_label(str(raw_label)),
+                raw_label=label_str,
+                normalized_label=_normalize_label(label_str),
                 value=str(value).strip(),
                 method="form_field",
                 confidence=0.95,

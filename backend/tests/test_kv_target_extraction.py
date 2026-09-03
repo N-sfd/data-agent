@@ -1,7 +1,7 @@
 from types import SimpleNamespace
 
 from app.schemas.document_target import DocumentTarget
-from app.services.generic_kv_scanner import is_plausible_kv_label
+from app.services.generic_kv_scanner import is_internal_form_name, is_plausible_kv_label
 from app.services.target_extraction_service import (
     _resolve_scalar_from_source_examples,
     _resolve_scalar_target,
@@ -107,6 +107,24 @@ def test_prose_fragments_are_not_plausible_kv_labels() -> None:
         is_plausible_kv_label("form1[0].Page2[0].TextField[3]")
         is False
     )
+
+
+def test_is_internal_form_name() -> None:
+    assert is_internal_form_name("topmostSubform[0].Page1[0].PG11I[0]") is True
+    assert is_internal_form_name("form1[0].Page2[0].TextField[3]") is True
+    assert is_internal_form_name("Page1") is True
+    assert is_internal_form_name("PG11I") is True
+    assert is_internal_form_name("#subform[2]") is True
+    assert is_internal_form_name("xfa.form.root") is True
+    assert is_internal_form_name("CheckBox1") is True
+    assert is_internal_form_name("") is True
+
+    # Real business labels should NOT be internal
+    assert is_internal_form_name("SOLICITATION NO.") is False
+    assert is_internal_form_name("Contract Number") is False
+    assert is_internal_form_name("DODAAC") is False
+    assert is_internal_form_name("Effective Date") is False
+    assert is_internal_form_name("WAWF Payment Office") is False
 
 
 def test_field_probe_evidence_resolves_via_source_examples() -> None:

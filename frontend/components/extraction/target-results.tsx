@@ -161,27 +161,47 @@ export default function TargetResults({
         />
       )}
 
-      {result.unresolved_targets.length > 0 && (
-        <div className="rounded-xl border border-warning/25 bg-warning/5 p-4 text-sm text-warning">
-          <p>
-            {result.unresolved_targets.length} selected target
-            {result.unresolved_targets.length === 1 ? "" : "s"} could not be
-            resolved in this document.
-          </p>
-          <ul className="mt-2 list-disc space-y-1 pl-5">
-            {result.unresolved_targets.map((targetKey) => (
-              <li key={targetKey}>
-                {labelByKey.get(targetKey) ?? targetKey}
-                {labelByKey.has(targetKey) && (
-                  <span className="ml-1 text-xs text-warning/80">
-                    ({targetKey})
-                  </span>
-                )}
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
+      {result.unresolved_targets.length > 0 && (() => {
+        const isInternalKey = (key: string) =>
+          /\[\d+\]|topmostsubform|subform|^pg\d+/i.test(key) ||
+          /\[\d+\]|topmostsubform|subform|^pg\d+/i.test(labelByKey.get(key) ?? "");
+
+        const meaningful = result.unresolved_targets.filter((k) => !isInternalKey(k));
+        const internal = result.unresolved_targets.filter((k) => isInternalKey(k));
+
+        return (
+          <>
+            {meaningful.length > 0 && (
+              <div className="rounded-xl border border-warning/25 bg-warning/5 p-4 text-sm text-warning">
+                <p>
+                  {meaningful.length} selected target
+                  {meaningful.length === 1 ? "" : "s"} could not be resolved
+                  in this document.
+                </p>
+                <ul className="mt-2 list-disc space-y-1 pl-5">
+                  {meaningful.map((targetKey) => (
+                    <li key={targetKey}>
+                      {labelByKey.get(targetKey) ?? targetKey}
+                      {labelByKey.has(targetKey) && (
+                        <span className="ml-1 text-xs text-warning/80">
+                          ({targetKey})
+                        </span>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+            {internal.length > 0 && (
+              <p className="text-xs text-text-muted">
+                {internal.length} internal form field
+                {internal.length === 1 ? " was" : "s were"} skipped
+                (no readable value could be mapped).
+              </p>
+            )}
+          </>
+        );
+      })()}
 
       {fieldScalars.length > 0 && (
         <div className="editorial-card p-5 sm:p-6">

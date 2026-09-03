@@ -1,5 +1,7 @@
 from difflib import SequenceMatcher
 
+from app.services.generic_kv_scanner import is_internal_form_name
+
 
 def normalize_name(
     value: str,
@@ -36,6 +38,8 @@ def search_form_fields(
     matches = []
 
     for name, value in form_fields.items():
+        if is_internal_form_name(name):
+            continue
 
         score = similarity(
             name,

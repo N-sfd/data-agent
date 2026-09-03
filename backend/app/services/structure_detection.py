@@ -18,6 +18,7 @@ from app.services.generic_entity_extractor import (
     extract_generic_entities,
 )
 from app.services.generic_kv_scanner import (
+    is_internal_form_name,
     is_plausible_kv_label,
     scan_page_for_labeled_pairs,
 )
