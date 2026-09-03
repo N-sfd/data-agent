@@ -56,6 +56,9 @@ _ALL_CAPS = re.compile(r"^[A-Z0-9 /#.'\-]+$")
 
 _NUMERIC_ONLY = re.compile(r"^[\s\d.,$%()-]+$")
 
+# XFA / AcroForm internal field paths like topmostSubform[0].Page1[0].PG11I[0]
+_XFA_FIELD_PATH = re.compile(r"\[[\d]+\]")
+
 
 @dataclass(frozen=True)
 class ScannedPair:
@@ -179,6 +182,10 @@ def is_plausible_kv_label(label: str) -> bool:
     """
     normalized = " ".join(label.split())
     if not normalized or _looks_like_noise(normalized):
+        return False
+
+    # XFA / AcroForm internal field paths (e.g. topmostSubform[0].Page1[0])
+    if _XFA_FIELD_PATH.search(normalized):
         return False
 
     lowered = f" {normalized.lower()} "

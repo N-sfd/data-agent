@@ -97,3 +97,13 @@ def test_prose_fragments_are_not_plausible_kv_labels() -> None:
         )
         is False
     )
+
+    # XFA / AcroForm internal field paths
+    assert (
+        is_plausible_kv_label("topmostSubform[0].Page1[0].PG11I[0]")
+        is False
+    )
+    assert (
+        is_plausible_kv_label("form1[0].Page2[0].TextField[3]")
+        is False
+    )
