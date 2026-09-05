@@ -2,7 +2,7 @@ from pathlib import Path
 
 from alembic import command
 from alembic.config import Config
-from sqlalchemy import text
+from sqlalchemy import inspect, text
 from sqlalchemy.engine import Engine
 
 _BACKEND_ROOT = Path(__file__).resolve().parents[2]
@@ -23,29 +23,42 @@ def run_alembic_upgrade() -> None:
     command.upgrade(alembic_cfg, "head")
 
 
-DOCUMENT_PAGE_COLUMNS: dict[str, str] = {
+# Column type strings, keyed by dialect name. "sqlite" doubles as the
+# default for any dialect not listed (sqlite's loose typing — e.g.
+# "DATETIME", "BOOLEAN ... DEFAULT 0" — happens to also be valid SQL
+# there, so most columns don't need a postgres-specific override).
+_DEFAULT_DIALECT = "sqlite"
+
+
+def _column_ddl(column_type: str | dict[str, str], dialect_name: str) -> str:
+    if isinstance(column_type, str):
+        return column_type
+    return column_type.get(dialect_name, column_type[_DEFAULT_DIALECT])
+
+
+DOCUMENT_PAGE_COLUMNS: dict[str, str | dict[str, str]] = {
     "form_fields_json": "JSON",
     "tables_json": "JSON",
-    "has_tables": "BOOLEAN NOT NULL DEFAULT 0",
-    "has_form_fields": "BOOLEAN NOT NULL DEFAULT 0",
-    "is_scanned": "BOOLEAN NOT NULL DEFAULT 0",
+    "has_tables": {"sqlite": "BOOLEAN NOT NULL DEFAULT 0", "postgresql": "BOOLEAN NOT NULL DEFAULT false"},
+    "has_form_fields": {"sqlite": "BOOLEAN NOT NULL DEFAULT 0", "postgresql": "BOOLEAN NOT NULL DEFAULT false"},
+    "is_scanned": {"sqlite": "BOOLEAN NOT NULL DEFAULT 0", "postgresql": "BOOLEAN NOT NULL DEFAULT false"},
     "text_length": "INTEGER NOT NULL DEFAULT 0",
 }
 
 
-DOCUMENT_METADATA_FIELD_COLUMNS: dict[str, str] = {
-    "human_approved": "BOOLEAN NOT NULL DEFAULT 0",
+DOCUMENT_METADATA_FIELD_COLUMNS: dict[str, str | dict[str, str]] = {
+    "human_approved": {"sqlite": "BOOLEAN NOT NULL DEFAULT 0", "postgresql": "BOOLEAN NOT NULL DEFAULT false"},
     "review_status": "VARCHAR(20) NOT NULL DEFAULT 'pending'",
     "original_value": "TEXT NOT NULL DEFAULT ''",
 }
 
 
-EXTRACTION_MODEL_COLUMNS: dict[str, str] = {
-    "document_types": "JSON",
+EXTRACTION_MODEL_COLUMNS: dict[str, str | dict[str, str]] = {
+    "document_types": {"sqlite": "JSON", "postgresql": "JSON DEFAULT '[\"*\"]'::json"},
 }
 
 
-DOCUMENT_COLUMNS: dict[str, str] = {
+DOCUMENT_COLUMNS: dict[str, str | dict[str, str]] = {
     "document_type": "VARCHAR(60)",
     "industry": "VARCHAR(60)",
     "contract_side": "VARCHAR(20)",
@@ -58,136 +71,65 @@ DOCUMENT_COLUMNS: dict[str, str] = {
     "parent_relationship_status": "VARCHAR(20)",
     "processing_duration_seconds": "FLOAT",
     "approved_by": "VARCHAR(120)",
-    "approved_at": "DATETIME",
+    "approved_at": {"sqlite": "DATETIME", "postgresql": "TIMESTAMP WITH TIME ZONE"},
     "document_status": "VARCHAR(30)",
     "parent_relationship_reasons": "JSON",
     "parent_relationship_detection_method": "VARCHAR(20)",
     "promoted_by": "VARCHAR(120)",
-    "promoted_at": "DATETIME",
+    "promoted_at": {"sqlite": "DATETIME", "postgresql": "TIMESTAMP WITH TIME ZONE"},
     "organization_id": "VARCHAR(36)",
     "owner_id": "VARCHAR(36)",
 }
 
 
-def ensure_document_page_columns(engine: Engine) -> None:
-    """Add missing document_pages columns for existing SQLite databases."""
+def _ensure_columns(
+    engine: Engine,
+    table_name: str,
+    columns: dict[str, str | dict[str, str]],
+) -> None:
+    """Add any missing columns to an existing table, on any dialect.
 
-    if engine.dialect.name != "sqlite":
+    Uses SQLAlchemy's dialect-agnostic inspector (not sqlite's PRAGMA)
+    so this also patches columns added to a model after a table was
+    first created on Postgres — the same gap this already covered for
+    SQLite, just no longer skipped there.
+    """
+
+    inspector = inspect(engine)
+
+    if not inspector.has_table(table_name):
         return
 
+    existing = {column["name"] for column in inspector.get_columns(table_name)}
+
     with engine.begin() as connection:
-        existing = {
-            row[1]
-            for row in connection.execute(
-                text("PRAGMA table_info(document_pages)")
-            )
-        }
-
-        if not existing:
-            return
-
-        for column_name, column_type in DOCUMENT_PAGE_COLUMNS.items():
+        for column_name, column_type in columns.items():
             if column_name in existing:
                 continue
 
+            ddl = _column_ddl(column_type, engine.dialect.name)
             connection.execute(
-                text(
-                    "ALTER TABLE document_pages "
-                    f"ADD COLUMN {column_name} {column_type}"
-                )
+                text(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {ddl}")
             )
+
+
+def ensure_document_page_columns(engine: Engine) -> None:
+    """Add missing document_pages columns for an existing database."""
+    _ensure_columns(engine, "document_pages", DOCUMENT_PAGE_COLUMNS)
 
 
 def ensure_documents_columns(engine: Engine) -> None:
-    """Add missing documents columns for existing SQLite databases."""
-
-    if engine.dialect.name != "sqlite":
-        return
-
-    with engine.begin() as connection:
-        existing = {
-            row[1]
-            for row in connection.execute(
-                text("PRAGMA table_info(documents)")
-            )
-        }
-
-        if not existing:
-            return
-
-        for column_name, column_type in DOCUMENT_COLUMNS.items():
-            if column_name in existing:
-                continue
-
-            connection.execute(
-                text(
-                    "ALTER TABLE documents "
-                    f"ADD COLUMN {column_name} {column_type}"
-                )
-            )
+    """Add missing documents columns for an existing database."""
+    _ensure_columns(engine, "documents", DOCUMENT_COLUMNS)
 
 
 def ensure_document_metadata_field_columns(engine: Engine) -> None:
-    """
-    Add missing document_metadata_fields columns for existing
-    SQLite databases.
-    """
-
-    if engine.dialect.name != "sqlite":
-        return
-
-    with engine.begin() as connection:
-        existing = {
-            row[1]
-            for row in connection.execute(
-                text(
-                    "PRAGMA table_info(document_metadata_fields)"
-                )
-            )
-        }
-
-        if not existing:
-            return
-
-        for (
-            column_name,
-            column_type,
-        ) in DOCUMENT_METADATA_FIELD_COLUMNS.items():
-            if column_name in existing:
-                continue
-
-            connection.execute(
-                text(
-                    "ALTER TABLE document_metadata_fields "
-                    f"ADD COLUMN {column_name} {column_type}"
-                )
-            )
+    """Add missing document_metadata_fields columns for an existing database."""
+    _ensure_columns(
+        engine, "document_metadata_fields", DOCUMENT_METADATA_FIELD_COLUMNS
+    )
 
 
 def ensure_extraction_model_columns(engine: Engine) -> None:
-    """Add missing extraction_models columns for existing SQLite databases."""
-
-    if engine.dialect.name != "sqlite":
-        return
-
-    with engine.begin() as connection:
-        existing = {
-            row[1]
-            for row in connection.execute(
-                text("PRAGMA table_info(extraction_models)")
-            )
-        }
-
-        if not existing:
-            return
-
-        for column_name, column_type in EXTRACTION_MODEL_COLUMNS.items():
-            if column_name in existing:
-                continue
-
-            connection.execute(
-                text(
-                    "ALTER TABLE extraction_models "
-                    f"ADD COLUMN {column_name} {column_type}"
-                )
-            )
+    """Add missing extraction_models columns for an existing database."""
+    _ensure_columns(engine, "extraction_models", EXTRACTION_MODEL_COLUMNS)

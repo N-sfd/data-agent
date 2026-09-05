@@ -189,15 +189,19 @@ async def create_database_tables() -> None:
 
         run_alembic_upgrade()
     else:
-        # Local development: create_all plus additive column patches for
-        # SQLite databases created before those columns existed.
-        # Production always goes through Alembic (above) so Postgres
-        # schema changes are never silently skipped.
+        # Local development: create_all for brand-new tables.
         Base.metadata.create_all(bind=engine)
-        ensure_document_page_columns(engine)
-        ensure_documents_columns(engine)
-        ensure_document_metadata_field_columns(engine)
-        ensure_extraction_model_columns(engine)
+
+    # Safety net on every startup, in both modes: patches any column
+    # added to a model after its table already existed — e.g. a
+    # database that predates a migration, or one whose tables were
+    # created by an earlier create_all before a column existed. Runs on
+    # any dialect (see database/migrate.py) so this now also covers
+    # Postgres, not just the SQLite databases it originally targeted.
+    ensure_document_page_columns(engine)
+    ensure_documents_columns(engine)
+    ensure_document_metadata_field_columns(engine)
+    ensure_extraction_model_columns(engine)
 
     _recover_interrupted_jobs()
 
