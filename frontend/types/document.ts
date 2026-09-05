@@ -229,14 +229,18 @@ export interface DiscoverSchemaResult {
   generated_at: string;
 }
 
+export type ConfidenceBand = "high" | "medium" | "low";
+
 export interface ScalarTargetResult {
   target: string;
   normalized_key: string;
   value: unknown;
   page: number;
   confidence: number;
+  confidence_band: ConfidenceBand;
   verified: boolean;
   extraction_method: string;
+  display_method: string;
   evidence: SourceEvidence;
 }
 
@@ -253,6 +257,24 @@ export interface ExtractTargetsResult {
   tables: TableTargetResult[];
   unresolved_targets: string[];
   warnings: string[];
+}
+
+export type ExtractionJobType = "processing" | "extraction";
+export type ExtractionJobStatus = "queued" | "processing" | "complete" | "failed";
+
+export interface ExtractionJob {
+  id: number;
+  document_id: string;
+  job_type: ExtractionJobType;
+  status: ExtractionJobStatus;
+  stage: string | null;
+  progress: number;
+  error_message: string | null;
+  retry_count: number;
+  result: ExtractTargetsResult | null;
+  created_at: string;
+  started_at: string | null;
+  completed_at: string | null;
 }
 
 export interface EmbeddedFileSummary {

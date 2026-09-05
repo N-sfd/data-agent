@@ -16,8 +16,10 @@ import type {
   DocumentPage,
   DocumentSearchResponse,
   DocumentSummary,
+  DocumentTarget,
   DuplicateResolution,
   ExtractTargetsResult,
+  ExtractionJob,
   ExtractionProgress,
   ExtractionSummary,
   FieldAuditEntry,
@@ -450,6 +452,42 @@ export async function getTargets(
   return apiFetch(`/api/documents/${documentId}/targets`);
 }
 
+export async function createCustomTarget(
+  documentId: string,
+  label: string,
+): Promise<DocumentTarget> {
+  return apiFetch(`/api/documents/${documentId}/targets/custom`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ label }),
+  });
+}
+
+export async function renameCustomTarget(
+  documentId: string,
+  targetKey: string,
+  label: string,
+): Promise<DocumentTarget> {
+  return apiFetch(
+    `/api/documents/${documentId}/targets/custom/${encodeURIComponent(targetKey)}`,
+    {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ label }),
+    },
+  );
+}
+
+export async function deleteCustomTarget(
+  documentId: string,
+  targetKey: string,
+): Promise<void> {
+  await apiFetch(
+    `/api/documents/${documentId}/targets/custom/${encodeURIComponent(targetKey)}`,
+    { method: "DELETE" },
+  );
+}
+
 // The backend caps a single extract-targets request at 50 target IDs
 // (app/schemas/document_target.py). "Extract All" can easily select
 // more than that, so split into sequential batches and merge the
@@ -502,6 +540,68 @@ export async function extractTargets(
   }
 
   return merged;
+}
+
+export async function startExtractionJob(
+  documentId: string,
+  targetIds: string[],
+  onRetry?: (attempt: number, total: number) => void,
+): Promise<ExtractionJob> {
+  return apiFetch(
+    `/api/documents/${documentId}/jobs/extract`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        target_ids: targetIds,
+        use_ai_fallback: true,
+      }),
+    },
+    onRetry,
+  );
+}
+
+export async function getExtractionJob(
+  jobId: number,
+  onRetry?: (attempt: number, total: number) => void,
+): Promise<ExtractionJob> {
+  return apiFetch(`/v1/jobs/${jobId}`, undefined, onRetry);
+}
+
+const JOB_POLL_INTERVAL_MS = 1200;
+
+/**
+ * Runs target extraction as a background job instead of the client-side
+ * chunked requests above, so the frontend never has to know about (or
+ * expose to the user) any backend batch limit — one job, any number of
+ * target ids, the server batches internally.
+ */
+export async function extractTargetsViaJob(
+  documentId: string,
+  targetIds: string[],
+  onStageChange?: (job: ExtractionJob) => void,
+  onRetry?: (attempt: number, total: number) => void,
+): Promise<ExtractTargetsResult> {
+  let job = await startExtractionJob(documentId, targetIds, onRetry);
+  onStageChange?.(job);
+
+  while (job.status === "queued" || job.status === "processing") {
+    await new Promise((resolve) => setTimeout(resolve, JOB_POLL_INTERVAL_MS));
+    job = await getExtractionJob(job.id, onRetry);
+    onStageChange?.(job);
+  }
+
+  if (job.status === "failed") {
+    throw new Error(job.error_message ?? "Extraction failed.");
+  }
+
+  if (!job.result) {
+    throw new Error("Extraction completed without a result.");
+  }
+
+  return job.result;
 }
 
 export async function selectPortfolioFile(

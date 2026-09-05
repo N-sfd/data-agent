@@ -14,9 +14,12 @@ from app.database.dependencies import (
 from app.models.document import Document
 from app.models.document_page import DocumentPage
 from app.schemas.document_target import (
+    CreateCustomTargetRequest,
     DiscoverSchemaResponse,
+    DocumentTarget,
     ExtractTargetsRequest,
     ExtractTargetsResponse,
+    RenameCustomTargetRequest,
 )
 from app.schemas.structure_detection import (
     StructureDetectionResponse,
@@ -29,8 +32,12 @@ from app.services.ai_provider_factory import (
     create_ai_provider,
 )
 from app.services.detected_target_store import (
+    CustomTargetError,
+    add_custom_target,
+    delete_custom_target,
     load_document_targets,
     persist_document_targets,
+    rename_custom_target,
 )
 from app.services.schema_discovery import discover_document_schema
 from app.services.structure_detection import (
@@ -231,6 +238,73 @@ async def get_targets(
         )
 
     return result
+
+
+@router.post(
+    "/{document_id}/targets/custom",
+    response_model=DocumentTarget,
+    status_code=201,
+)
+async def create_custom_target(
+    document_id: str,
+    request: CreateCustomTargetRequest,
+    database: Session = Depends(get_database),
+) -> DocumentTarget:
+    _load_document_or_404(database, document_id)
+
+    try:
+        return add_custom_target(
+            database=database,
+            document_id=document_id,
+            label=request.label,
+            target_type=request.target_type,
+        )
+    except CustomTargetError as exc:
+        raise http_error(409, TARGET_NOT_FOUND, str(exc)) from exc
+
+
+@router.patch(
+    "/{document_id}/targets/custom/{target_key}",
+    response_model=DocumentTarget,
+)
+async def rename_custom_target_endpoint(
+    document_id: str,
+    target_key: str,
+    request: RenameCustomTargetRequest,
+    database: Session = Depends(get_database),
+) -> DocumentTarget:
+    _load_document_or_404(database, document_id)
+
+    try:
+        return rename_custom_target(
+            database=database,
+            document_id=document_id,
+            target_key=target_key,
+            label=request.label,
+        )
+    except CustomTargetError as exc:
+        raise http_error(404, TARGET_NOT_FOUND, str(exc)) from exc
+
+
+@router.delete(
+    "/{document_id}/targets/custom/{target_key}",
+    status_code=204,
+)
+async def delete_custom_target_endpoint(
+    document_id: str,
+    target_key: str,
+    database: Session = Depends(get_database),
+) -> None:
+    _load_document_or_404(database, document_id)
+
+    try:
+        delete_custom_target(
+            database=database,
+            document_id=document_id,
+            target_key=target_key,
+        )
+    except CustomTargetError as exc:
+        raise http_error(404, TARGET_NOT_FOUND, str(exc)) from exc
 
 
 @router.post(

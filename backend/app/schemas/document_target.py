@@ -52,6 +52,15 @@ class ExtractTargetsRequest(BaseModel):
     use_ai_fallback: bool = True
 
 
+class CreateCustomTargetRequest(BaseModel):
+    label: str = Field(min_length=1, max_length=120)
+    target_type: TargetType = "custom"
+
+
+class RenameCustomTargetRequest(BaseModel):
+    label: str = Field(min_length=1, max_length=120)
+
+
 class ScalarTargetResult(BaseModel):
     target: str
     normalized_key: str

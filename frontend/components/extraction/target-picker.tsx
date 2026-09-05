@@ -1,6 +1,6 @@
 "use client";
 
-import { Check, Search } from "lucide-react";
+import { Check, Pencil, Search, Trash2, X } from "lucide-react";
 import { useMemo, useState } from "react";
 
 import {
@@ -22,9 +22,14 @@ interface TargetPickerProps {
   selectedIds: Set<string>;
   disabled?: boolean;
   onToggle: (targetId: string) => void;
+  onToggleGroup: (targetIds: string[]) => void;
   onSelectAll: (targetType: TargetType) => void;
+  onSelectAllVisible: (targetIds: string[]) => void;
   onClear: () => void;
   onSelectCustom: (pick: CustomQuickPick) => void;
+  onAddCustomField?: (label: string) => Promise<DocumentTarget | undefined>;
+  onRenameCustomField?: (targetKey: string, label: string) => Promise<void>;
+  onDeleteCustomField?: (targetKey: string) => Promise<void>;
 }
 
 function confidenceLabel(target: DocumentTarget): string {
@@ -39,11 +44,42 @@ export default function TargetPicker({
   selectedIds,
   disabled = false,
   onToggle,
+  onToggleGroup,
   onSelectAll,
+  onSelectAllVisible,
   onClear,
   onSelectCustom,
+  onAddCustomField,
+  onRenameCustomField,
+  onDeleteCustomField,
 }: TargetPickerProps) {
   const [query, setQuery] = useState("");
+  const [newFieldLabel, setNewFieldLabel] = useState("");
+  const [addingField, setAddingField] = useState(false);
+  const [editingKey, setEditingKey] = useState<string | null>(null);
+  const [editingLabel, setEditingLabel] = useState("");
+
+  async function submitNewField() {
+    if (!newFieldLabel.trim() || !onAddCustomField) return;
+    setAddingField(true);
+    try {
+      await onAddCustomField(newFieldLabel.trim());
+      setNewFieldLabel("");
+    } finally {
+      setAddingField(false);
+    }
+  }
+
+  function startEditing(target: DocumentTarget) {
+    setEditingKey(target.key);
+    setEditingLabel(target.label);
+  }
+
+  async function submitRename(targetKey: string) {
+    if (!editingLabel.trim() || !onRenameCustomField) return;
+    await onRenameCustomField(targetKey, editingLabel.trim());
+    setEditingKey(null);
+  }
 
   const filtered = useMemo(
     () => filterTargets(targets, query),
@@ -75,55 +111,139 @@ export default function TargetPicker({
 
       <div className="max-h-80 overflow-y-auto p-2">
         {hasAnyDetected &&
-          Array.from(grouped.entries()).map(([groupKey, groupTargetsList]) => (
+          Array.from(grouped.entries()).map(([groupKey, groupTargetsList]) => {
+            const groupIds = groupTargetsList.map((target) => target.id);
+            const allGroupSelected = groupIds.every((id) =>
+              selectedIds.has(id),
+            );
+            return (
             <section key={groupKey} className="mb-1">
-              <p className="px-2 py-1.5 text-[11px] font-semibold uppercase tracking-wider text-text-muted">
-                {displayGroupLabel(groupKey)}
-              </p>
+              <div className="flex items-center justify-between px-2 py-1.5">
+                <p className="text-[11px] font-semibold uppercase tracking-wider text-text-muted">
+                  {displayGroupLabel(groupKey)}
+                </p>
+                <button
+                  type="button"
+                  disabled={disabled}
+                  onClick={() => onToggleGroup(groupIds)}
+                  className="text-[11px] font-medium text-primary transition hover:underline disabled:opacity-40"
+                >
+                  {allGroupSelected ? "Deselect all" : "Select all"}
+                </button>
+              </div>
               {groupTargetsList.map((target) => {
                 const selected = selectedIds.has(target.id);
+                const isCustom = target.source === "custom";
+                const isEditing = editingKey === target.key;
+
+                if (isEditing) {
+                  return (
+                    <div
+                      key={target.id}
+                      className="flex items-center gap-2 rounded-lg px-2 py-2"
+                    >
+                      <input
+                        type="text"
+                        autoFocus
+                        value={editingLabel}
+                        onChange={(event) =>
+                          setEditingLabel(event.target.value)
+                        }
+                        onKeyDown={(event) => {
+                          if (event.key === "Enter") {
+                            void submitRename(target.key);
+                          }
+                          if (event.key === "Escape") {
+                            setEditingKey(null);
+                          }
+                        }}
+                        className="min-w-0 flex-1 rounded-lg border border-border bg-surface px-2 py-1.5 text-sm text-foreground outline-none"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => void submitRename(target.key)}
+                        className="rounded-lg p-1.5 text-primary hover:bg-primary/8"
+                      >
+                        <Check className="h-3.5 w-3.5" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setEditingKey(null)}
+                        className="rounded-lg p-1.5 text-text-muted hover:bg-surface-soft"
+                      >
+                        <X className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
+                  );
+                }
+
                 return (
-                  <button
+                  <div
                     key={target.id}
-                    type="button"
-                    disabled={disabled}
-                    onClick={() => onToggle(target.id)}
                     className={[
-                      "flex w-full items-center gap-3 rounded-lg px-2 py-2 text-left transition disabled:opacity-50",
+                      "group flex w-full items-center gap-1 rounded-lg transition",
                       selected
                         ? "bg-primary/8 hover:bg-primary/12"
                         : "hover:bg-surface-soft",
                     ].join(" ")}
                   >
-                    <span
-                      className={[
-                        "flex h-4 w-4 shrink-0 items-center justify-center rounded border",
-                        selected
-                          ? "border-primary bg-primary"
-                          : "border-border bg-surface",
-                      ].join(" ")}
+                    <button
+                      type="button"
+                      disabled={disabled}
+                      onClick={() => onToggle(target.id)}
+                      className="flex min-w-0 flex-1 items-center gap-3 px-2 py-2 text-left disabled:opacity-50"
                     >
-                      {selected && <Check className="h-3 w-3 text-white" />}
-                    </span>
-                    <span className="min-w-0 flex-1">
-                      <span className="block truncate text-sm font-medium text-foreground">
-                        {target.label}
+                      <span
+                        className={[
+                          "flex h-4 w-4 shrink-0 items-center justify-center rounded border",
+                          selected
+                            ? "border-primary bg-primary"
+                            : "border-border bg-surface",
+                        ].join(" ")}
+                      >
+                        {selected && <Check className="h-3 w-3 text-white" />}
                       </span>
-                      <span className="flex items-center gap-1 text-xs text-text-secondary">
-                        <span className="inline-block h-1.5 w-1.5 rounded-full bg-success" />
-                        {confidenceLabel(target)}
-                      </span>
-                      {target.source_examples[0] && (
-                        <span className="mt-0.5 line-clamp-1 text-[11px] text-text-muted">
-                          {target.source_examples[0]}
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate text-sm font-medium text-foreground">
+                          {target.label}
                         </span>
-                      )}
-                    </span>
-                  </button>
+                        <span className="flex items-center gap-1 text-xs text-text-secondary">
+                          <span className="inline-block h-1.5 w-1.5 rounded-full bg-success" />
+                          {confidenceLabel(target)}
+                        </span>
+                        {target.source_examples[0] && (
+                          <span className="mt-0.5 line-clamp-1 text-[11px] text-text-muted">
+                            {target.source_examples[0]}
+                          </span>
+                        )}
+                      </span>
+                    </button>
+                    {isCustom && onRenameCustomField && (
+                      <button
+                        type="button"
+                        disabled={disabled}
+                        onClick={() => startEditing(target)}
+                        className="shrink-0 rounded-lg p-1.5 text-text-muted opacity-0 transition hover:bg-surface-soft hover:text-foreground group-hover:opacity-100 disabled:opacity-0"
+                      >
+                        <Pencil className="h-3.5 w-3.5" />
+                      </button>
+                    )}
+                    {isCustom && onDeleteCustomField && (
+                      <button
+                        type="button"
+                        disabled={disabled}
+                        onClick={() => onDeleteCustomField(target.key)}
+                        className="mr-1 shrink-0 rounded-lg p-1.5 text-text-muted opacity-0 transition hover:bg-danger/8 hover:text-danger group-hover:opacity-100 disabled:opacity-0"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </button>
+                    )}
+                  </div>
                 );
               })}
             </section>
-          ))}
+            );
+          })}
 
         {!hasAnyDetected && (
           <p className="px-2 py-6 text-center text-sm text-text-secondary">
@@ -155,6 +275,29 @@ export default function TargetPicker({
               </button>
             ))}
           </div>
+          {onAddCustomField && (
+            <div className="mt-1 flex items-center gap-2 px-2 pb-1">
+              <input
+                type="text"
+                value={newFieldLabel}
+                disabled={disabled || addingField}
+                onChange={(event) => setNewFieldLabel(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") void submitNewField();
+                }}
+                placeholder="Add a custom field (e.g. Renewal Option Date)"
+                className="min-w-0 flex-1 rounded-lg border border-border bg-surface px-2.5 py-1.5 text-sm text-foreground outline-none placeholder:text-text-muted disabled:opacity-50"
+              />
+              <button
+                type="button"
+                disabled={disabled || addingField || !newFieldLabel.trim()}
+                onClick={() => void submitNewField()}
+                className="rounded-lg border border-border px-3 py-1.5 text-xs font-medium text-foreground transition hover:bg-surface-soft disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                {addingField ? "Adding…" : "Add"}
+              </button>
+            </div>
+          )}
         </section>
       </div>
 
@@ -166,6 +309,14 @@ export default function TargetPicker({
           className="rounded-lg px-3 py-1.5 text-xs font-medium text-text-muted transition hover:text-foreground disabled:opacity-40"
         >
           Clear
+        </button>
+        <button
+          type="button"
+          disabled={disabled || filtered.length === 0}
+          onClick={() => onSelectAllVisible(filtered.map((t) => t.id))}
+          className="rounded-lg px-3 py-1.5 text-xs font-medium text-primary transition hover:underline disabled:opacity-40"
+        >
+          Select All{filtered.length ? ` (${filtered.length})` : ""}
         </button>
         <div className="flex-1" />
         <button

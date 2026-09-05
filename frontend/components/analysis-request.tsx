@@ -1,22 +1,43 @@
 "use client";
 
-import { ArrowRight, Loader2, Search } from "lucide-react";
+import { ArrowRight, Loader2, Save, Search } from "lucide-react";
 import { useState } from "react";
 
 import ExtractionInstruction from "@/components/extraction/extraction-instruction";
 import TargetPicker, {
   type CustomQuickPick,
 } from "@/components/extraction/target-picker";
+import {
+  addExtractionField,
+  createExtractionModel,
+  listExtractionModels,
+} from "@/lib/extraction-models";
 import type {
   DocumentTarget,
+  ExtractionJob,
+  ExtractionModel,
   ExtractTargetsResult,
   TargetType,
   UniversalExtractionResult,
 } from "@/types/document";
 
+const STAGE_LABELS: Record<string, string> = {
+  extracting_data: "Extracting selected fields…",
+  validating_results: "Validating results…",
+  complete: "Finishing up…",
+};
+
+function extractionStageLabel(job: ExtractionJob | null | undefined): string {
+  if (!job) return "Running extraction against detected document schema...";
+  if (job.status === "queued") return "Queued…";
+  if (job.stage && STAGE_LABELS[job.stage]) return STAGE_LABELS[job.stage];
+  return "Running extraction against detected document schema...";
+}
+
 interface AnalysisRequestProps {
   disabled?: boolean;
   waking?: boolean;
+  extractionJob?: ExtractionJob | null;
   targets?: DocumentTarget[];
   documentFamilyLabel?: string | null;
   schemaDiscovering?: boolean;
@@ -30,6 +51,10 @@ interface AnalysisRequestProps {
   onAnalyze: (
     instruction: string,
   ) => Promise<UniversalExtractionResult>;
+
+  onAddCustomField?: (label: string) => Promise<DocumentTarget | undefined>;
+  onRenameCustomField?: (targetKey: string, label: string) => Promise<void>;
+  onDeleteCustomField?: (targetKey: string) => Promise<void>;
 }
 
 const CUSTOM_QUICK_PICKS: CustomQuickPick[] = [
@@ -43,6 +68,7 @@ const CUSTOM_QUICK_PICKS: CustomQuickPick[] = [
 export default function AnalysisRequest({
   disabled = false,
   waking = false,
+  extractionJob = null,
   targets = [],
   documentFamilyLabel = null,
   schemaDiscovering = false,
@@ -50,6 +76,9 @@ export default function AnalysisRequest({
   onRetryDiscovery,
   onExtractTargets,
   onAnalyze,
+  onAddCustomField,
+  onRenameCustomField,
+  onDeleteCustomField,
 }: AnalysisRequestProps) {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [extracting, setExtracting] = useState(false);
@@ -61,7 +90,100 @@ export default function AnalysisRequest({
   const [asking, setAsking] = useState(false);
   const [askError, setAskError] = useState("");
 
+  const [savingSchema, setSavingSchema] = useState(false);
+  const [saveSchemaName, setSaveSchemaName] = useState("");
+  const [schemaActionError, setSchemaActionError] = useState("");
+  const [schemaActionBusy, setSchemaActionBusy] = useState(false);
+  const [savedModels, setSavedModels] = useState<ExtractionModel[] | null>(
+    null,
+  );
+  const [loadingModels, setLoadingModels] = useState(false);
+
   const busy = disabled || extracting || asking;
+
+  async function saveCurrentSelectionAsSchema() {
+    if (!saveSchemaName.trim() || selectedIds.size === 0) return;
+
+    setSchemaActionBusy(true);
+    setSchemaActionError("");
+
+    try {
+      const model = await createExtractionModel(
+        saveSchemaName.trim(),
+        `Saved from Extraction Workspace (${selectedIds.size} fields)`,
+      );
+
+      const selectedTargets = targets.filter((target) =>
+        selectedIds.has(target.id),
+      );
+
+      for (const target of selectedTargets) {
+        await addExtractionField(model.id, target.label, "", "text");
+      }
+
+      setSavingSchema(false);
+      setSaveSchemaName("");
+    } catch (error) {
+      setSchemaActionError(
+        error instanceof Error ? error.message : "Couldn't save schema.",
+      );
+    } finally {
+      setSchemaActionBusy(false);
+    }
+  }
+
+  async function openLoadSchema() {
+    setSchemaActionError("");
+    setLoadingModels(true);
+
+    try {
+      const models = await listExtractionModels();
+      setSavedModels(models);
+    } catch (error) {
+      setSchemaActionError(
+        error instanceof Error ? error.message : "Couldn't load schemas.",
+      );
+    } finally {
+      setLoadingModels(false);
+    }
+  }
+
+  async function applySchema(model: ExtractionModel) {
+    setSchemaActionBusy(true);
+    setSchemaActionError("");
+
+    try {
+      const nextSelected = new Set(selectedIds);
+
+      for (const field of model.fields) {
+        const match = targets.find(
+          (target) =>
+            target.label.toLowerCase() === field.field_name.toLowerCase(),
+        );
+
+        if (match) {
+          nextSelected.add(match.id);
+          continue;
+        }
+
+        if (onAddCustomField) {
+          const created = await onAddCustomField(field.field_name);
+          if (created) {
+            nextSelected.add(created.id);
+          }
+        }
+      }
+
+      setSelectedIds(nextSelected);
+      setSavedModels(null);
+    } catch (error) {
+      setSchemaActionError(
+        error instanceof Error ? error.message : "Couldn't apply schema.",
+      );
+    } finally {
+      setSchemaActionBusy(false);
+    }
+  }
 
   function toggleTarget(targetId: string) {
     setSelectedIds((current) => {
@@ -110,6 +232,29 @@ export default function AnalysisRequest({
 
     setSelectedIds(new Set(ids));
     void runExtraction(ids);
+  }
+
+  function selectAllVisible(targetIds: string[]) {
+    if (targetIds.length === 0) return;
+
+    setSelectedIds(new Set(targetIds));
+    void runExtraction(targetIds);
+  }
+
+  function toggleGroup(targetIds: string[]) {
+    setSelectedIds((current) => {
+      const allSelected = targetIds.every((id) => current.has(id));
+      const next = new Set(current);
+      for (const id of targetIds) {
+        if (allSelected) {
+          next.delete(id);
+        } else {
+          next.add(id);
+        }
+      }
+      return next;
+    });
+    setNoMatch(false);
   }
 
   function selectCustomQuickPick(pick: CustomQuickPick) {
@@ -211,12 +356,107 @@ export default function AnalysisRequest({
             selectedIds={selectedIds}
             disabled={busy}
             onToggle={toggleTarget}
+            onToggleGroup={toggleGroup}
             onSelectAll={selectAllOfType}
+            onSelectAllVisible={selectAllVisible}
             onClear={clearSelection}
             onSelectCustom={selectCustomQuickPick}
+            onAddCustomField={onAddCustomField}
+            onRenameCustomField={onRenameCustomField}
+            onDeleteCustomField={onDeleteCustomField}
           />
         )}
       </div>
+
+      {!schemaDiscovering && !schemaDiscoveryError && (
+        <div className="mt-3 flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            disabled={busy || selectedIds.size === 0}
+            onClick={() => {
+              setSavedModels(null);
+              setSavingSchema((value) => !value);
+            }}
+            className="inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-medium text-text-secondary transition hover:text-foreground disabled:opacity-40"
+          >
+            <Save className="h-3.5 w-3.5" />
+            Save schema
+          </button>
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() => {
+              setSavingSchema(false);
+              void openLoadSchema();
+            }}
+            className="rounded-lg px-2.5 py-1.5 text-xs font-medium text-text-secondary transition hover:text-foreground disabled:opacity-40"
+          >
+            Reuse saved schema
+          </button>
+        </div>
+      )}
+
+      {savingSchema && (
+        <div className="mt-2 flex items-center gap-2 rounded-xl border border-border bg-surface-soft p-2.5">
+          <input
+            type="text"
+            value={saveSchemaName}
+            onChange={(event) => setSaveSchemaName(event.target.value)}
+            placeholder={`Name this schema (${selectedIds.size} fields)`}
+            className="flex-1 bg-transparent px-1.5 text-sm text-foreground outline-none placeholder:text-text-muted"
+          />
+          <button
+            type="button"
+            disabled={schemaActionBusy || !saveSchemaName.trim()}
+            onClick={() => void saveCurrentSelectionAsSchema()}
+            className="btn-secondary px-3 py-1.5 text-xs disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            {schemaActionBusy ? "Saving…" : "Save"}
+          </button>
+        </div>
+      )}
+
+      {savedModels !== null && (
+        <div className="mt-2 rounded-xl border border-border bg-surface-soft p-2.5">
+          {loadingModels ? (
+            <p className="px-1.5 py-1 text-sm text-text-secondary">
+              Loading saved schemas…
+            </p>
+          ) : savedModels.length === 0 ? (
+            <p className="px-1.5 py-1 text-sm text-text-secondary">
+              No saved schemas yet.
+            </p>
+          ) : (
+            <ul className="divide-y divide-border">
+              {savedModels.map((model) => (
+                <li
+                  key={model.id}
+                  className="flex items-center justify-between gap-2 px-1.5 py-1.5"
+                >
+                  <span className="min-w-0 truncate text-sm text-foreground">
+                    {model.name}{" "}
+                    <span className="text-xs text-text-muted">
+                      ({model.fields.length} fields)
+                    </span>
+                  </span>
+                  <button
+                    type="button"
+                    disabled={schemaActionBusy}
+                    onClick={() => void applySchema(model)}
+                    className="btn-secondary px-2.5 py-1 text-xs disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    Apply
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
+
+      {schemaActionError && (
+        <p className="mt-2 text-xs text-danger">{schemaActionError}</p>
+      )}
 
       <button
         type="button"
@@ -241,7 +481,15 @@ export default function AnalysisRequest({
         <div className="mt-4 rounded-xl border border-primary/15 bg-primary/5 px-3.5 py-2.5 text-sm text-text-secondary">
           {waking
             ? "Waking processing service — first request after idle can take up to a minute."
-            : "Running extraction against detected document schema..."}
+            : extractionStageLabel(extractionJob)}
+          {extractionJob && extractionJob.progress > 0 && (
+            <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-primary/10">
+              <div
+                className="h-full rounded-full bg-primary transition-all"
+                style={{ width: `${extractionJob.progress}%` }}
+              />
+            </div>
+          )}
         </div>
       )}
 

@@ -21,13 +21,16 @@ import ImportSourceTabs from "@/components/import-source-tabs";
 import {
   analyzeContract,
   confirmRelationship,
+  createCustomTarget,
+  deleteCustomTarget,
   detectStructures,
   discoverSchema,
   extractDocumentPages,
-  extractTargets,
+  extractTargetsViaJob,
   getDocumentPages,
   getExtractionProgress,
   getStructuredOutput,
+  renameCustomTarget,
   universalExtract,
 } from "@/lib/documents";
 import { listExtractionModels } from "@/lib/extraction-models";
@@ -36,6 +39,7 @@ import type {
   DiscoverSchemaResult,
   DocumentPage,
   ExtractTargetsResult,
+  ExtractionJob,
   ExtractionModel,
   ExtractionProgress,
   ExtractionSummary,
@@ -72,6 +76,8 @@ export default function NewExtractionPage() {
     useState<ExtractionProgress | null>(null);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const [waking, setWaking] = useState(false);
+  const [targetExtractionJob, setTargetExtractionJob] =
+    useState<ExtractionJob | null>(null);
 
   const [analyzeStageIndex, setAnalyzeStageIndex] = useState(0);
   const [wasAnalyzing, setWasAnalyzing] = useState(false);
@@ -222,6 +228,58 @@ export default function NewExtractionPage() {
     }
   }
 
+  async function handleAddCustomField(label: string) {
+    if (!document) return;
+
+    const target = await createCustomTarget(document.document_id, label);
+
+    setSchemaDiscovery((current) =>
+      current
+        ? { ...current, targets: [...current.targets, target] }
+        : current,
+    );
+
+    return target;
+  }
+
+  async function handleRenameCustomField(targetKey: string, label: string) {
+    if (!document) return;
+
+    const updated = await renameCustomTarget(
+      document.document_id,
+      targetKey,
+      label,
+    );
+
+    setSchemaDiscovery((current) =>
+      current
+        ? {
+            ...current,
+            targets: current.targets.map((target) =>
+              target.key === targetKey ? updated : target,
+            ),
+          }
+        : current,
+    );
+  }
+
+  async function handleDeleteCustomField(targetKey: string) {
+    if (!document) return;
+
+    await deleteCustomTarget(document.document_id, targetKey);
+
+    setSchemaDiscovery((current) =>
+      current
+        ? {
+            ...current,
+            targets: current.targets.filter(
+              (target) => target.key !== targetKey,
+            ),
+          }
+        : current,
+    );
+  }
+
   async function handleUploadComplete(
     uploadedDocument: UploadedDocument,
   ) {
@@ -319,9 +377,10 @@ export default function NewExtractionPage() {
     }
 
     try {
-      const result = await extractTargets(
+      const result = await extractTargetsViaJob(
         document.document_id,
         targetIds,
+        (job) => setTargetExtractionJob(job),
         () => setWaking(true),
       );
 
@@ -336,6 +395,7 @@ export default function NewExtractionPage() {
       return result;
     } finally {
       setWaking(false);
+      setTargetExtractionJob(null);
     }
   }
 
@@ -526,6 +586,10 @@ export default function NewExtractionPage() {
                     onAnalyze={handleAnalyze}
                     onExtractTargets={handleExtractTargets}
                     waking={waking}
+                    extractionJob={targetExtractionJob}
+                    onAddCustomField={handleAddCustomField}
+                    onRenameCustomField={handleRenameCustomField}
+                    onDeleteCustomField={handleDeleteCustomField}
                     targets={(schemaDiscovery?.targets ?? []).filter(
                       (target) =>
                         target.source !== "template" &&
