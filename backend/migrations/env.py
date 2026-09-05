@@ -14,6 +14,7 @@ from app.models import (  # noqa: F401
     classification_audit_log as classification_audit_log_model,
 )
 from app.models import document as document_model  # noqa: F401
+from app.models import extraction_job as extraction_job_model  # noqa: F401
 from app.models import document_address as document_address_model  # noqa: F401
 from app.models import (  # noqa: F401
     document_amendment_history as document_amendment_history_model,

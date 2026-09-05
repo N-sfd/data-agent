@@ -18,6 +18,11 @@ from app.services.ai_context import build_page_context
 from app.services.ai_provider import AIProvider, AIProviderError
 from app.services.ai_value_mapping import map_ai_value
 from app.services.clause_citation_scanner import scan_pages_for_clause_citations
+from app.services.confidence_engine import (
+    compute_confidence,
+    confidence_band,
+    display_method,
+)
 from app.services.detected_target_store import load_document_targets
 from app.services.form_field_search import search_form_fields
 from app.services.generic_label_extractor import extract_labeled_value
@@ -61,14 +66,22 @@ def _resolve_scalar_from_source_examples(
         if not verified:
             continue
 
+        confidence = compute_confidence(
+            method="source_evidence",
+            occurrence_count=target.occurrence_count,
+            page=page,
+        )
+
         return ScalarTargetResult(
             target=target.key,
             normalized_key=target.key,
             value=value,
             page=page_number,
-            confidence=max(target.confidence, 0.85),
+            confidence=confidence,
+            confidence_band=confidence_band(confidence),
             verified=True,
             extraction_method="source_evidence",
+            display_method=display_method("source_evidence", page),
             evidence={
                 "page_number": page_number,
                 "source_text": snippet,
@@ -110,14 +123,22 @@ def _resolve_scalar_target(
                 )
                 if not verified:
                     continue
+                confidence = compute_confidence(
+                    method="form_field",
+                    match_exactness=score,
+                    occurrence_count=target.occurrence_count,
+                    page=page,
+                )
                 return ScalarTargetResult(
                     target=target.key,
                     normalized_key=target.key,
                     value=value,
                     page=page.page_number,
-                    confidence=score,
+                    confidence=confidence,
+                    confidence_band=confidence_band(confidence),
                     verified=verified,
                     extraction_method="form_field",
+                    display_method=display_method("form_field", page),
                     evidence={
                         "page_number": page.page_number,
                         "source_text": snippet,
@@ -137,14 +158,21 @@ def _resolve_scalar_target(
             )
             if not verified:
                 continue
+            confidence = compute_confidence(
+                method="label_value",
+                occurrence_count=target.occurrence_count,
+                page=page,
+            )
             return ScalarTargetResult(
                 target=target.key,
                 normalized_key=target.key,
                 value=label_value,
                 page=page.page_number,
-                confidence=0.80,
+                confidence=confidence,
+                confidence_band=confidence_band(confidence),
                 verified=verified,
                 extraction_method="label_value",
+                display_method=display_method("label_value", page),
                 evidence={
                     "page_number": page.page_number,
                     "source_text": label_value,
@@ -298,15 +326,24 @@ async def _run_batched_scalar_ai_fallback(
             warnings.append(warning)
             continue
 
+        ai_page = page_lookup.get(value.evidence.page_number)
+        confidence = compute_confidence(
+            method="ai",
+            match_exactness=value.confidence,
+            page=ai_page,
+        )
+
         scalars.append(
             ScalarTargetResult(
                 target=matched.key,
                 normalized_key=matched.key,
                 value=value.value,
                 page=value.evidence.page_number,
-                confidence=value.confidence,
+                confidence=confidence,
+                confidence_band=confidence_band(confidence),
                 verified=value.verified,
                 extraction_method="ai",
+                display_method=display_method("ai", ai_page),
                 evidence=value.evidence,
             )
         )
@@ -389,15 +426,23 @@ async def _run_per_target_ai_fallback(
                     f"AI result for '{target.label}' failed source validation."
                 )
                 continue
+            ai_page = page_lookup.get(value.evidence.page_number)
+            confidence = compute_confidence(
+                method="ai",
+                match_exactness=value.confidence,
+                page=ai_page,
+            )
             return (
                 ScalarTargetResult(
                     target=target.key,
                     normalized_key=target.key,
                     value=value.value,
                     page=value.evidence.page_number,
-                    confidence=value.confidence,
+                    confidence=confidence,
+                    confidence_band=confidence_band(confidence),
                     verified=value.verified,
                     extraction_method="ai",
+                    display_method=display_method("ai", ai_page),
                     evidence=value.evidence,
                 ),
                 warnings,

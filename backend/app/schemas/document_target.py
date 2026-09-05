@@ -58,8 +58,10 @@ class ScalarTargetResult(BaseModel):
     value: Any
     page: int
     confidence: float
+    confidence_band: Literal["high", "medium", "low"] = "medium"
     verified: bool
     extraction_method: str
+    display_method: str = ""
     evidence: SourceEvidence
 
 

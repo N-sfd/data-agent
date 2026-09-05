@@ -7,6 +7,7 @@ from app.api import (
     documents,
     extraction_models,
     financial_analysis,
+    jobs,
     page_extraction,
     system,
     universal_extraction,
@@ -26,6 +27,7 @@ from app.models import (  # noqa: F401
     classification_audit_log as classification_audit_log_model,
 )
 from app.models import document as document_model  # noqa: F401
+from app.models import extraction_job as extraction_job_model  # noqa: F401
 from app.models import document_address as document_address_model  # noqa: F401
 from app.models import (  # noqa: F401
     document_amendment_history as document_amendment_history_model,
@@ -154,6 +156,18 @@ app.include_router(
     tags=["System"],
 )
 
+app.include_router(
+    jobs.router,
+    prefix="/api/documents",
+    tags=["Jobs"],
+)
+
+app.include_router(
+    jobs.v1_router,
+    prefix="/v1/jobs",
+    tags=["Jobs"],
+)
+
 
 @app.on_event("startup")
 async def create_database_tables() -> None:
@@ -174,17 +188,45 @@ async def create_database_tables() -> None:
             )
 
         run_alembic_upgrade()
-        return
+    else:
+        # Local development: create_all plus additive column patches for
+        # SQLite databases created before those columns existed.
+        # Production always goes through Alembic (above) so Postgres
+        # schema changes are never silently skipped.
+        Base.metadata.create_all(bind=engine)
+        ensure_document_page_columns(engine)
+        ensure_documents_columns(engine)
+        ensure_document_metadata_field_columns(engine)
+        ensure_extraction_model_columns(engine)
 
-    # Local development: create_all plus additive column patches for
-    # SQLite databases created before those columns existed. Production
-    # always goes through Alembic (above) so Postgres schema changes are
-    # never silently skipped.
-    Base.metadata.create_all(bind=engine)
-    ensure_document_page_columns(engine)
-    ensure_documents_columns(engine)
-    ensure_document_metadata_field_columns(engine)
-    ensure_extraction_model_columns(engine)
+    _recover_interrupted_jobs()
+
+
+def _recover_interrupted_jobs() -> None:
+    """In-process background tasks don't survive a process restart —
+    anything still queued/processing when the process died is stuck
+    forever otherwise. Surface it as a clean failure instead."""
+
+    from datetime import datetime, timezone
+
+    from app.database.session import SessionLocal
+    from app.models.extraction_job import ExtractionJob
+
+    database = SessionLocal()
+
+    try:
+        stuck_jobs = database.query(ExtractionJob).filter(
+            ExtractionJob.status.in_(["queued", "processing"])
+        )
+
+        for job in stuck_jobs:
+            job.status = "failed"
+            job.error_message = "Interrupted by a server restart."
+            job.completed_at = datetime.now(timezone.utc)
+
+        database.commit()
+    finally:
+        database.close()
 
 
 @app.get("/")
