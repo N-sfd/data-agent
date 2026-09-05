@@ -18,8 +18,10 @@ from app.database.migrate import (
     ensure_document_page_columns,
     ensure_documents_columns,
     ensure_extraction_model_columns,
+    run_alembic_upgrade,
 )
 from app.database.session import engine
+from app.services.document_storage import is_remote_storage_configured
 from app.models import (  # noqa: F401
     classification_audit_log as classification_audit_log_model,
 )
@@ -155,6 +157,29 @@ app.include_router(
 
 @app.on_event("startup")
 async def create_database_tables() -> None:
+    if settings.app_env == "production":
+        if settings.resolved_database_url.startswith("sqlite"):
+            raise RuntimeError(
+                "APP_ENV=production requires a persistent PostgreSQL "
+                "DATABASE_URL — refusing to start on ephemeral SQLite, "
+                "which does not survive a restart or redeploy."
+            )
+
+        if not is_remote_storage_configured(settings):
+            raise RuntimeError(
+                "APP_ENV=production requires SUPABASE_URL and "
+                "SUPABASE_SERVICE_ROLE_KEY to be set — refusing to start "
+                "without persistent object storage for uploaded "
+                "documents."
+            )
+
+        run_alembic_upgrade()
+        return
+
+    # Local development: create_all plus additive column patches for
+    # SQLite databases created before those columns existed. Production
+    # always goes through Alembic (above) so Postgres schema changes are
+    # never silently skipped.
     Base.metadata.create_all(bind=engine)
     ensure_document_page_columns(engine)
     ensure_documents_columns(engine)

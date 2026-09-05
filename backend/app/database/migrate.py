@@ -1,5 +1,26 @@
+from pathlib import Path
+
+from alembic import command
+from alembic.config import Config
 from sqlalchemy import text
 from sqlalchemy.engine import Engine
+
+_BACKEND_ROOT = Path(__file__).resolve().parents[2]
+
+
+def run_alembic_upgrade() -> None:
+    """Apply all pending Alembic migrations (production schema path).
+
+    Local development keeps using create_all + ensure_*_columns below
+    for convenience; production must go through real migrations so
+    schema changes on Postgres are never silently skipped.
+    """
+
+    alembic_cfg = Config(str(_BACKEND_ROOT / "alembic.ini"))
+    alembic_cfg.set_main_option(
+        "script_location", str(_BACKEND_ROOT / "migrations")
+    )
+    command.upgrade(alembic_cfg, "head")
 
 
 DOCUMENT_PAGE_COLUMNS: dict[str, str] = {

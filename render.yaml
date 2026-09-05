@@ -1,3 +1,9 @@
+databases:
+  - name: data-agent-db
+    plan: free
+    databaseName: data_agent
+    user: data_agent
+
 services:
   - type: web
     name: data-agent-backend
@@ -12,7 +18,9 @@ services:
       - key: DEBUG
         value: "false"
       - key: DATABASE_URL
-        sync: false
+        fromDatabase:
+          name: data-agent-db
+          property: connectionString
       - key: FRONTEND_URL
         sync: false
       - key: UPLOAD_DIRECTORY
