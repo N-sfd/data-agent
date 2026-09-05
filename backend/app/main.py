@@ -10,6 +10,7 @@ from app.api import (
     jobs,
     page_extraction,
     system,
+    target_corrections,
     universal_extraction,
 )
 from app.core.config import get_settings
@@ -76,6 +77,9 @@ from app.models import (  # noqa: F401
 from app.models import page_text_block as page_text_block_model  # noqa: F401
 from app.models import (  # noqa: F401
     relationship_audit_log as relationship_audit_log_model,
+)
+from app.models import (  # noqa: F401
+    target_correction as target_correction_model,
 )
 
 settings = get_settings()
@@ -166,6 +170,12 @@ app.include_router(
     jobs.v1_router,
     prefix="/v1/jobs",
     tags=["Jobs"],
+)
+
+app.include_router(
+    target_corrections.router,
+    prefix="/api/documents",
+    tags=["Target Corrections"],
 )
 
 

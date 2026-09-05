@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { Check, Copy, Download, FileText } from "lucide-react";
 
+import { downloadBlob, toCsv, toTsv } from "@/lib/export";
 import type { UniversalTable } from "@/types/document";
 
 interface TableResultProps {
@@ -14,47 +15,12 @@ interface TableResultProps {
   }) => void;
 }
 
-function downloadBlob(content: string, filename: string, type: string) {
-  const blob = new Blob([content], { type });
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = filename;
-  link.click();
-  URL.revokeObjectURL(url);
-}
-
-function toCsv(table: UniversalTable): string {
-  const lines = [
-    table.headers.join(","),
-    ...table.rows.map((row) =>
-      table.headers
-        .map((header) => {
-          const value = String(row[header] ?? "");
-          return `"${value.replaceAll('"', '""')}"`;
-        })
-        .join(","),
-    ),
-  ];
-  return lines.join("\n");
-}
-
-function toTsv(table: UniversalTable): string {
-  const lines = [
-    table.headers.join("\t"),
-    ...table.rows.map((row) =>
-      table.headers.map((header) => String(row[header] ?? "")).join("\t"),
-    ),
-  ];
-  return lines.join("\n");
-}
-
 export default function TableResult({ table, onViewSource }: TableResultProps) {
   const [copied, setCopied] = useState(false);
 
   async function copyTable() {
     try {
-      await navigator.clipboard.writeText(toTsv(table));
+      await navigator.clipboard.writeText(toTsv(table.headers, table.rows));
       setCopied(true);
       setTimeout(() => setCopied(false), 1500);
     } catch {
@@ -65,7 +31,7 @@ export default function TableResult({ table, onViewSource }: TableResultProps) {
 
   function exportCsv() {
     downloadBlob(
-      toCsv(table),
+      toCsv(table.headers, table.rows),
       `table-page-${table.page_number}.csv`,
       "text/csv;charset=utf-8;",
     );
@@ -156,14 +122,14 @@ export default function TableResult({ table, onViewSource }: TableResultProps) {
         </div>
       </div>
 
-      <div className="overflow-x-auto">
+      <div className="max-h-[32rem] overflow-auto">
         <table className="min-w-full text-sm">
-          <thead className="bg-surface-soft">
+          <thead className="sticky top-0 z-10 bg-surface-soft">
             <tr>
               {table.headers.map((header) => (
                 <th
                   key={header}
-                  className="whitespace-nowrap border-b border-border px-4 py-3 text-left font-semibold text-foreground"
+                  className="whitespace-nowrap border-b border-border bg-surface-soft px-4 py-3 text-left font-semibold text-foreground"
                 >
                   {header}
                 </th>

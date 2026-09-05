@@ -1,6 +1,6 @@
 "use client";
 
-import { CheckCircle2, ChevronDown, ChevronRight, Eye, Sparkles } from "lucide-react";
+import { CheckCircle2, ChevronDown, ChevronRight, Eye } from "lucide-react";
 import { useMemo, useState } from "react";
 
 import type { SourceViewRequest } from "@/components/source-verification-panel";
@@ -89,16 +89,41 @@ function consolidateSources(items: UniversalValue[]): SourceEntry[] {
   );
 }
 
-function MethodBadge({ isAi }: { isAi: boolean }) {
-  return isAi ? (
-    <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-accent/10 px-2 py-0.5 text-[11px] font-semibold text-accent">
-      <Sparkles className="h-3 w-3" />
-      AI
-    </span>
-  ) : (
+function ValidationBadge({ verified }: { verified: boolean }) {
+  return verified ? (
     <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-success/10 px-2 py-0.5 text-[11px] font-semibold text-success">
       <CheckCircle2 className="h-3 w-3" />
-      Verified
+      Valid
+    </span>
+  ) : (
+    <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-warning/10 px-2 py-0.5 text-[11px] font-semibold text-warning">
+      Unverified
+    </span>
+  );
+}
+
+const CONFIDENCE_BAND_STYLES: Record<string, string> = {
+  high: "bg-success/10 text-success",
+  medium: "bg-warning/10 text-warning",
+  low: "bg-danger/10 text-danger",
+};
+
+function ConfidenceBadge({
+  confidence,
+  band,
+}: {
+  confidence: number;
+  band?: string;
+}) {
+  const resolvedBand =
+    band ?? (confidence >= 0.85 ? "high" : confidence >= 0.6 ? "medium" : "low");
+  const style = CONFIDENCE_BAND_STYLES[resolvedBand] ?? CONFIDENCE_BAND_STYLES.medium;
+
+  return (
+    <span
+      className={`inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-semibold capitalize ${style}`}
+    >
+      {resolvedBand} · {Math.round(confidence * 100)}%
     </span>
   );
 }
@@ -139,7 +164,6 @@ function ValueRow({
 }) {
   const [expanded, setExpanded] = useState(false);
   const first = group.items[0];
-  const isAi = first.extraction_method === "ai";
   const anyVerified = group.items.some((item) => item.verified);
   const pages = Array.from(
     new Set(group.items.map((item) => item.evidence.page_number)),
@@ -168,6 +192,9 @@ function ValueRow({
         <td className="px-3 py-2.5 align-top text-sm font-medium text-foreground sm:px-4">
           {String(group.value ?? "")}
         </td>
+        <td className="whitespace-nowrap px-3 py-2.5 align-top sm:px-4">
+          <ConfidenceBadge confidence={first.confidence} band={first.confidence_band} />
+        </td>
         <td className="min-w-[7rem] px-3 py-2.5 align-top text-xs text-text-secondary sm:px-4">
           <span className="font-medium text-foreground">
             {pages.length > 1 ? `pp. ${pages.join(", ")}` : `p. ${pages[0]}`}
@@ -182,7 +209,12 @@ function ValueRow({
           </p>
         </td>
         <td className="whitespace-nowrap px-3 py-2.5 align-top sm:px-4">
-          <MethodBadge isAi={isAi} />
+          <span className="text-xs font-medium text-foreground">
+            {first.display_method || methodLabel(first.extraction_method)}
+          </span>
+        </td>
+        <td className="whitespace-nowrap px-3 py-2.5 align-top sm:px-4">
+          <ValidationBadge verified={anyVerified} />
         </td>
         <td className="hidden whitespace-nowrap px-3 py-2.5 align-top sm:table-cell sm:px-4">
           {onViewSource ? (
@@ -288,13 +320,19 @@ export default function FieldResult({
               Value
             </th>
             <th className="whitespace-nowrap border-b border-border px-3 py-2.5 text-left text-xs font-semibold text-foreground sm:px-4">
+              Confidence
+            </th>
+            <th className="whitespace-nowrap border-b border-border px-3 py-2.5 text-left text-xs font-semibold text-foreground sm:px-4">
               Source
             </th>
             <th className="whitespace-nowrap border-b border-border px-3 py-2.5 text-left text-xs font-semibold text-foreground sm:px-4">
               Method
             </th>
+            <th className="whitespace-nowrap border-b border-border px-3 py-2.5 text-left text-xs font-semibold text-foreground sm:px-4">
+              Validation
+            </th>
             <th className="hidden whitespace-nowrap border-b border-border px-3 py-2.5 text-left text-xs font-semibold text-foreground sm:table-cell sm:px-4">
-              Evidence
+              Actions
             </th>
           </tr>
         </thead>

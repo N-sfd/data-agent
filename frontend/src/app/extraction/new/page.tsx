@@ -100,6 +100,9 @@ export default function NewExtractionPage() {
 
   const [targetResult, setTargetResult] =
     useState<ExtractTargetsResult | null>(null);
+  const [targetResultDurationMs, setTargetResultDurationMs] = useState<
+    number | null
+  >(null);
 
   const [workflowError, setWorkflowError] = useState("");
 
@@ -376,6 +379,8 @@ export default function NewExtractionPage() {
       throw new Error("Upload a document first.");
     }
 
+    const startedAt = Date.now();
+
     try {
       const result = await extractTargetsViaJob(
         document.document_id,
@@ -385,6 +390,7 @@ export default function NewExtractionPage() {
       );
 
       setTargetResult(result);
+      setTargetResultDurationMs(Date.now() - startedAt);
       requestAnimationFrame(() => {
         targetResultRef.current?.scrollIntoView({
           behavior: "smooth",
@@ -558,6 +564,7 @@ export default function NewExtractionPage() {
                       setPages([]);
                       setUniversalResult(null);
                       setTargetResult(null);
+                      setTargetResultDurationMs(null);
                       setContractAnalysis(null);
                       setStructuredOutput(null);
                       setStructureDetection(null);
@@ -746,7 +753,7 @@ export default function NewExtractionPage() {
           <div className="extraction-workspace -mx-[max(1.5rem,3vw)] mt-8">
             <div
               ref={targetResultRef}
-              className="extraction-bar-inner animate-fade-in"
+              className="extraction-workspace-inner animate-fade-in"
             >
               <p className="text-base font-medium text-foreground">
                 Extraction Result
@@ -760,6 +767,9 @@ export default function NewExtractionPage() {
                       target.source_examples.length > 0,
                   )}
                   documentId={document.document_id}
+                  documentName={document.original_filename}
+                  status="complete"
+                  processingDurationMs={targetResultDurationMs}
                   pageCount={document.page_count}
                   sourceRequest={sourceRequest}
                   onViewSource={setSourceRequest}

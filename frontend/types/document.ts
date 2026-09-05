@@ -259,6 +259,17 @@ export interface ExtractTargetsResult {
   warnings: string[];
 }
 
+export interface TargetCorrection {
+  id: number;
+  document_id: string;
+  normalized_key: string;
+  original_value: unknown;
+  corrected_value: unknown;
+  evidence_snapshot: SourceEvidence | null;
+  changed_by: string | null;
+  created_at: string;
+}
+
 export type ExtractionJobType = "processing" | "extraction";
 export type ExtractionJobStatus = "queued" | "processing" | "complete" | "failed";
 
@@ -398,7 +409,11 @@ export interface UniversalValue {
 
   confidence: number;
 
+  confidence_band?: ConfidenceBand;
+
   extraction_method: string;
+
+  display_method?: string;
 
   evidence: SourceEvidence;
 
