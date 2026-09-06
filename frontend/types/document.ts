@@ -259,10 +259,13 @@ export interface ExtractTargetsResult {
   warnings: string[];
 }
 
+export type CorrectionAction = "edit" | "verify";
+
 export interface TargetCorrection {
   id: number;
   document_id: string;
   normalized_key: string;
+  action: CorrectionAction;
   original_value: unknown;
   corrected_value: unknown;
   evidence_snapshot: SourceEvidence | null;

@@ -1,14 +1,17 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { CheckCircle2, Loader2 } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { Loader2 } from "lucide-react";
 
 import PdfPageViewer from "@/components/pdf-page-viewer";
-import PdfToolbar from "@/components/pdf-toolbar";
-import { getPageRender } from "@/lib/documents";
-import type { PageRender } from "@/types/document";
+import PdfToolbar, { type SearchMatch } from "@/components/pdf-toolbar";
+import { getDocumentPages, getPageRender } from "@/lib/documents";
+import type { DocumentPage, PageRender } from "@/types/document";
 
 export interface SourceViewRequest {
+  /** Stable id of the selected result (FieldRow.id / table id) — used by
+   * the results list to keep the clicked row visually selected. */
+  id?: string;
   pageNumber: number;
   highlightText?: string | null;
   label?: string;
@@ -19,13 +22,18 @@ export interface SourceViewRequest {
 
 interface SourceVerificationPanelProps {
   documentId: string;
+  documentName: string;
   pageCount: number;
   request: SourceViewRequest | null;
-  onRequestChange?: (request: SourceViewRequest | null) => void;
+}
+
+function renderCacheKey(page: number, highlight: string | null): string {
+  return `${page}::${highlight ?? ""}`;
 }
 
 export default function SourceVerificationPanel({
   documentId,
+  documentName,
   pageCount,
   request,
 }: SourceVerificationPanelProps) {
@@ -35,6 +43,19 @@ export default function SourceVerificationPanel({
   const [renderLoading, setRenderLoading] = useState(false);
   const [renderError, setRenderError] = useState("");
   const [zoom, setZoom] = useState(1);
+  const [rotation, setRotation] = useState<0 | 90 | 180 | 270>(0);
+
+  const [documentPages, setDocumentPages] = useState<DocumentPage[] | null>(
+    null,
+  );
+  const [searching, setSearching] = useState(false);
+  const [searchResults, setSearchResults] = useState<SearchMatch[] | null>(
+    null,
+  );
+  const [lastQuery, setLastQuery] = useState("");
+
+  const viewerRef = useRef<HTMLDivElement | null>(null);
+  const renderCacheRef = useRef<Map<string, PageRender>>(new Map());
 
   useEffect(() => {
     if (!request) return;
@@ -43,13 +64,20 @@ export default function SourceVerificationPanel({
   }, [request]);
 
   useEffect(() => {
-    if (!documentId || !request) return;
+    if (!documentId) return;
 
     let active = true;
+    const cacheKey = renderCacheKey(currentPage, highlightText);
+    const cached = renderCacheRef.current.get(cacheKey);
+
+    if (cached) {
+      setPageRender(cached);
+      setRenderError("");
+    }
 
     async function loadPage() {
       setRenderLoading(true);
-      setRenderError("");
+      if (!cached) setRenderError("");
 
       try {
         const render = await getPageRender(
@@ -57,9 +85,29 @@ export default function SourceVerificationPanel({
           currentPage,
           highlightText ?? undefined,
         );
-        if (active) setPageRender(render);
+        if (!active) return;
+
+        renderCacheRef.current.set(cacheKey, render);
+        setPageRender(render);
+        setRenderError("");
+
+        // Prefetch the next plain page in the background so Next feels
+        // instant, without ever keeping more than one page mounted.
+        const nextPage = currentPage + 1;
+        if (nextPage <= pageCount) {
+          const nextKey = renderCacheKey(nextPage, null);
+          if (!renderCacheRef.current.has(nextKey)) {
+            getPageRender(documentId, nextPage)
+              .then((nextRender) => {
+                renderCacheRef.current.set(nextKey, nextRender);
+              })
+              .catch(() => {
+                // Best-effort — the real fetch happens again on navigation.
+              });
+          }
+        }
       } catch (error) {
-        if (active) {
+        if (active && !cached) {
           setRenderError(
             error instanceof Error
               ? error.message
@@ -76,79 +124,117 @@ export default function SourceVerificationPanel({
     return () => {
       active = false;
     };
-  }, [documentId, currentPage, highlightText, request]);
+  }, [documentId, currentPage, highlightText, pageCount]);
 
-  if (!request) {
-    return (
-      <div className="flex h-full min-h-[320px] flex-col items-center justify-center rounded-xl border border-dashed border-border bg-surface-soft p-8 text-center">
-        <p className="text-sm font-medium text-foreground">Source document</p>
-        <p className="mt-1 max-w-xs text-sm leading-6 text-text-secondary">
-          Click any extracted value to open the exact page with the source
-          highlighted.
-        </p>
-      </div>
+  // Once a highlighted render loads, make sure the highlighted region is
+  // actually within the visible scroll area (matters once zoomed in).
+  useEffect(() => {
+    if (!pageRender?.highlight) return;
+    const frame = requestAnimationFrame(() => {
+      viewerRef.current
+        ?.querySelector("[data-evidence-highlight]")
+        ?.scrollIntoView({ block: "center", inline: "center", behavior: "smooth" });
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [pageRender]);
+
+  function handleRotate() {
+    setRotation((current) =>
+      current === 270 ? 0 : ((current + 90) as 0 | 90 | 180 | 270),
     );
+  }
+
+  function handleFitWidth() {
+    if (!viewerRef.current || !pageRender) return;
+    const available = viewerRef.current.clientWidth - 32;
+    const isSideways = rotation === 90 || rotation === 270;
+    const naturalWidth = isSideways ? pageRender.page_height : pageRender.page_width;
+    if (available > 0 && naturalWidth > 0) {
+      setZoom(Math.max(0.5, Math.min(2.5, +(available / naturalWidth).toFixed(2))));
+    }
+  }
+
+  async function handleSearch(query: string) {
+    setSearching(true);
+    setLastQuery(query);
+
+    try {
+      let pages = documentPages;
+
+      if (!pages) {
+        pages = await getDocumentPages(documentId);
+        setDocumentPages(pages);
+      }
+
+      const needle = query.toLowerCase();
+
+      const results: SearchMatch[] = pages
+        .map((page) => {
+          const haystack = page.final_text.toLowerCase();
+          let count = 0;
+          let index = haystack.indexOf(needle);
+
+          while (index !== -1) {
+            count += 1;
+            index = haystack.indexOf(needle, index + needle.length);
+          }
+
+          return { pageNumber: page.page_number, matches: count };
+        })
+        .filter((result) => result.matches > 0);
+
+      setSearchResults(results);
+    } catch {
+      setSearchResults([]);
+    } finally {
+      setSearching(false);
+    }
+  }
+
+  function handleJumpToResult(pageNumber: number) {
+    setCurrentPage(pageNumber);
+    setHighlightText(lastQuery);
   }
 
   return (
     <div className="flex h-full min-h-[420px] flex-col overflow-hidden rounded-xl border border-border bg-surface">
-      <div className="grid min-h-0 flex-1 lg:grid-cols-[minmax(0,0.42fr)_minmax(0,0.58fr)]">
-        <div className="border-b border-border p-4 lg:border-b-0 lg:border-r">
-          <p className="text-[11px] font-semibold uppercase tracking-wide text-text-muted">
-            Extracted result
+      <div className="flex shrink-0 items-center justify-between gap-3 border-b border-border px-4 py-3">
+        <div className="min-w-0">
+          <p className="truncate text-sm font-semibold text-foreground">
+            {documentName}
           </p>
-          <p className="mt-2 text-xs font-semibold uppercase tracking-wide text-text-muted">
-            {request.label ?? "Field"}
+          <p className="text-xs text-text-secondary">
+            Page {currentPage} of {pageCount}
           </p>
-          <p className="mt-1 break-all text-lg font-semibold text-foreground">
-            {request.value ?? "—"}
-          </p>
-          <div className="mt-3 flex flex-wrap items-center gap-2 text-xs">
-            {request.verified !== false && (
-              <span className="inline-flex items-center gap-1 rounded-full bg-success/10 px-2 py-0.5 font-semibold text-success">
-                <CheckCircle2 className="h-3 w-3" />
-                Verified
-              </span>
-            )}
-            <span className="text-text-secondary">Page {request.pageNumber}</span>
-            {request.confidence !== undefined && (
-              <span className="text-text-muted">
-                {Math.round(request.confidence * 100)}% confidence
-              </span>
-            )}
-          </div>
         </div>
+        {renderLoading && (
+          <Loader2 className="h-4 w-4 shrink-0 animate-spin text-text-muted" />
+        )}
+      </div>
 
-        <div className="flex min-h-0 flex-col">
-          <div className="shrink-0 border-b border-border">
-            <PdfToolbar
-              currentPage={currentPage}
-              pageCount={pageCount}
-              zoom={zoom}
-              onPageChange={setCurrentPage}
-              onZoomChange={setZoom}
-              onRotate={() => {}}
-              searching={false}
-              searchResults={null}
-              onSearch={() => {}}
-              onJumpToResult={() => {}}
-            />
-          </div>
-          <div className="min-h-0 flex-1">
-            {renderLoading && !pageRender ? (
-              <div className="flex h-full items-center justify-center">
-                <Loader2 className="h-6 w-6 animate-spin text-text-muted" />
-              </div>
-            ) : (
-              <PdfPageViewer
-                render={pageRender}
-                loading={renderLoading}
-                error={renderError}
-                zoom={zoom}
-              />
-            )}
-          </div>
-        </div>
+      <PdfToolbar
+        currentPage={currentPage}
+        pageCount={pageCount}
+        zoom={zoom}
+        onPageChange={setCurrentPage}
+        onZoomChange={setZoom}
+        onFitWidth={handleFitWidth}
+        onRotate={handleRotate}
+        searching={searching}
+        searchResults={searchResults}
+        onSearch={handleSearch}
+        onJumpToResult={handleJumpToResult}
+      />
+
+      <div ref={viewerRef} className="min-h-0 flex-1">
+        <PdfPageViewer
+          render={pageRender}
+          loading={renderLoading}
+          error={renderError}
+          zoom={zoom}
+          rotation={rotation}
+          hideHeader
+        />
       </div>
     </div>
   );

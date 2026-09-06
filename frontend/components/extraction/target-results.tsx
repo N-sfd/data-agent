@@ -1,7 +1,7 @@
 "use client";
 
-import { Download } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { ChevronDown, Download } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import {
   buildFieldRows,
@@ -13,12 +13,11 @@ import FieldsTable from "@/components/extraction/fields-table";
 import ResultSummaryBar from "@/components/extraction/result-summary-bar";
 import TableResult from "@/components/extraction/table-result";
 import ValidationIssuesPanel from "@/components/extraction/validation-issues-panel";
-import SourceVerificationPanel, {
-  type SourceViewRequest,
-} from "@/components/source-verification-panel";
+import type { SourceViewRequest } from "@/components/source-verification-panel";
 import { downloadCsv, downloadJson } from "@/lib/export";
 import {
   listTargetCorrections,
+  markTargetVerified,
   saveTargetCorrection,
 } from "@/lib/target-corrections";
 import type {
@@ -38,8 +37,7 @@ interface TargetResultsProps {
   documentName?: string;
   status?: "complete" | "processing" | "failed" | "partial";
   processingDurationMs?: number | null;
-  pageCount?: number;
-  sourceRequest?: SourceViewRequest | null;
+  selectedResultId?: string | null;
   onViewSource?: (request: SourceViewRequest) => void;
 }
 
@@ -129,8 +127,7 @@ export default function TargetResults({
   documentName,
   status = "complete",
   processingDurationMs,
-  pageCount = 1,
-  sourceRequest = null,
+  selectedResultId = null,
   onViewSource,
 }: TargetResultsProps) {
   const [searchQuery, setSearchQuery] = useState("");
@@ -143,9 +140,23 @@ export default function TargetResults({
   );
   const [onlyWithValues, setOnlyWithValues] = useState(false);
   const [onlyMissing, setOnlyMissing] = useState(false);
+  const [activeTab, setActiveTab] = useState<"fields" | "tables">("fields");
+  const [exportMenuOpen, setExportMenuOpen] = useState(false);
+  const exportMenuRef = useRef<HTMLDivElement | null>(null);
   const [corrections, setCorrections] = useState<Map<string, TargetCorrection>>(
     new Map(),
   );
+
+  useEffect(() => {
+    if (!exportMenuOpen) return;
+    function handleClickOutside(event: MouseEvent) {
+      if (!exportMenuRef.current?.contains(event.target as Node)) {
+        setExportMenuOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [exportMenuOpen]);
 
   useEffect(() => {
     if (!documentId) return;
@@ -279,6 +290,28 @@ export default function TargetResults({
     });
   }
 
+  async function handleMarkVerified(row: FieldRow) {
+    if (!documentId) return;
+    const originalValue = row.correction ? row.correction.original_value : row.value;
+    const saved = await markTargetVerified(
+      documentId,
+      row.id,
+      originalValue,
+      row.evidence
+        ? {
+            page_number: row.evidence.page_number,
+            source_text: row.evidence.source_text,
+            source_reference: row.evidence.source_reference,
+          }
+        : null,
+    );
+    setCorrections((prev) => {
+      const next = new Map(prev);
+      next.set(row.id, saved);
+      return next;
+    });
+  }
+
   function handleIssueClick(rowId: string) {
     setSearchQuery("");
     setConfidenceFilter("all");
@@ -343,7 +376,36 @@ export default function TargetResults({
         processingDurationMs={processingDurationMs}
       />
 
-      {allRows.length > 0 && (
+      {(dataTables.length > 0 || clauseTables.length > 0) && (
+        <div className="flex gap-1 rounded-lg border border-border bg-surface-soft p-1">
+          <button
+            type="button"
+            onClick={() => setActiveTab("fields")}
+            className={[
+              "flex-1 rounded-md px-3 py-1.5 text-sm font-semibold transition sm:flex-none",
+              activeTab === "fields"
+                ? "bg-surface text-primary shadow-sm"
+                : "text-text-secondary",
+            ].join(" ")}
+          >
+            Fields
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveTab("tables")}
+            className={[
+              "flex-1 rounded-md px-3 py-1.5 text-sm font-semibold transition sm:flex-none",
+              activeTab === "tables"
+                ? "bg-surface text-primary shadow-sm"
+                : "text-text-secondary",
+            ].join(" ")}
+          >
+            Tables ({dataTables.length + clauseTables.length})
+          </button>
+        </div>
+      )}
+
+      {activeTab === "fields" && allRows.length > 0 && (
         <div className="space-y-2.5 rounded-xl border border-border bg-surface-soft p-2.5">
           <div className="flex flex-wrap items-center gap-2">
             <input
@@ -391,23 +453,40 @@ export default function TargetResults({
                 </option>
               ))}
             </select>
-            <div className="ml-auto flex items-center gap-2">
+            <div className="relative ml-auto" ref={exportMenuRef}>
               <button
                 type="button"
-                onClick={exportFieldsJson}
+                onClick={() => setExportMenuOpen((open) => !open)}
                 className="btn-secondary py-1.5 text-xs"
               >
                 <Download className="h-3.5 w-3.5" />
-                JSON
+                Export
+                <ChevronDown className="h-3.5 w-3.5" />
               </button>
-              <button
-                type="button"
-                onClick={exportFieldsCsv}
-                className="btn-secondary py-1.5 text-xs"
-              >
-                <Download className="h-3.5 w-3.5" />
-                CSV
-              </button>
+              {exportMenuOpen && (
+                <div className="absolute right-0 top-full z-10 mt-1 w-40 rounded-lg border border-border bg-surface p-1 shadow-lg">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      exportFieldsJson();
+                      setExportMenuOpen(false);
+                    }}
+                    className="block w-full rounded-md px-3 py-1.5 text-left text-xs text-foreground hover:bg-surface-soft"
+                  >
+                    Download JSON
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      exportFieldsCsv();
+                      setExportMenuOpen(false);
+                    }}
+                    className="block w-full rounded-md px-3 py-1.5 text-left text-xs text-foreground hover:bg-surface-soft"
+                  >
+                    Download CSV
+                  </button>
+                </div>
+              )}
             </div>
           </div>
           <div className="flex flex-wrap items-center gap-4 px-1">
@@ -437,15 +516,7 @@ export default function TargetResults({
         </div>
       )}
 
-      {documentId && onViewSource && (
-        <SourceVerificationPanel
-          documentId={documentId}
-          pageCount={pageCount}
-          request={sourceRequest}
-        />
-      )}
-
-      {internalMissingCount > 0 && (
+      {activeTab === "fields" && internalMissingCount > 0 && (
         <p className="text-xs text-text-muted">
           {internalMissingCount} internal form field
           {internalMissingCount === 1 ? " was" : "s were"} skipped (no
@@ -453,34 +524,43 @@ export default function TargetResults({
         </p>
       )}
 
-      {allRows.length > 0 && filteredRows.length === 0 && (
+      {activeTab === "fields" && allRows.length > 0 && filteredRows.length === 0 && (
         <p className="rounded-xl border border-border bg-surface-soft p-4 text-center text-sm text-text-secondary">
           No fields match the current search/filter.
         </p>
       )}
 
-      <div id="fields-section" className="space-y-6">
+      <div
+        id="fields-section"
+        className={["space-y-6", activeTab === "fields" ? "" : "hidden"].join(" ")}
+      >
         <FieldsTable
           title="Fields"
           rows={fieldRows}
+          selectedId={selectedResultId}
           onViewSource={onViewSource}
           onSaveCorrection={documentId ? handleSaveCorrection : undefined}
+          onMarkVerified={documentId ? handleMarkVerified : undefined}
         />
         <FieldsTable
           title="Identifiers & codes"
           rows={identifierRows}
+          selectedId={selectedResultId}
           onViewSource={onViewSource}
           onSaveCorrection={documentId ? handleSaveCorrection : undefined}
+          onMarkVerified={documentId ? handleMarkVerified : undefined}
         />
         <FieldsTable
           title="Contacts"
           rows={contactRows}
+          selectedId={selectedResultId}
           onViewSource={onViewSource}
           onSaveCorrection={documentId ? handleSaveCorrection : undefined}
+          onMarkVerified={documentId ? handleMarkVerified : undefined}
         />
       </div>
 
-      {dataTables.length > 0 && (
+      {activeTab === "tables" && dataTables.length > 0 && (
         <div id="tables-section">
           <h3 className="mb-3 text-sm font-semibold text-foreground">Tables</h3>
           <div className="space-y-4">
@@ -493,6 +573,7 @@ export default function TargetResults({
                     ? (req) =>
                         onViewSource({
                           ...req,
+                          id: tableToUniversalTable(table, index).table_id,
                           value: table.target,
                           verified: true,
                         })
@@ -504,7 +585,7 @@ export default function TargetResults({
         </div>
       )}
 
-      {clauseTables.length > 0 && (
+      {activeTab === "tables" && clauseTables.length > 0 && (
         <div className="editorial-card p-5 sm:p-6">
           <h3 className="text-sm font-semibold text-foreground">
             Clauses & sections
@@ -558,12 +639,14 @@ export default function TargetResults({
         </div>
       )}
 
-      <div id="validation-section">
-        <h3 className="mb-3 text-sm font-semibold text-foreground">
-          Validation Issues
-        </h3>
-        <ValidationIssuesPanel rows={allRows} onIssueClick={handleIssueClick} />
-      </div>
+      {activeTab === "fields" && (
+        <div id="validation-section">
+          <h3 className="mb-3 text-sm font-semibold text-foreground">
+            Validation Issues
+          </h3>
+          <ValidationIssuesPanel rows={allRows} onIssueClick={handleIssueClick} />
+        </div>
+      )}
 
       {result.warnings.length > 0 && (
         <div className="rounded-xl border border-border bg-surface-soft p-4 text-xs text-text-secondary">

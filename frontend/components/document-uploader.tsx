@@ -12,8 +12,9 @@ import {
 
 import DuplicateDialog from "@/components/duplicate-dialog";
 import PortfolioPicker from "@/components/portfolio-picker";
-import { apiFetch, wakeBackend } from "@/lib/api";
+import { wakeBackend } from "@/lib/api";
 import { resolveDuplicate, selectPortfolioFile } from "@/lib/documents";
+import { uploadFileWithProgress } from "@/lib/upload";
 import { formatBytes } from "@/lib/format";
 import type {
   EmbeddedFileSummary,
@@ -28,6 +29,20 @@ const ACCEPTED_EXTENSIONS = [
   ".jpg",
   ".jpeg",
 ];
+
+/**
+ * Explicit upload lifecycle. "queued"/"processing"/"complete" are not
+ * represented here — this component unmounts the instant onUploadComplete
+ * fires, handing off to extraction/new/page.tsx's already-real (non-fake)
+ * processing progress (extraction-live-progress.tsx).
+ */
+type UploadStage =
+  | "idle"
+  | "file_selected"
+  | "service_starting"
+  | "uploading"
+  | "upload_complete"
+  | "failed";
 
 interface DocumentUploaderProps {
   onUploadComplete: (document: UploadedDocument) => void;
@@ -48,9 +63,8 @@ export default function DocumentUploader({
   onUploadComplete,
 }: DocumentUploaderProps) {
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
-  const [uploading, setUploading] = useState(false);
-  const [progress, setProgress] = useState(0);
-  const [waking, setWaking] = useState(false);
+  const [stage, setStage] = useState<UploadStage>("idle");
+  const [uploadFraction, setUploadFraction] = useState(0);
   const [error, setError] = useState("");
   const [pendingDuplicate, setPendingDuplicate] =
     useState<PendingDuplicate | null>(null);
@@ -59,6 +73,24 @@ export default function DocumentUploader({
     useState<PendingPortfolio | null>(null);
   const [selectingPortfolioFile, setSelectingPortfolioFile] =
     useState(false);
+
+  // Pre-warm: fire once when this page mounts, independent of file
+  // selection, so the backend may already be awake by the time the user
+  // picks a document. serviceReadyRef (not state) avoids a stale-closure
+  // read inside ensureServiceReady after an `await`.
+  const serviceReadyRef = useRef(false);
+  const prewarmRef = useRef<Promise<void> | null>(null);
+
+  useEffect(() => {
+    prewarmRef.current = wakeBackend()
+      .then(() => {
+        serviceReadyRef.current = true;
+      })
+      .catch(() => {
+        // Swallow here — the user may never upload this session. An
+        // actual upload attempt below gets its own fresh wake sequence.
+      });
+  }, []);
 
   const onDrop = useCallback((acceptedFiles: File[]) => {
     setError("");
@@ -79,7 +111,8 @@ export default function DocumentUploader({
     }
 
     setSelectedFile(file);
-    setProgress(0);
+    setStage("file_selected");
+    setUploadFraction(0);
   }, []);
 
   const {
@@ -99,62 +132,46 @@ export default function DocumentUploader({
     maxFiles: 1,
   });
 
-  const progressTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  async function ensureServiceReady() {
+    if (serviceReadyRef.current) return;
 
-  const clearProgressTimer = useCallback(() => {
-    if (progressTimerRef.current) {
-      clearInterval(progressTimerRef.current);
-      progressTimerRef.current = null;
+    setStage("service_starting");
+
+    if (prewarmRef.current) {
+      await prewarmRef.current;
     }
-  }, []);
 
-  const startSlowProgress = useCallback(() => {
-    clearProgressTimer();
-    progressTimerRef.current = setInterval(() => {
-      setProgress((current) => (current < 72 ? current + 1 : current));
-    }, 2500);
-  }, [clearProgressTimer]);
+    if (serviceReadyRef.current) return;
 
-  useEffect(() => () => clearProgressTimer(), [clearProgressTimer]);
+    // Pre-warm hadn't started, was still running, or failed — the user
+    // has now explicitly asked to upload, so make one more attempt.
+    await wakeBackend();
+    serviceReadyRef.current = true;
+  }
 
   async function uploadDocument() {
     if (!selectedFile) return;
 
-    setUploading(true);
     setError("");
-    setWaking(true);
-    setProgress(10);
-    startSlowProgress();
-
-    const onWakeRetry = () => setWaking(true);
 
     try {
-      await wakeBackend(onWakeRetry);
-      setProgress(25);
+      await ensureServiceReady();
 
-      const formData = new FormData();
-      formData.append("file", selectedFile);
+      setStage("uploading");
+      setUploadFraction(0);
 
-      setProgress(35);
-
-      const result = await apiFetch<UploadedDocument>(
+      const result = await uploadFileWithProgress<UploadedDocument>(
         "/api/documents/upload",
-        {
-          method: "POST",
-          body: formData,
-        },
-        onWakeRetry,
+        selectedFile,
+        setUploadFraction,
       );
-
-      clearProgressTimer();
-      setProgress(80);
 
       if (result.status === "portfolio_pending" && result.embedded_files) {
         setPendingPortfolio({
           documentId: result.document_id,
           files: result.embedded_files,
         });
-        setProgress(0);
+        setStage("file_selected");
         return;
       }
 
@@ -164,26 +181,19 @@ export default function DocumentUploader({
           originalFilename: result.original_filename,
           existingDocument: result.existing_document,
         });
-        setProgress(0);
+        setStage("file_selected");
         return;
       }
 
-      setProgress(100);
-
+      setStage("upload_complete");
       onUploadComplete(result);
     } catch (uploadError) {
-      clearProgressTimer();
-      setProgress(0);
-
+      setStage("failed");
       setError(
         uploadError instanceof Error
           ? uploadError.message
           : "Unable to upload the document.",
       );
-    } finally {
-      clearProgressTimer();
-      setUploading(false);
-      setWaking(false);
     }
   }
 
@@ -200,10 +210,11 @@ export default function DocumentUploader({
         pendingDuplicate.documentId,
         action,
         pendingDuplicate.originalFilename,
+        () => setResolving(true),
       );
 
-      setProgress(100);
       setPendingDuplicate(null);
+      setStage("upload_complete");
       onUploadComplete(result);
     } catch (resolveError) {
       setError(
@@ -218,7 +229,7 @@ export default function DocumentUploader({
 
   function handleCancelDuplicate() {
     setPendingDuplicate(null);
-    setProgress(0);
+    setStage("file_selected");
   }
 
   async function handlePortfolioSelection(filename: string) {
@@ -231,9 +242,9 @@ export default function DocumentUploader({
       const result = await selectPortfolioFile(
         pendingPortfolio.documentId,
         filename,
+        () => setSelectingPortfolioFile(true),
       );
 
-      setProgress(100);
       setPendingPortfolio(null);
 
       if (result.duplicate && result.existing_document) {
@@ -242,10 +253,11 @@ export default function DocumentUploader({
           originalFilename: result.original_filename,
           existingDocument: result.existing_document,
         });
-        setProgress(0);
+        setStage("file_selected");
         return;
       }
 
+      setStage("upload_complete");
       onUploadComplete(result);
     } catch (selectError) {
       setError(
@@ -260,14 +272,18 @@ export default function DocumentUploader({
 
   function handleCancelPortfolio() {
     setPendingPortfolio(null);
-    setProgress(0);
+    setStage("file_selected");
   }
 
   function clearFile() {
     setSelectedFile(null);
-    setProgress(0);
+    setStage("idle");
+    setUploadFraction(0);
     setError("");
   }
+
+  const busy = stage === "service_starting" || stage === "uploading";
+  const percent = Math.round(uploadFraction * 100);
 
   return (
     <div className="editorial-card p-8">
@@ -332,7 +348,7 @@ export default function DocumentUploader({
               </p>
             </div>
 
-            {!uploading && (
+            {!busy && stage !== "upload_complete" && (
               <button
                 type="button"
                 onClick={clearFile}
@@ -344,53 +360,70 @@ export default function DocumentUploader({
             )}
           </div>
 
-          {progress > 0 && (
+          {stage === "service_starting" && (
+            <div className="mt-5">
+              <p className="text-sm font-medium text-foreground">
+                Preparing processing service…
+              </p>
+              <p className="mt-1 text-xs text-text-muted">
+                The document is ready and will upload automatically once
+                the service is available — this can take up to 90 seconds
+                on the free tier.
+              </p>
+              <div className="progress-violet mt-3">
+                <div className="progress-violet-fill w-1/3 animate-[indeterminate_1.4s_ease-in-out_infinite]" />
+              </div>
+            </div>
+          )}
+
+          {stage === "uploading" && (
             <div className="mt-5">
               <div className="mb-2 flex items-center justify-between text-xs">
                 <span className="text-text-secondary">
-                  {progress === 100
-                    ? "Upload complete"
-                    : waking
-                      ? "Waking processing service..."
-                      : progress < 35
-                        ? "Connecting to backend..."
-                        : "Uploading and validating"}
+                  Uploading document…
                 </span>
-
                 <span className="font-medium text-foreground">
-                  {progress}%
+                  {percent}%
                 </span>
               </div>
-
               <div className="progress-violet">
                 <div
                   className="progress-violet-fill"
-                  style={{ width: `${progress}%` }}
+                  style={{ width: `${percent}%` }}
                 />
               </div>
+            </div>
+          )}
 
-              {waking && (
-                <p className="mt-2 text-xs text-text-muted">
-                  The backend was idle and is spinning back up. This can
-                  take up to 90 seconds on the free tier — please keep
-                  this tab open.
-                </p>
-              )}
+          {stage === "upload_complete" && (
+            <div className="mt-5">
+              <div className="flex items-center gap-2 text-sm font-medium text-success">
+                <CheckCircle2 className="h-4 w-4" />
+                Document uploaded
+              </div>
+              <p className="mt-1 text-xs text-text-secondary">
+                Processing started
+              </p>
             </div>
           )}
 
           <button
             type="button"
             onClick={uploadDocument}
-            disabled={uploading || progress === 100}
+            disabled={busy || stage === "upload_complete"}
             className="btn-primary mt-5 w-full disabled:cursor-not-allowed disabled:opacity-60"
           >
-            {uploading ? (
+            {stage === "service_starting" ? (
               <>
                 <Loader2 className="h-4 w-4 animate-spin" />
-                Uploading...
+                Starting service…
               </>
-            ) : progress === 100 ? (
+            ) : stage === "uploading" ? (
+              <>
+                <Loader2 className="h-4 w-4 animate-spin" />
+                Uploading…
+              </>
+            ) : stage === "upload_complete" ? (
               <>
                 <CheckCircle2 className="h-4 w-4" />
                 Uploaded

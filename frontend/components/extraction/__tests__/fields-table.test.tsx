@@ -25,14 +25,22 @@ function scalar(overrides: Partial<ScalarTargetResult> = {}): ScalarTargetResult
   };
 }
 
+function expandRow(id: string) {
+  const row = document.getElementById(`field-row-${id}`);
+  const toggle = row!.querySelector("button")!;
+  fireEvent.click(toggle);
+}
+
 describe("FieldsTable", () => {
-  it("renders a single extracted field with its confidence band and method", () => {
+  it("renders a compact collapsed card with label, value, confidence, method, and page", () => {
     const rows = buildFieldRows([scalar()], [], new Map());
     render(<FieldsTable title="Fields" rows={rows} />);
 
     expect(screen.getByText("contract_number")).toBeInTheDocument();
     expect(screen.getByText("W912DR-26-C-0042")).toBeInTheDocument();
-    expect(screen.getByText(/high · 90%/i)).toBeInTheDocument();
+    expect(screen.getByText(/high 0\.90/i)).toBeInTheDocument();
+    expect(screen.getByText("source_evidence")).toBeInTheDocument();
+    expect(screen.getByText(/page 1/i)).toBeInTheDocument();
   });
 
   it("renders 100+ fields without dropping rows", () => {
@@ -40,66 +48,74 @@ describe("FieldsTable", () => {
       scalar({ target: `field_${i}`, normalized_key: `field_${i}` }),
     );
     const rows = buildFieldRows(scalars, [], new Map());
-    render(<FieldsTable title="Fields" rows={rows} />);
+    render(<FieldsTable title="Fields" rows={rows} onViewSource={vi.fn()} />);
 
-    expect(screen.getAllByText("Extracted")).toHaveLength(120);
+    expect(screen.getAllByText("View Source")).toHaveLength(120);
   });
 
-  it("distinguishes missing, empty, low-confidence, and unverified fields with visible pills", () => {
+  it("distinguishes missing and empty fields with placeholder text instead of blank cells", () => {
     const rows = buildFieldRows(
-      [
-        scalar({ target: "a", normalized_key: "a", value: "" }),
-        scalar({
-          target: "b",
-          normalized_key: "b",
-          confidence_band: "low",
-          confidence: 0.4,
-        }),
-        scalar({ target: "c", normalized_key: "c", verified: false }),
-      ],
+      [scalar({ target: "a", normalized_key: "a", value: "" })],
       [{ key: "d", label: "Missing Field" }],
       new Map(),
     );
     render(<FieldsTable title="Fields" rows={rows} />);
 
-    expect(screen.getByText("Empty")).toBeInTheDocument();
-    expect(screen.getByText("Needs review")).toBeInTheDocument();
-    expect(screen.getByText("Unverified")).toBeInTheDocument();
-    expect(screen.getByText("Not found")).toBeInTheDocument();
+    expect(screen.getByText("No value captured")).toBeInTheDocument();
+    expect(screen.getByText("Not found in document")).toBeInTheDocument();
     expect(screen.getByText("Missing Field")).toBeInTheDocument();
   });
 
-  it("maps extraction methods to their display labels", () => {
+  it("does not show a View Source action for a not-found field (no evidence)", () => {
+    const rows = buildFieldRows([], [{ key: "missing_field", label: "Missing Field" }], new Map());
+    render(<FieldsTable title="Fields" rows={rows} />);
+
+    const row = document.getElementById("field-row-missing_field");
+    expect(row).not.toBeNull();
+    expect(row!.textContent).not.toContain("View Source");
+  });
+
+  it("renders a Native result with its real page number and method, unmodified", () => {
+    const rows = buildFieldRows(
+      [scalar({ display_method: "Native", extraction_method: "source_evidence" })],
+      [],
+      new Map(),
+    );
+    render(<FieldsTable title="Fields" rows={rows} />);
+
+    expect(screen.getByText("Native")).toBeInTheDocument();
+  });
+
+  it("renders an OCR result using the backend's OCR display label", () => {
     const rows = buildFieldRows(
       [
-        scalar({ target: "a", normalized_key: "a", extraction_method: "ai" }),
         scalar({
-          target: "b",
-          normalized_key: "b",
-          extraction_method: "form_field",
+          display_method: "OCR",
+          extraction_method: "source_evidence",
+          evidence: { page_number: 2, source_text: "OCR'd text", source_reference: "Page 2" },
         }),
       ],
+      [],
+      new Map(),
+    );
+    render(<FieldsTable title="Fields" rows={rows} />);
+
+    expect(screen.getByText("OCR")).toBeInTheDocument();
+    expect(screen.getByText(/page 2/i)).toBeInTheDocument();
+  });
+
+  it("renders an AI Fallback result distinctly from Native/OCR results", () => {
+    const rows = buildFieldRows(
+      [scalar({ extraction_method: "ai", display_method: "" })],
       [],
       new Map(),
     );
     render(<FieldsTable title="Fields" rows={rows} />);
 
     expect(screen.getByText("AI Fallback")).toBeInTheDocument();
-    expect(screen.getByText("PDF Form Field")).toBeInTheDocument();
   });
 
-  it("prefers the backend-provided display_method (e.g. an OCR label) over the generic mapping", () => {
-    const rows = buildFieldRows(
-      [scalar({ display_method: "OCR (Tesseract)" })],
-      [],
-      new Map(),
-    );
-    render(<FieldsTable title="Fields" rows={rows} />);
-
-    expect(screen.getByText("OCR (Tesseract)")).toBeInTheDocument();
-  });
-
-  it("fires onViewSource with the field's page and highlight text", () => {
+  it("fires onViewSource with the field's page, highlight text, and stable row id", () => {
     const onViewSource = vi.fn();
     const rows = buildFieldRows([scalar()], [], new Map());
     render(<FieldsTable title="Fields" rows={rows} onViewSource={onViewSource} />);
@@ -108,6 +124,7 @@ describe("FieldsTable", () => {
 
     expect(onViewSource).toHaveBeenCalledWith(
       expect.objectContaining({
+        id: "contract_number",
         pageNumber: 1,
         label: "contract_number",
         value: "W912DR-26-C-0042",
@@ -115,11 +132,64 @@ describe("FieldsTable", () => {
     );
   });
 
-  it("saves a correction through the edit workflow", async () => {
+  it("keeps the clicked result visually selected and auto-expands its compact evidence panel", () => {
+    const rows = buildFieldRows(
+      [scalar(), scalar({ target: "vendor_name", normalized_key: "vendor_name" })],
+      [],
+      new Map(),
+    );
+    const { rerender } = render(<FieldsTable title="Fields" rows={rows} selectedId={null} />);
+
+    expect(screen.queryByText("Source evidence")).not.toBeInTheDocument();
+
+    rerender(<FieldsTable title="Fields" rows={rows} selectedId="contract_number" />);
+
+    const selectedRow = document.getElementById("field-row-contract_number");
+    expect(selectedRow).toHaveClass("bg-primary/5");
+
+    expect(screen.getByText("Source evidence")).toBeInTheDocument();
+    expect(screen.getByText("“Contract Number: W912DR-26-C-0042”")).toBeInTheDocument();
+
+    const vendorRow = document.getElementById("field-row-vendor_name");
+    expect(vendorRow).not.toHaveClass("bg-primary/5");
+  });
+
+  it("expands only the clicked result when its row body is clicked (independent of selection)", () => {
+    const rows = buildFieldRows(
+      [scalar(), scalar({ target: "vendor_name", normalized_key: "vendor_name" })],
+      [],
+      new Map(),
+    );
+    render(<FieldsTable title="Fields" rows={rows} />);
+
+    expandRow("vendor_name");
+
+    expect(screen.getByText("Source evidence")).toBeInTheDocument();
+    expect(screen.getByText("Validation")).toBeInTheDocument();
+    // Collapsing the same row hides the panel again.
+    expandRow("vendor_name");
+    expect(screen.queryByText("Source evidence")).not.toBeInTheDocument();
+  });
+
+  it("truncates a long evidence snippet instead of dumping the full page text", () => {
+    const longText = "A".repeat(500);
+    const rows = buildFieldRows(
+      [scalar({ evidence: { page_number: 1, source_text: longText, source_reference: "Page 1" } })],
+      [],
+      new Map(),
+    );
+    render(<FieldsTable title="Fields" rows={rows} selectedId="contract_number" />);
+
+    const snippet = screen.getByText(/^“A+…”$/);
+    expect(snippet.textContent!.length).toBeLessThan(longText.length);
+  });
+
+  it("saves a correction through the expanded edit workflow", async () => {
     const onSaveCorrection = vi.fn().mockResolvedValue(undefined);
     const rows = buildFieldRows([scalar()], [], new Map());
     render(<FieldsTable title="Fields" rows={rows} onSaveCorrection={onSaveCorrection} />);
 
+    expandRow("contract_number");
     fireEvent.click(screen.getByText("Edit"));
     const input = screen.getByDisplayValue("W912DR-26-C-0042");
     fireEvent.change(input, { target: { value: "W912DR-26-C-0043" } });
@@ -129,5 +199,74 @@ describe("FieldsTable", () => {
       expect.objectContaining({ id: "contract_number" }),
       "W912DR-26-C-0043",
     );
+  });
+
+  it("shows an edited-value indicator and the original extraction once a correction exists", () => {
+    const correction = {
+      id: 1,
+      document_id: "doc-1",
+      normalized_key: "contract_number",
+      action: "edit" as const,
+      original_value: "W912DR-26-C-0042",
+      corrected_value: "W912DR-26-C-0043",
+      evidence_snapshot: null,
+      changed_by: null,
+      created_at: new Date().toISOString(),
+    };
+    const rows = buildFieldRows(
+      [scalar()],
+      [],
+      new Map([["contract_number", correction]]),
+    );
+    render(<FieldsTable title="Fields" rows={rows} />);
+
+    expect(screen.getByText("W912DR-26-C-0043")).toBeInTheDocument();
+    expect(screen.getByText("Edited")).toBeInTheDocument();
+
+    expandRow("contract_number");
+    expect(screen.getByText("Original extraction")).toBeInTheDocument();
+    expect(screen.getByText("W912DR-26-C-0042")).toBeInTheDocument();
+  });
+
+  it("marks a result verified without changing its value", async () => {
+    const onMarkVerified = vi.fn().mockResolvedValue(undefined);
+    const rows = buildFieldRows([scalar()], [], new Map());
+    render(<FieldsTable title="Fields" rows={rows} onMarkVerified={onMarkVerified} />);
+
+    expandRow("contract_number");
+    fireEvent.click(screen.getByText("Mark verified"));
+
+    expect(onMarkVerified).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "contract_number", value: "W912DR-26-C-0042" }),
+    );
+  });
+
+  it("shows a human-verified badge once a verify action exists, and does not treat it as an edit", () => {
+    const verifyAction = {
+      id: 1,
+      document_id: "doc-1",
+      normalized_key: "contract_number",
+      action: "verify" as const,
+      original_value: "W912DR-26-C-0042",
+      corrected_value: null,
+      evidence_snapshot: null,
+      changed_by: "reviewer@example.com",
+      created_at: new Date().toISOString(),
+    };
+    const rows = buildFieldRows(
+      [scalar()],
+      [],
+      new Map([["contract_number", verifyAction]]),
+    );
+    render(<FieldsTable title="Fields" rows={rows} />);
+
+    // Value is untouched by a pure verification (no "Edited" tag).
+    expect(screen.getByText("W912DR-26-C-0042")).toBeInTheDocument();
+    expect(screen.queryByText("Edited")).not.toBeInTheDocument();
+    expect(screen.getByText("Verified")).toBeInTheDocument();
+
+    expandRow("contract_number");
+    expect(screen.getByText("Verified by reviewer")).toBeInTheDocument();
+    expect(screen.queryByText("Original extraction")).not.toBeInTheDocument();
   });
 });

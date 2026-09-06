@@ -20,6 +20,7 @@ from app.database.migrate import (
     ensure_document_page_columns,
     ensure_documents_columns,
     ensure_extraction_model_columns,
+    ensure_target_correction_columns,
     run_alembic_upgrade,
 )
 from app.database.session import engine
@@ -212,6 +213,7 @@ async def create_database_tables() -> None:
     ensure_documents_columns(engine)
     ensure_document_metadata_field_columns(engine)
     ensure_extraction_model_columns(engine)
+    ensure_target_correction_columns(engine)
 
     _recover_interrupted_jobs()
 

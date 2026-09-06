@@ -1,19 +1,26 @@
 "use client";
 
-import { Check, Eye, History, Pencil, X } from "lucide-react";
-import { useState } from "react";
+import { Check, CheckCircle2, ChevronDown, ChevronRight, Eye, Pencil, ShieldCheck, X } from "lucide-react";
+import { useEffect, useState } from "react";
 
-import {
-  FIELD_ROW_STATUS_LABEL,
-  type FieldRow,
-} from "@/components/extraction/field-row";
+import type { FieldRow } from "@/components/extraction/field-row";
 import type { SourceViewRequest } from "@/components/source-verification-panel";
 
 interface FieldsTableProps {
   title: string;
   rows: FieldRow[];
+  selectedId?: string | null;
   onViewSource?: (request: SourceViewRequest) => void;
   onSaveCorrection?: (row: FieldRow, correctedValue: string) => Promise<void> | void;
+  onMarkVerified?: (row: FieldRow) => Promise<void> | void;
+}
+
+const SNIPPET_MAX_LENGTH = 220;
+
+function evidenceSnippet(text: string): string {
+  const trimmed = text.trim();
+  if (trimmed.length <= SNIPPET_MAX_LENGTH) return trimmed;
+  return `${trimmed.slice(0, SNIPPET_MAX_LENGTH).trimEnd()}…`;
 }
 
 function methodLabel(method: string | null): string {
@@ -41,59 +48,93 @@ const CONFIDENCE_BAND_STYLES: Record<string, string> = {
   low: "bg-danger/10 text-danger",
 };
 
-function ConfidenceCell({ row }: { row: FieldRow }) {
+function ConfidenceTag({ row }: { row: FieldRow }) {
   if (row.confidence == null || row.confidence_band == null) {
-    return <span className="text-xs text-text-muted">—</span>;
+    return <span className="text-text-muted">—</span>;
   }
   const style = CONFIDENCE_BAND_STYLES[row.confidence_band] ?? CONFIDENCE_BAND_STYLES.medium;
   return (
     <span
-      className={`inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-semibold capitalize ${style}`}
+      className={`inline-flex shrink-0 items-center rounded-full px-1.5 py-0.5 text-[11px] font-semibold uppercase ${style}`}
     >
-      {row.confidence_band} · {Math.round(row.confidence * 100)}%
+      {row.confidence_band} {row.confidence.toFixed(2)}
     </span>
   );
 }
 
-const STATUS_STYLES: Record<FieldRow["status"], string> = {
-  extracted: "bg-success/10 text-success",
-  empty: "bg-surface-soft text-text-secondary",
-  low_confidence: "bg-warning/10 text-warning",
-  validation_failed: "bg-danger/10 text-danger",
-  not_found: "bg-surface-soft text-text-muted",
-};
+/** Whether a correction exists that changed the value (as opposed to a
+ * pure "mark verified" action, which leaves the value untouched). */
+function isEditCorrection(row: FieldRow): boolean {
+  return Boolean(row.correction) && row.correction!.action !== "verify";
+}
 
-function StatusBadge({ status }: { status: FieldRow["status"] }) {
-  return (
-    <span
-      className={`inline-flex shrink-0 items-center rounded-full px-2 py-0.5 text-[11px] font-semibold ${STATUS_STYLES[status]}`}
-    >
-      {FIELD_ROW_STATUS_LABEL[status]}
-    </span>
-  );
+function isHumanVerified(row: FieldRow): boolean {
+  return row.correction?.action === "verify";
 }
 
 function displayValue(row: FieldRow): string {
-  const current = row.correction ? row.correction.corrected_value : row.value;
+  const current = isEditCorrection(row) ? row.correction!.corrected_value : row.value;
   if (row.status === "not_found") return "";
   if (current === null || current === undefined || current === "") return "";
   return String(current);
 }
 
-function FieldTableRow({
+function ValidationDetail({ row }: { row: FieldRow }) {
+  if (isHumanVerified(row)) {
+    return (
+      <p className="mt-1 flex items-center gap-1.5 text-sm text-success">
+        <ShieldCheck className="h-4 w-4" />
+        Verified by reviewer
+      </p>
+    );
+  }
+  if (row.status === "not_found") {
+    return <p className="mt-1 text-sm text-text-secondary">Not found in this document.</p>;
+  }
+  if (row.status === "empty") {
+    return <p className="mt-1 text-sm text-text-secondary">Resolved with no captured value.</p>;
+  }
+  if (!row.verified) {
+    return (
+      <p className="mt-1 flex items-center gap-1.5 text-sm text-warning">
+        <span aria-hidden>⚠</span>
+        Could not confirm this value against the source text.
+      </p>
+    );
+  }
+  return (
+    <p className="mt-1 flex items-center gap-1.5 text-sm text-success">
+      <CheckCircle2 className="h-4 w-4" />
+      Format valid
+    </p>
+  );
+}
+
+function FieldCard({
   row,
+  selected,
+  expanded,
+  onToggleExpand,
   onViewSource,
   onSaveCorrection,
+  onMarkVerified,
 }: {
   row: FieldRow;
+  selected: boolean;
+  expanded: boolean;
+  onToggleExpand: () => void;
   onViewSource?: (request: SourceViewRequest) => void;
   onSaveCorrection?: (row: FieldRow, correctedValue: string) => Promise<void> | void;
+  onMarkVerified?: (row: FieldRow) => Promise<void> | void;
 }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(displayValue(row));
   const [saving, setSaving] = useState(false);
+  const [verifying, setVerifying] = useState(false);
   const value = displayValue(row);
   const canEdit = Boolean(onSaveCorrection) && row.status !== "not_found";
+  const canVerify = Boolean(onMarkVerified) && row.status !== "not_found";
+  const highlighted = selected || expanded;
 
   async function handleSave() {
     if (!onSaveCorrection) return;
@@ -106,68 +147,143 @@ function FieldTableRow({
     }
   }
 
+  async function handleMarkVerified() {
+    if (!onMarkVerified) return;
+    setVerifying(true);
+    try {
+      await onMarkVerified(row);
+    } finally {
+      setVerifying(false);
+    }
+  }
+
+  function handleViewSourceClick(event: React.MouseEvent) {
+    event.stopPropagation();
+    if (!onViewSource || !row.evidence) return;
+    onViewSource({
+      id: row.id,
+      pageNumber: row.evidence.page_number,
+      highlightText: row.evidence.source_text || value,
+      label: row.label,
+      value,
+      confidence: row.confidence ?? 0,
+      verified: row.verified,
+    });
+  }
+
   return (
-    <tr
+    <div
       id={`field-row-${row.id}`}
-      className="scroll-mt-32 border-b border-border last:border-0 hover:bg-surface-soft"
+      className={[
+        "scroll-mt-32 border-b border-border last:border-0",
+        highlighted ? "bg-primary/5" : "",
+      ].join(" ")}
     >
-      <td className="px-3 py-2.5 align-top text-xs font-semibold uppercase tracking-wide text-text-muted sm:px-4">
-        {row.label}
-      </td>
-      <td className="px-3 py-2.5 align-top text-sm font-medium text-foreground sm:px-4">
-        {editing ? (
-          <input
-            autoFocus
-            value={draft}
-            onChange={(event) => setDraft(event.target.value)}
-            className="w-full min-w-[10rem] rounded-lg border border-primary/40 bg-surface px-2 py-1 text-sm outline-none"
-          />
-        ) : value ? (
-          <span>
-            {value}
-            {row.correction && (
-              <span
-                title={`Corrected from "${String(row.correction.original_value ?? "")}" on ${new Date(row.correction.created_at).toLocaleString()}`}
-                className="ml-1.5 inline-flex items-center gap-0.5 text-[11px] font-medium text-primary"
-              >
-                <History className="h-3 w-3" />
-                corrected
+      <button
+        type="button"
+        onClick={onToggleExpand}
+        className="flex w-full items-start gap-2 px-3 py-2.5 text-left hover:bg-surface-soft sm:px-4"
+      >
+        {expanded ? (
+          <ChevronDown className="mt-0.5 h-3.5 w-3.5 shrink-0 text-text-muted" />
+        ) : (
+          <ChevronRight className="mt-0.5 h-3.5 w-3.5 shrink-0 text-text-muted" />
+        )}
+
+        <div className="min-w-0 flex-1">
+          <p className="text-[11px] font-semibold uppercase tracking-wide text-text-muted">
+            {row.label}
+          </p>
+          {value ? (
+            <p className="mt-0.5 truncate text-sm font-medium text-foreground">{value}</p>
+          ) : (
+            <p className="mt-0.5 text-sm italic text-text-muted">
+              {row.status === "not_found" ? "Not found in document" : "No value captured"}
+            </p>
+          )}
+          <div className="mt-1 flex flex-wrap items-center gap-x-1.5 gap-y-1 text-xs text-text-secondary">
+            <ConfidenceTag row={row} />
+            {row.evidence && (
+              <>
+                <span>·</span>
+                <span>{row.display_method || methodLabel(row.extraction_method)}</span>
+                <span>·</span>
+                <span>Page {row.evidence.page_number}</span>
+              </>
+            )}
+            {isHumanVerified(row) && (
+              <span className="inline-flex items-center gap-0.5 text-success">
+                <ShieldCheck className="h-3 w-3" />
+                Verified
               </span>
             )}
-          </span>
-        ) : (
-          <span className="text-xs italic text-text-muted">
-            {row.status === "not_found" ? "Not found in document" : "No value captured"}
+            {isEditCorrection(row) && (
+              <span
+                title={`Corrected from "${String(row.correction!.original_value ?? "")}"`}
+                className="inline-flex items-center gap-0.5 text-primary"
+              >
+                <Pencil className="h-3 w-3" />
+                Edited
+              </span>
+            )}
+          </div>
+        </div>
+
+        {row.evidence && onViewSource && (
+          <span
+            role="button"
+            tabIndex={0}
+            onClick={handleViewSourceClick}
+            onKeyDown={(event) => {
+              if (event.key === "Enter" || event.key === " ") handleViewSourceClick(event as never);
+            }}
+            className="mt-0.5 inline-flex shrink-0 items-center gap-1 text-xs font-semibold text-text-teal hover:text-primary"
+          >
+            <Eye className="h-3 w-3" />
+            View Source
           </span>
         )}
-      </td>
-      <td className="whitespace-nowrap px-3 py-2.5 align-top sm:px-4">
-        <ConfidenceCell row={row} />
-      </td>
-      <td className="whitespace-nowrap px-3 py-2.5 align-top text-xs font-medium text-foreground sm:px-4">
-        {row.display_method || methodLabel(row.extraction_method)}
-      </td>
-      <td className="min-w-[7rem] px-3 py-2.5 align-top text-xs text-text-secondary sm:px-4">
-        {row.evidence ? (
-          <>
-            <span className="font-medium text-foreground">
-              p. {row.evidence.page_number}
-            </span>
-            <p className="mt-0.5 line-clamp-1 text-[11px] text-text-muted">
-              {row.evidence.source_reference || "Source evidence"}
+      </button>
+
+      {expanded && (
+        <div className="border-t border-border bg-surface-soft/60 px-3 py-3 sm:px-4">
+          {row.evidence?.source_text && (
+            <div>
+              <p className="text-[11px] font-semibold uppercase tracking-wide text-text-muted">
+                Source evidence
+              </p>
+              <p className="mt-1 text-sm leading-6 text-foreground">
+                &ldquo;{evidenceSnippet(row.evidence.source_text)}&rdquo;
+              </p>
+            </div>
+          )}
+
+          <div className="mt-3">
+            <p className="text-[11px] font-semibold uppercase tracking-wide text-text-muted">
+              Validation
             </p>
-          </>
-        ) : (
-          <span className="text-xs text-text-muted">—</span>
-        )}
-      </td>
-      <td className="whitespace-nowrap px-3 py-2.5 align-top sm:px-4">
-        <StatusBadge status={row.status} />
-      </td>
-      <td className="whitespace-nowrap px-3 py-2.5 align-top sm:px-4">
-        <div className="flex items-center gap-2">
+            <ValidationDetail row={row} />
+          </div>
+
+          {isEditCorrection(row) && (
+            <div className="mt-3">
+              <p className="text-[11px] font-semibold uppercase tracking-wide text-text-muted">
+                Original extraction
+              </p>
+              <p className="mt-1 text-sm text-text-secondary">
+                {String(row.correction!.original_value ?? "") || "—"}
+              </p>
+            </div>
+          )}
+
           {editing ? (
-            <>
+            <div className="mt-3 flex items-center gap-2">
+              <input
+                autoFocus
+                value={draft}
+                onChange={(event) => setDraft(event.target.value)}
+                className="w-full min-w-[10rem] rounded-lg border border-primary/40 bg-surface px-2 py-1.5 text-sm outline-none"
+              />
               <button
                 type="button"
                 onClick={handleSave}
@@ -189,87 +305,79 @@ function FieldTableRow({
                 <X className="h-3.5 w-3.5" />
                 Cancel
               </button>
-            </>
+            </div>
           ) : (
-            <>
-              {row.evidence && onViewSource && (
-                <button
-                  type="button"
-                  onClick={() =>
-                    onViewSource({
-                      pageNumber: row.evidence!.page_number,
-                      highlightText: row.evidence!.source_text || value,
-                      label: row.label,
-                      value,
-                      confidence: row.confidence ?? 0,
-                      verified: row.verified,
-                    })
-                  }
-                  className="inline-flex items-center gap-1 text-xs font-semibold text-text-teal hover:text-primary"
-                >
-                  <Eye className="h-3 w-3" />
-                  View Source
-                </button>
-              )}
-              {canEdit && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    setDraft(value);
-                    setEditing(true);
-                  }}
-                  className="inline-flex items-center gap-1 text-xs font-semibold text-text-secondary hover:text-primary"
-                >
-                  <Pencil className="h-3 w-3" />
-                  Edit
-                </button>
-              )}
-            </>
+            (canEdit || canVerify) && (
+              <div className="mt-3 flex flex-wrap items-center gap-3">
+                {canEdit && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setDraft(value);
+                      setEditing(true);
+                    }}
+                    className="inline-flex items-center gap-1 text-xs font-semibold text-text-secondary hover:text-primary"
+                  >
+                    <Pencil className="h-3 w-3" />
+                    Edit
+                  </button>
+                )}
+                {canVerify && (
+                  <button
+                    type="button"
+                    onClick={handleMarkVerified}
+                    disabled={verifying || isHumanVerified(row)}
+                    className="inline-flex items-center gap-1 text-xs font-semibold text-text-secondary hover:text-primary disabled:cursor-default disabled:text-success disabled:opacity-100"
+                  >
+                    <ShieldCheck className="h-3 w-3" />
+                    {isHumanVerified(row) ? "Verified" : verifying ? "Marking…" : "Mark verified"}
+                  </button>
+                )}
+              </div>
+            )
           )}
         </div>
-      </td>
-    </tr>
+      )}
+    </div>
   );
 }
 
 export default function FieldsTable({
   title,
   rows,
+  selectedId = null,
   onViewSource,
   onSaveCorrection,
+  onMarkVerified,
 }: FieldsTableProps) {
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+
+  // Clicking "View Source" elsewhere selects a result — auto-expand it
+  // here too, so the compact detail panel appears alongside the PDF jump.
+  useEffect(() => {
+    if (selectedId) setExpandedId(selectedId);
+  }, [selectedId]);
+
   if (rows.length === 0) return null;
 
   return (
-    <div className="editorial-card p-5 sm:p-6">
-      <h3 className="text-sm font-semibold text-foreground">{title}</h3>
-      <div className="mt-3 overflow-x-auto rounded-xl border border-border">
-        <table className="min-w-full text-sm">
-          <thead className="bg-surface-soft">
-            <tr>
-              {["Field", "Value", "Confidence", "Method", "Source", "Validation", "Actions"].map(
-                (header) => (
-                  <th
-                    key={header}
-                    className="whitespace-nowrap border-b border-border px-3 py-2.5 text-left text-xs font-semibold text-foreground sm:px-4"
-                  >
-                    {header}
-                  </th>
-                ),
-              )}
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((row) => (
-              <FieldTableRow
-                key={row.id}
-                row={row}
-                onViewSource={onViewSource}
-                onSaveCorrection={onSaveCorrection}
-              />
-            ))}
-          </tbody>
-        </table>
+    <div className="editorial-card overflow-hidden p-0">
+      <h3 className="px-5 pt-5 text-sm font-semibold text-foreground sm:px-6">{title}</h3>
+      <div className="mt-3">
+        {rows.map((row) => (
+          <FieldCard
+            key={row.id}
+            row={row}
+            selected={row.id === selectedId}
+            expanded={row.id === expandedId}
+            onToggleExpand={() =>
+              setExpandedId((current) => (current === row.id ? null : row.id))
+            }
+            onViewSource={onViewSource}
+            onSaveCorrection={onSaveCorrection}
+            onMarkVerified={onMarkVerified}
+          />
+        ))}
       </div>
     </div>
   );

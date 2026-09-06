@@ -36,6 +36,7 @@ async def create_target_correction(
     correction = TargetCorrection(
         document_id=document_id,
         normalized_key=normalized_key,
+        action=request.action,
         original_value=request.original_value,
         corrected_value=request.corrected_value,
         evidence_snapshot=(

@@ -58,6 +58,11 @@ EXTRACTION_MODEL_COLUMNS: dict[str, str | dict[str, str]] = {
 }
 
 
+TARGET_CORRECTION_COLUMNS: dict[str, str | dict[str, str]] = {
+    "action": "VARCHAR(20) NOT NULL DEFAULT 'edit'",
+}
+
+
 DOCUMENT_COLUMNS: dict[str, str | dict[str, str]] = {
     "document_type": "VARCHAR(60)",
     "industry": "VARCHAR(60)",
@@ -133,3 +138,8 @@ def ensure_document_metadata_field_columns(engine: Engine) -> None:
 def ensure_extraction_model_columns(engine: Engine) -> None:
     """Add missing extraction_models columns for an existing database."""
     _ensure_columns(engine, "extraction_models", EXTRACTION_MODEL_COLUMNS)
+
+
+def ensure_target_correction_columns(engine: Engine) -> None:
+    """Add missing target_corrections columns for an existing database."""
+    _ensure_columns(engine, "target_corrections", TARGET_CORRECTION_COLUMNS)

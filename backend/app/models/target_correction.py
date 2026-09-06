@@ -7,10 +7,13 @@ from app.database.base import Base
 
 
 class TargetCorrection(Base):
-    """A user-entered correction to an extracted target value.
+    """A human review action on an extracted target value — either an
+    edit (corrected_value differs from original_value) or a verification
+    (a reviewer confirmed the existing value is correct, with no value
+    change).
 
-    Every edit inserts a new row rather than updating in place, so the
-    full history survives — "current" value for a target is the most
+    Every action inserts a new row rather than updating in place, so the
+    full history survives — "current" state for a target is the most
     recent row for its normalized_key. There is no ORM table for
     individual scalar results (they only ever exist inside an
     ExtractionJob.result_json blob), so original_value/evidence_snapshot
@@ -36,6 +39,16 @@ class TargetCorrection(Base):
         String(255),
         nullable=False,
         index=True,
+    )
+
+    # "edit" (value changed) or "verify" (reviewer confirmed the value
+    # as-is, corrected_value left null). Defaults to "edit" so rows
+    # created before this column existed still read correctly.
+    action: Mapped[str] = mapped_column(
+        String(20),
+        nullable=False,
+        default="edit",
+        server_default="edit",
     )
 
     original_value: Mapped[dict | list | str | int | float | bool | None] = (

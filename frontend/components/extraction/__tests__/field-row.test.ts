@@ -65,6 +65,7 @@ describe("buildFieldRows", () => {
       id: 1,
       document_id: "doc-1",
       normalized_key: "contract_number",
+      action: "edit",
       original_value: "W912DR-26-C-0042",
       corrected_value: "W912DR-26-C-0043",
       evidence_snapshot: null,

@@ -102,17 +102,22 @@ export async function resolveDuplicate(
   documentId: string,
   action: DuplicateResolution,
   originalFilename?: string,
+  onRetry?: (attempt: number, total: number) => void,
 ): Promise<UploadedDocument> {
-  return apiFetch(`/api/documents/${documentId}/resolve-duplicate`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
+  return apiFetch(
+    `/api/documents/${documentId}/resolve-duplicate`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        action,
+        original_filename: originalFilename ?? null,
+      }),
     },
-    body: JSON.stringify({
-      action,
-      original_filename: originalFilename ?? null,
-    }),
-  });
+    onRetry,
+  );
 }
 
 export async function extractDocumentPages(
@@ -607,12 +612,17 @@ export async function extractTargetsViaJob(
 export async function selectPortfolioFile(
   documentId: string,
   filename: string,
+  onRetry?: (attempt: number, total: number) => void,
 ): Promise<UploadedDocument> {
-  return apiFetch(`/api/documents/${documentId}/portfolio/select`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
+  return apiFetch(
+    `/api/documents/${documentId}/portfolio/select`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ filename }),
     },
-    body: JSON.stringify({ filename }),
-  });
+    onRetry,
+  );
 }

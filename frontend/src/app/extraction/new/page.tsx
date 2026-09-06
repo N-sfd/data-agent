@@ -13,7 +13,9 @@ import ProcessingDetailsDrawer from "@/components/extraction/processing-details-
 import TargetResults from "@/components/extraction/target-results";
 import AnalysisRequest from "@/components/analysis-request";
 import UniversalResults from "@/components/universal-results";
-import type { SourceViewRequest } from "@/components/source-verification-panel";
+import SourceVerificationPanel, {
+  type SourceViewRequest,
+} from "@/components/source-verification-panel";
 import DocumentOverview from "@/components/document-overview";
 import DocumentUploader from "@/components/document-uploader";
 import BackendStatusBanner from "@/components/backend-status-banner";
@@ -89,6 +91,14 @@ export default function NewExtractionPage() {
   const [processingDrawerOpen, setProcessingDrawerOpen] = useState(false);
   const [sourceRequest, setSourceRequest] =
     useState<SourceViewRequest | null>(null);
+  // True mobile only (below sm) — tablet and up always show the source
+  // pane stacked/split, no drawer needed there.
+  const [mobileSourceOpen, setMobileSourceOpen] = useState(false);
+
+  function handleViewSource(request: SourceViewRequest) {
+    setSourceRequest(request);
+    setMobileSourceOpen(true);
+  }
 
   const [universalResult, setUniversalResult] =
     useState<UniversalExtractionResult | null>(null);
@@ -302,6 +312,8 @@ export default function NewExtractionPage() {
     setProgress(null);
     setElapsedSeconds(0);
     setWaking(false);
+    setSourceRequest(null);
+    setMobileSourceOpen(false);
     setExtracting(true);
 
     try {
@@ -758,22 +770,62 @@ export default function NewExtractionPage() {
               <p className="text-base font-medium text-foreground">
                 Extraction Result
               </p>
-              <div className="mt-4">
-                <TargetResults
-                  result={targetResult}
-                  targets={(schemaDiscovery?.targets ?? []).filter(
-                    (target) =>
-                      target.source !== "template" &&
-                      target.source_examples.length > 0,
+
+              {/*
+                Responsive strategy:
+                - Desktop (lg+): side-by-side split, PDF pane sticky.
+                - Tablet (sm-lg): stacked, both panels always visible —
+                  no toggle needed, there's room for both.
+                - Mobile (<sm): Results only; "View Source" opens the PDF
+                  pane as a full-screen drawer. The pane is NEVER unmounted
+                  (only hidden/fixed via CSS) so its render cache survives
+                  opening and closing the drawer repeatedly.
+              */}
+              <div className="mt-4 grid gap-5 lg:grid-cols-[minmax(0,0.58fr)_minmax(0,0.42fr)]">
+                <div
+                  className={[
+                    mobileSourceOpen
+                      ? "fixed inset-0 z-50 overflow-y-auto bg-background p-4"
+                      : "hidden",
+                    "sm:static sm:z-auto sm:block sm:overflow-visible sm:bg-transparent sm:p-0",
+                    "min-h-0 lg:sticky lg:top-4 lg:max-h-[calc(100vh-2rem)] lg:self-start lg:overflow-hidden",
+                  ].join(" ")}
+                >
+                  {mobileSourceOpen && (
+                    <div className="mb-3 sm:hidden">
+                      <button
+                        type="button"
+                        onClick={() => setMobileSourceOpen(false)}
+                        className="btn-secondary w-full text-sm"
+                      >
+                        Close Source Preview
+                      </button>
+                    </div>
                   )}
-                  documentId={document.document_id}
-                  documentName={document.original_filename}
-                  status="complete"
-                  processingDurationMs={targetResultDurationMs}
-                  pageCount={document.page_count}
-                  sourceRequest={sourceRequest}
-                  onViewSource={setSourceRequest}
-                />
+                  <SourceVerificationPanel
+                    documentId={document.document_id}
+                    documentName={document.original_filename}
+                    pageCount={document.page_count}
+                    request={sourceRequest}
+                  />
+                </div>
+
+                <div className="min-w-0">
+                  <TargetResults
+                    result={targetResult}
+                    targets={(schemaDiscovery?.targets ?? []).filter(
+                      (target) =>
+                        target.source !== "template" &&
+                        target.source_examples.length > 0,
+                    )}
+                    documentId={document.document_id}
+                    documentName={document.original_filename}
+                    status="complete"
+                    processingDurationMs={targetResultDurationMs}
+                    selectedResultId={sourceRequest?.id ?? null}
+                    onViewSource={handleViewSource}
+                  />
+                </div>
               </div>
             </div>
           </div>

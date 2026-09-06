@@ -92,6 +92,66 @@ def test_second_edit_replaces_latest_value_but_keeps_history() -> None:
     assert corrections[0]["corrected_value"] == "Second Correction"
 
 
+def test_create_and_list_target_correction_defaults_action_to_edit() -> None:
+    document_id = upload_document(f"correction-default-action-{uuid4()}.pdf")
+
+    create_response = client.post(
+        f"/api/documents/{document_id}/targets/contract_number/corrections",
+        json={
+            "original_value": "W912DR-26-C-0042",
+            "corrected_value": "W912DR-26-C-0043",
+        },
+    )
+    assert create_response.status_code == 201, create_response.text
+    assert create_response.json()["action"] == "edit"
+
+
+def test_mark_verified_does_not_change_the_value() -> None:
+    document_id = upload_document(f"correction-verify-{uuid4()}.pdf")
+
+    verify_response = client.post(
+        f"/api/documents/{document_id}/targets/contract_number/corrections",
+        json={
+            "action": "verify",
+            "original_value": "W912DR-26-C-0042",
+            "changed_by": "reviewer@example.com",
+        },
+    )
+    assert verify_response.status_code == 201, verify_response.text
+    body = verify_response.json()
+    assert body["action"] == "verify"
+    assert body["original_value"] == "W912DR-26-C-0042"
+    assert body["corrected_value"] is None
+
+    list_response = client.get(f"/api/documents/{document_id}/corrections")
+    corrections = list_response.json()
+    assert len(corrections) == 1
+    assert corrections[0]["action"] == "verify"
+
+
+def test_edit_after_verify_replaces_latest_action() -> None:
+    document_id = upload_document(f"correction-verify-then-edit-{uuid4()}.pdf")
+
+    client.post(
+        f"/api/documents/{document_id}/targets/contract_number/corrections",
+        json={"action": "verify", "original_value": "W912DR-26-C-0042"},
+    )
+    client.post(
+        f"/api/documents/{document_id}/targets/contract_number/corrections",
+        json={
+            "action": "edit",
+            "original_value": "W912DR-26-C-0042",
+            "corrected_value": "W912DR-26-C-0099",
+        },
+    )
+
+    list_response = client.get(f"/api/documents/{document_id}/corrections")
+    corrections = list_response.json()
+    assert len(corrections) == 1
+    assert corrections[0]["action"] == "edit"
+    assert corrections[0]["corrected_value"] == "W912DR-26-C-0099"
+
+
 def test_correction_requires_existing_document() -> None:
     response = client.post(
         f"/api/documents/{uuid4()}/targets/contract_number/corrections",

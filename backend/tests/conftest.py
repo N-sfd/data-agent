@@ -25,6 +25,7 @@ from app.database.migrate import (  # noqa: E402
     ensure_document_page_columns,
     ensure_documents_columns,
     ensure_extraction_model_columns,
+    ensure_target_correction_columns,
 )
 from app.database.session import engine  # noqa: E402
 from app.models import (  # noqa: E402,F401
@@ -110,6 +111,7 @@ def _initialize_database() -> None:
     ensure_documents_columns(engine)
     ensure_document_metadata_field_columns(engine)
     ensure_extraction_model_columns(engine)
+    ensure_target_correction_columns(engine)
 
 
 @pytest.fixture
