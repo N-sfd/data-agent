@@ -497,9 +497,10 @@ export async function deleteCustomTarget(
 // (app/schemas/document_target.py). "Extract All" can easily select
 // more than that, so split into sequential batches and merge the
 // results rather than surfacing a 422 for selecting too much at once.
-const MAX_TARGET_IDS_PER_REQUEST = 50;
+/** Sync extract-targets API cap — keep in sync with backend EXTRACTION_BATCH_SIZE. */
+export const MAX_TARGET_IDS_PER_REQUEST = 50;
 
-function chunk<T>(items: T[], size: number): T[][] {
+export function chunkTargetIds<T>(items: T[], size: number): T[][] {
   const chunks: T[][] = [];
   for (let index = 0; index < items.length; index += size) {
     chunks.push(items.slice(index, index + size));
@@ -512,7 +513,7 @@ export async function extractTargets(
   targetIds: string[],
   onRetry?: (attempt: number, total: number) => void,
 ): Promise<ExtractTargetsResult> {
-  const batches = chunk(targetIds, MAX_TARGET_IDS_PER_REQUEST);
+  const batches = chunkTargetIds(targetIds, MAX_TARGET_IDS_PER_REQUEST);
 
   const merged: ExtractTargetsResult = {
     document_id: documentId,

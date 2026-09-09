@@ -42,7 +42,7 @@ const CAPABILITIES = [
   {
     title: "Relationships",
     description:
-      "Map parent, amendment, and related-agreement links across the portfolio.",
+      "Map parent, amendment, and related-document links across the contract portfolio.",
     href: "/relationships",
     icon: GitBranch,
   },

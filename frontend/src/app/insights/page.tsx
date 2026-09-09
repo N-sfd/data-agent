@@ -4,7 +4,7 @@ export default function InsightsPage() {
   return (
     <ComingSoonPage
       title="Contract Insights"
-      description="Executive summaries and portfolio intelligence across your agreements."
+      description="Executive summaries and portfolio intelligence across your documents."
     />
   );
 }

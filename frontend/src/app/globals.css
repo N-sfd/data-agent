@@ -408,17 +408,20 @@ body {
 .header-nav {
   display: none;
   align-items: center;
-  gap: 0.35rem;
+  gap: 1.25rem;
   flex: 1 1 auto;
   min-width: 0;
+  overflow: hidden;
 }
 
-.header-nav-secondary {
-  display: contents;
+.header-nav-governance {
+  display: block;
+  flex-shrink: 0;
 }
 
 .header-nav-more {
   display: none;
+  flex-shrink: 0;
 }
 
 .header-actions {
@@ -426,6 +429,7 @@ body {
   align-items: center;
   gap: 0.75rem;
   flex: 0 0 auto;
+  flex-shrink: 0;
   white-space: nowrap;
 }
 
@@ -451,14 +455,14 @@ body {
   }
 }
 
-/* Tighten spacing before the header runs out of width */
-@media (max-width: 1350px) and (min-width: 1024px) {
+/* Tighten spacing well before Governance approaches the CTAs */
+@media (max-width: 1480px) and (min-width: 1024px) {
   .app-header {
-    gap: 1rem;
+    gap: 1.25rem;
   }
 
   .header-nav {
-    gap: 0.15rem;
+    gap: 0.75rem;
   }
 
   .header-nav .nav-menu-button {
@@ -466,17 +470,31 @@ body {
     padding-left: 0.65rem;
     padding-right: 0.65rem;
   }
+}
+
+/* Collapse Governance into More before it can overlap New Extraction */
+@media (max-width: 1420px) and (min-width: 1024px) {
+  .app-header {
+    gap: 1rem;
+  }
+
+  .header-nav {
+    gap: 0.5rem;
+  }
+
+  .header-nav .nav-menu-button {
+    font-size: 0.8125rem;
+    padding-left: 0.55rem;
+    padding-right: 0.55rem;
+  }
 
   .btn-new-extraction,
   .btn-ask-agent {
     padding-left: 0.875rem;
     padding-right: 0.875rem;
   }
-}
 
-/* Collapse Review + Governance into More before overlap */
-@media (max-width: 1180px) and (min-width: 1024px) {
-  .header-nav-secondary {
+  .header-nav-governance {
     display: none;
   }
 

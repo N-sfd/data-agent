@@ -124,7 +124,7 @@ export default function GlobalSearch({ open, onClose }: GlobalSearchProps) {
                 <SearchRow
                   icon={Sparkles}
                   title="Ask Data Agent"
-                  subtitle="Natural language contract questions"
+        subtitle="Natural language questions with source citations"
                   onClick={() => {
                     onClose();
                     router.push("/ask");
@@ -132,8 +132,8 @@ export default function GlobalSearch({ open, onClose }: GlobalSearchProps) {
                 />
                 <SearchRow
                   icon={FileText}
-                  title="Contract Repository"
-                  subtitle="Browse all agreements"
+                  title="Document Repository"
+                  subtitle="Browse all documents"
                   onClick={() => {
                     onClose();
                     router.push("/repository");

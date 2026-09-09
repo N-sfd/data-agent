@@ -61,7 +61,7 @@ function confidenceQualifier(confidence: number): string {
 
 const ANALYZE_STAGE_MESSAGES = [
   "Classifying document... Identifying document type, contract side, language, and status.",
-  "Detecting related agreements... Checking parent and child contract relationships.",
+  "Detecting related documents... Checking parent and child relationships.",
 ];
 
 export default function NewExtractionPage() {
@@ -509,15 +509,15 @@ export default function NewExtractionPage() {
   return (
     <>
       <PageHero
-        eyebrow="Store / Extraction Agent"
+        eyebrow="Store / Extraction"
         title={
           <>
-            Turn agreements into
+            Source evidence first
             <br />
-            structured intelligence
+            across every document
           </>
         }
-        description="Convert contracts and financial documents into structured, searchable intelligence with source-level traceability."
+        description="Extract fields, tables, and clauses from contracts, financial reports, lab records, and more — then verify every value against the source PDF."
       />
 
       <ContentSection>
@@ -554,7 +554,7 @@ export default function NewExtractionPage() {
                   <ol className="mt-4 space-y-3 text-sm leading-6 text-text-secondary">
                     <li>
                       <span className="font-medium text-foreground">1.</span>{" "}
-                      Upload a contract to extract pages and detect structure.
+                      Upload a document to extract pages and detect structure.
                     </li>
                     <li>
                       <span className="font-medium text-foreground">2.</span>{" "}
@@ -660,7 +660,7 @@ export default function NewExtractionPage() {
                         )}
                       <p className="mt-2 text-sm leading-6 text-text-secondary">
                         Classify this document, extract structured metadata, and
-                        detect any parent contract.
+                        detect related documents when present.
                       </p>
 
                       {analyzingContract && (
@@ -786,13 +786,21 @@ export default function NewExtractionPage() {
               ref={targetResultRef}
               className="extraction-workspace-inner animate-fade-in"
             >
-              <p className="text-base font-medium text-foreground">
-                Extraction Workspace
-              </p>
-              <p className="mt-1 text-sm text-text-secondary">
-                Source evidence first — click any result to highlight it in the
-                PDF.
-              </p>
+              <div className="flex flex-wrap items-end justify-between gap-3">
+                <div>
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-text-teal">
+                    Source Verification
+                  </p>
+                  <p className="mt-1 text-lg font-medium text-foreground">
+                    PDF + Results workspace
+                  </p>
+                  <p className="mt-1 max-w-2xl text-sm text-text-secondary">
+                    Click any extracted value to jump to its page, highlight the
+                    evidence, and Verify / Edit / Reject — this is the core
+                    Data Agent experience.
+                  </p>
+                </div>
+              </div>
 
               <div className="mt-4">
                 <ExtractionSummaryBar result={targetResult} />
@@ -808,7 +816,7 @@ export default function NewExtractionPage() {
                   (only hidden/fixed via CSS) so its render cache survives
                   opening and closing the drawer repeatedly.
               */}
-              <div className="mt-4 grid gap-5 lg:grid-cols-[minmax(0,0.48fr)_minmax(0,0.52fr)]">
+              <div className="mt-4 grid gap-5 lg:grid-cols-[minmax(0,0.5fr)_minmax(0,0.5fr)]">
                 <div
                   className={[
                     mobileSourceOpen

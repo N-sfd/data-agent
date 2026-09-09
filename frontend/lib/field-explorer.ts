@@ -29,7 +29,10 @@ export async function aggregateFieldAcrossRepository(
         if (!field?.value?.trim()) return;
 
         const titleField = analysis.metadata_fields.find(
-          (item) => item.field_key === "contract_title",
+          (item) =>
+            item.field_key === "contract_title" ||
+            item.field_key === "document_title" ||
+            item.field_key === "report_title",
         );
         const counterpartyField = analysis.metadata_fields.find(
           (item) =>

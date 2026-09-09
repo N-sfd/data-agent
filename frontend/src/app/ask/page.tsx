@@ -263,10 +263,10 @@ function AskPageContent() {
               <EmptyState
                 variant="documents"
                 title="No matching evidence found"
-                description={`We searched across repository contracts but found no verified evidence for "${response.searchQuery}".`}
+                description={`We searched across the document repository but found no verified evidence for "${response.searchQuery}".`}
                 action={
                   <Link href="/repository" className="btn-secondary text-xs">
-                    Browse All Repository Contracts
+                    Browse Document Repository
                   </Link>
                 }
               />

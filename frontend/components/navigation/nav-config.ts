@@ -118,7 +118,7 @@ export const INTELLIGENCE_SECTIONS: MegaMenuSection[] = [
       },
       {
         label: "Clause Search",
-        description: "Search provisions across agreements",
+        description: "Search FAR/DFARS provisions across contracts",
         href: "/clauses",
         icon: Search,
       },

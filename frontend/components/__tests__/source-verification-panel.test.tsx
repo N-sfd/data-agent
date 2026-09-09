@@ -66,7 +66,8 @@ describe("SourceVerificationPanel", () => {
     await waitFor(() =>
       expect(screen.getByAltText("Page 1")).toBeInTheDocument(),
     );
-    expect(screen.getByText("Page 1 of 3")).toBeInTheDocument();
+    expect(screen.getByText(/Page 1 of 3/)).toBeInTheDocument();
+    expect(screen.getByText("Source Verification")).toBeInTheDocument();
     expect(getPageRenderMock).toHaveBeenCalledWith(
       "doc-1",
       1,
@@ -88,7 +89,9 @@ describe("SourceVerificationPanel", () => {
       />,
     );
 
-    await waitFor(() => expect(screen.getByText("Page 1 of 10")).toBeInTheDocument());
+    await waitFor(() =>
+      expect(screen.getByText(/Page 1 of 10/)).toBeInTheDocument(),
+    );
 
     rerender(
       <SourceVerificationPanel
@@ -99,7 +102,9 @@ describe("SourceVerificationPanel", () => {
       />,
     );
 
-    await waitFor(() => expect(screen.getByText("Page 7 of 10")).toBeInTheDocument());
+    await waitFor(() =>
+      expect(screen.getByText(/Page 7 of 10/)).toBeInTheDocument(),
+    );
     // Page 8 may also have been prefetched in the background — assert the
     // page-7 fetch happened, not that it was necessarily the last call.
     expect(getPageRenderMock).toHaveBeenCalledWith("doc-1", 7, "Vendor Name: Acme");

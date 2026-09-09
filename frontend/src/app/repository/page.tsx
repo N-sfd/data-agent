@@ -267,7 +267,7 @@ export default function RepositoryPage() {
                 setOffset(0);
                 setQuery(event.target.value);
               }}
-              placeholder="Search documents, counterparties, fields, or clauses..."
+              placeholder="Search documents, parties, fields, or content..."
               className="w-full rounded-2xl border border-border bg-surface py-3.5 pl-11 pr-4 text-[15px] outline-none transition duration-200 focus:border-primary/30 focus:shadow-[var(--shadow-soft)]"
             />
           </div>

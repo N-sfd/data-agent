@@ -196,16 +196,33 @@ export default function SourceVerificationPanel({
     setHighlightText(lastQuery);
   }
 
+  const selectedLabel = request?.label?.trim();
+  const selectedValue = request?.value?.trim();
+
   return (
-    <div className="flex h-full min-h-[420px] flex-col overflow-hidden rounded-xl border border-border bg-surface">
-      <div className="flex shrink-0 items-center justify-between gap-3 border-b border-border px-4 py-3">
+    <div className="flex h-full min-h-[420px] flex-col overflow-hidden rounded-xl border border-primary/20 bg-surface shadow-[var(--shadow-soft)]">
+      <div className="flex shrink-0 items-start justify-between gap-3 border-b border-border bg-primary/[0.04] px-4 py-3">
         <div className="min-w-0">
-          <p className="truncate text-sm font-semibold text-foreground">
+          <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-text-teal">
+            Source Verification
+          </p>
+          <p className="mt-0.5 truncate text-sm font-semibold text-foreground">
             {documentName}
           </p>
           <p className="text-xs text-text-secondary">
             Page {currentPage} of {pageCount}
+            {selectedLabel ? ` · ${selectedLabel}` : ""}
           </p>
+          {selectedValue ? (
+            <p className="mt-1 truncate text-xs text-foreground">
+              Highlighting:{" "}
+              <span className="font-medium">{selectedValue}</span>
+            </p>
+          ) : (
+            <p className="mt-1 text-xs text-text-muted">
+              Click a result to jump to its evidence in the PDF.
+            </p>
+          )}
         </div>
         {renderLoading && (
           <Loader2 className="h-4 w-4 shrink-0 animate-spin text-text-muted" />

@@ -121,7 +121,7 @@ function ExplorerContent() {
                   type="text"
                   value={fieldQuery}
                   onChange={(event) => setFieldQuery(event.target.value)}
-                  placeholder="Payment terms, governing law, supplier..."
+                  placeholder="Payment terms, invoice number, sample ID..."
                   className="w-full rounded-xl border border-border bg-surface py-2.5 pl-10 pr-3 text-sm outline-none focus:border-primary/30 focus:ring-2 focus:ring-primary/10"
                 />
               </div>
@@ -163,7 +163,7 @@ function ExplorerContent() {
       {loading ? (
         <div className="mt-10 flex items-center gap-2 text-sm text-text-secondary">
           <Loader2 className="h-4 w-4 animate-spin" />
-          Extracting contract fields across repository...
+          Extracting fields across the document repository...
         </div>
       ) : aggregation ? (
         <div className="mt-8 grid min-w-0 gap-6 lg:grid-cols-[minmax(260px,0.38fr)_minmax(0,0.62fr)]">
@@ -234,10 +234,10 @@ function ExplorerContent() {
                     <thead>
                       <tr className="border-b border-border bg-surface-soft">
                         <th className="px-6 py-3 text-left text-xs font-semibold text-foreground">
-                          Contract
+                          Document
                         </th>
                         <th className="px-4 py-3 text-left text-xs font-semibold text-foreground">
-                          Counterparty
+                          Party
                         </th>
                         <th className="px-4 py-3 text-left text-xs font-semibold text-foreground">
                           Effective
@@ -294,8 +294,8 @@ function ExplorerContent() {
             ) : (
               <EmptyState
                 variant="fields"
-                title="Select a value to explore matching contracts"
-                description="Click any distribution row to open the cross-contract results table."
+                title="Select a value to explore matching documents"
+                description="Click any distribution row to open the cross-document results table."
               />
             )}
           </div>

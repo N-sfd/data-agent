@@ -133,7 +133,7 @@ export default function ExtractionModelsPage() {
       <PageHero
         eyebrow="Settings"
         title="Extraction Models"
-        description="Define reusable field templates for Contract Intelligence runs."
+        description="Define reusable field templates for document extraction runs."
       />
 
       <ContentSection>

@@ -48,7 +48,7 @@ export default function GlobalHeader({ onOpenSearch }: GlobalHeaderProps) {
           </Link>
         </div>
 
-        {/* Primary nav — can shrink; secondary items collapse first */}
+        {/* Primary nav — Platform, Intelligence, Review stay visible */}
         <nav className="header-nav" aria-label="Main navigation">
           <NavDropdown
             label="Platform"
@@ -61,12 +61,12 @@ export default function GlobalHeader({ onOpenSearch }: GlobalHeaderProps) {
             overviewTitle="Intelligence Overview"
             sections={INTELLIGENCE_SECTIONS}
           />
-          <div className="header-nav-secondary">
-            <NavDropdown
-              label="Review"
-              overviewTitle="Review Overview"
-              sections={REVIEW_SECTIONS}
-            />
+          <NavDropdown
+            label="Review"
+            overviewTitle="Review Overview"
+            sections={REVIEW_SECTIONS}
+          />
+          <div className="header-nav-governance">
             <NavDropdown
               label="Governance"
               overviewTitle="Governance Overview"
@@ -77,7 +77,7 @@ export default function GlobalHeader({ onOpenSearch }: GlobalHeaderProps) {
             <NavDropdown
               label="More"
               overviewTitle="More"
-              sections={[...REVIEW_SECTIONS, ...GOVERNANCE_SECTIONS]}
+              sections={GOVERNANCE_SECTIONS}
             />
           </div>
         </nav>

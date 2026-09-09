@@ -293,7 +293,7 @@ export default function DocumentUploader({
         </h2>
 
         <p className="mt-2 text-sm leading-6 text-text-secondary">
-          Contracts, financial documents, invoices, and scanned agreements.
+          Contracts, financial documents, lab records, BRDs, and scanned files.
         </p>
       </div>
 
