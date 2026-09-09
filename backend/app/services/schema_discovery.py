@@ -14,6 +14,7 @@ from app.services.clin_block_detector import (
     detect_repeated_records,
 )
 from app.services.entity_classifier import classify_target_type
+from app.services.generic_kv_scanner import is_internal_form_name
 from app.services.structure_detection import (
     DETECTION_PAGE_LIMIT,
     KNOWN_TEMPLATE_KEYS,
@@ -24,6 +25,9 @@ from app.services.structure_detection import (
 
 def _has_source_evidence(target: DetectedTarget) -> bool:
     """Detected = we can point to where it exists in the document."""
+    if is_internal_form_name(target.key) or is_internal_form_name(target.label):
+        return False
+
     if not target.evidence:
         return False
 

@@ -1,7 +1,11 @@
 from types import SimpleNamespace
 
 from app.schemas.document_target import DocumentTarget
-from app.services.generic_kv_scanner import is_internal_form_name, is_plausible_kv_label
+from app.services.generic_kv_scanner import (
+    is_internal_form_name,
+    is_plausible_kv_label,
+    map_form_value_to_visible_label,
+)
 from app.services.target_extraction_service import (
     _resolve_scalar_from_source_examples,
     _resolve_scalar_target,
@@ -122,9 +126,56 @@ def test_is_internal_form_name() -> None:
     # Real business labels should NOT be internal
     assert is_internal_form_name("SOLICITATION NO.") is False
     assert is_internal_form_name("Contract Number") is False
+    assert is_internal_form_name("Contract Form Number") is False
     assert is_internal_form_name("DODAAC") is False
     assert is_internal_form_name("Effective Date") is False
     assert is_internal_form_name("WAWF Payment Office") is False
+
+
+def test_map_form_value_to_visible_label() -> None:
+    text = (
+        "SOLICITATION NO. FA300224C0008\n"
+        "CONTRACT NO.\n"
+        "FA300224C0009\n"
+        "Other contract text."
+    )
+    assert (
+        map_form_value_to_visible_label(text, "FA300224C0008")
+        == "SOLICITATION NO"
+    )
+    assert (
+        map_form_value_to_visible_label(text, "FA300224C0009")
+        == "CONTRACT NO"
+    )
+    assert map_form_value_to_visible_label(text, "MISSING") is None
+    assert (
+        map_form_value_to_visible_label(
+            "topmostSubform[0].Page1[0]: FA300224C0008",
+            "FA300224C0008",
+        )
+        is None
+    )
+
+
+def test_scan_form_fields_maps_xfa_path_to_visible_label() -> None:
+    from app.services.generic_kv_scanner import scan_page_for_labeled_pairs
+
+    page = SimpleNamespace(
+        page_number=1,
+        final_text="SOLICITATION NO. FA300224C0008\nIssued By: ACC",
+        form_fields_json={
+            "topmostSubform[0].Page1[0].PG11I[0]": "FA300224C0008",
+            "topmostSubform[0].Page1[0].PG99Z[0]": "NO_VISIBLE_LABEL_VALUE",
+        },
+        tables_json=[],
+    )
+    pairs = scan_page_for_labeled_pairs(page=page)
+    labels = {pair.raw_label for pair in pairs}
+
+    assert "SOLICITATION NO." in labels or "SOLICITATION NO" in labels
+    assert not any("topmostSubform" in label for label in labels)
+    assert not any("PG11I" in label for label in labels)
+    assert "NO_VISIBLE_LABEL_VALUE" not in {pair.value for pair in pairs}
 
 
 def test_field_probe_evidence_resolves_via_source_examples() -> None:

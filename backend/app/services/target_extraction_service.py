@@ -25,6 +25,7 @@ from app.services.confidence_engine import (
 )
 from app.services.detected_target_store import load_document_targets
 from app.services.form_field_search import search_form_fields
+from app.services.generic_kv_scanner import is_internal_form_name
 from app.services.generic_label_extractor import extract_labeled_value
 from app.services.source_validator import validate_source_value
 
@@ -565,9 +566,24 @@ async def extract_by_targets(
                 scalars.append(result)
             resolved_keys.add(result.target)
 
-    still_unresolved = unresolved + [
-        target.key for target in needs_ai if target.key not in resolved_keys
-    ]
+    still_unresolved: list[str] = list(unresolved)
+    skipped_internal = 0
+    for target in needs_ai:
+        if target.key in resolved_keys:
+            continue
+        if is_internal_form_name(target.key) or is_internal_form_name(
+            target.label or ""
+        ):
+            skipped_internal += 1
+            continue
+        still_unresolved.append(target.key)
+
+    if skipped_internal:
+        warnings.append(
+            f"{skipped_internal} internal form field"
+            f"{' was' if skipped_internal == 1 else 's were'} skipped "
+            "because no readable value could be mapped."
+        )
 
     return ExtractTargetsResponse(
         document_id=document.id,

@@ -116,7 +116,8 @@ function matchesMethodFilter(row: FieldRow, filter: string): boolean {
 }
 
 function isInternalKey(key: string, label: string): boolean {
-  const pattern = /\[\d+\]|topmostsubform|subform|^pg\d+/i;
+  const pattern =
+    /\[\d+\]|topmostsubform|\bsubform\b|\bxfa\b|\bpg\d+[a-z]*\b|\bform\d+\b|textfield\d*|checkbox\d*/i;
   return pattern.test(key) || pattern.test(label);
 }
 

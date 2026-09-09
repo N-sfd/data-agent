@@ -57,7 +57,7 @@ _ALL_CAPS = re.compile(r"^[A-Z0-9 /#.'\-]+$")
 _NUMERIC_ONLY = re.compile(r"^[\s\d.,$%()-]+$")
 
 # Internal PDF form field names (XFA, AcroForm, LiveCycle).
-# These are never meaningful business labels.
+# These are never meaningful business labels for the schema picker.
 _INTERNAL_FORM_PATTERNS = [
     re.compile(r"\[\d+\]"),                     # array indices: [0], [1]
     re.compile(r"\btopmostsubform\b", re.I),    # XFA root
@@ -65,16 +65,15 @@ _INTERNAL_FORM_PATTERNS = [
     re.compile(r"\bPage\d+\b"),                 # Page1, Page2
     re.compile(r"\bPG\d+[A-Z]*\b"),             # PG11I, PG2A
     re.compile(r"\bxfa\b", re.I),               # xfa namespace
-    re.compile(r"\bform\d*\b", re.I),           # form1, Form
-    re.compile(r"\bTextField\b", re.I),          # generic field names
+    re.compile(r"\bform\d+\b", re.I),           # form1 (not bare "Form")
+    re.compile(r"\bTextField\d*\b", re.I),
     re.compile(r"\bCheckBox\d*\b", re.I),
     re.compile(r"\bRadioButton\d*\b", re.I),
     re.compile(r"\bSignatureField\d*\b", re.I),
     re.compile(r"\bNumericField\d*\b", re.I),
     re.compile(r"\bDateTimeField\d*\b", re.I),
     re.compile(r"\bDropDownList\d*\b", re.I),
-    re.compile(r"\bTextField\d*\b", re.I),
-    re.compile(r"^#", re.I),                    # #subform, #field
+    re.compile(r"^#"),                          # #subform, #field
 ]
 
 
@@ -83,6 +82,58 @@ def is_internal_form_name(name: str) -> bool:
     if not name or not name.strip():
         return True
     return any(pattern.search(name) for pattern in _INTERNAL_FORM_PATTERNS)
+
+
+def map_form_value_to_visible_label(text: str, value: str) -> str | None:
+    """
+    Map a form-field value to a nearby human-readable label in page text.
+
+    Example: XFA path topmostSubform[0].Page1[0].PG11I[0] with value
+    FA300224C0008 and nearby text "SOLICITATION NO. FA300224C0008"
+    → returns "SOLICITATION NO."
+    """
+    cleaned_value = " ".join((value or "").split()).strip()
+    cleaned_text = text or ""
+    if not cleaned_text or len(cleaned_value) < 2:
+        return None
+
+    escaped = re.escape(cleaned_value)
+    same_line = re.compile(
+        rf"(?P<label>[A-Za-z][A-Za-z0-9 /#.'\-]{{1,60}}?)\s*[:#.-]\s*{escaped}\b",
+        re.IGNORECASE | re.MULTILINE,
+    )
+    match = same_line.search(cleaned_text)
+    if match:
+        label = " ".join(match.group("label").split()).strip().rstrip(".:-")
+        if (
+            label
+            and not is_internal_form_name(label)
+            and is_plausible_kv_label(label)
+        ):
+            return label
+
+    # Stacked layout: previous line is the label, current line is the value.
+    for index, line in enumerate(cleaned_text.splitlines()):
+        line_stripped = line.strip()
+        if cleaned_value not in line_stripped:
+            continue
+        if index == 0:
+            continue
+        # Prefer lines that are mostly the value itself.
+        if line_stripped != cleaned_value and not line_stripped.startswith(
+            cleaned_value
+        ):
+            continue
+        prev = cleaned_text.splitlines()[index - 1].strip().rstrip(".:-")
+        prev = " ".join(prev.split())
+        if (
+            prev
+            and not is_internal_form_name(prev)
+            and is_plausible_kv_label(prev)
+        ):
+            return prev
+
+    return None
 
 
 @dataclass(frozen=True)
@@ -242,17 +293,29 @@ def is_plausible_kv_label(label: str) -> bool:
 
 def _scan_form_fields(page: DocumentPage) -> list[ScannedPair]:
     pairs: list[ScannedPair] = []
+    page_text = page.final_text or ""
     for raw_label, value in (page.form_fields_json or {}).items():
         if not value or not str(value).strip():
             continue
         label_str = str(raw_label).strip()
+        value_str = str(value).strip()
+
+        # Raw XFA/AcroForm paths are never shown as targets. Prefer a
+        # nearby visible label when the filled value appears in page text.
         if is_internal_form_name(label_str):
+            mapped = map_form_value_to_visible_label(page_text, value_str)
+            if not mapped:
+                continue
+            label_str = mapped
+
+        if not is_plausible_kv_label(label_str):
             continue
+
         pairs.append(
             ScannedPair(
                 raw_label=label_str,
                 normalized_label=_normalize_label(label_str),
-                value=str(value).strip(),
+                value=value_str,
                 method="form_field",
                 confidence=0.95,
             )

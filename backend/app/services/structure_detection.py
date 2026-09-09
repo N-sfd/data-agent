@@ -881,11 +881,15 @@ async def detect_document_structures(
         for pair in scan_page_for_labeled_pairs(page=page):
             if pair.normalized_label in known_probe_labels:
                 continue
+            if is_internal_form_name(pair.raw_label):
+                continue
             if not is_plausible_kv_label(pair.raw_label):
                 continue
 
             slug = _slugify(pair.raw_label)
             if _kv_slug_looks_like_prose(slug):
+                continue
+            if is_internal_form_name(slug) or is_internal_form_name(f"kv_{slug}"):
                 continue
 
             detected.append(

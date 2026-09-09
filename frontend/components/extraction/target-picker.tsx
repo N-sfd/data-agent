@@ -81,14 +81,24 @@ export default function TargetPicker({
     setEditingKey(null);
   }
 
+  const visibleTargets = useMemo(
+    () =>
+      targets.filter((target) => {
+        const pattern =
+          /\[\d+\]|topmostsubform|\bsubform\b|\bxfa\b|\bpg\d+[a-z]*\b|\bform\d+\b/i;
+        return !pattern.test(target.label) && !pattern.test(target.key);
+      }),
+    [targets],
+  );
+
   const filtered = useMemo(
-    () => filterTargets(targets, query),
-    [targets, query],
+    () => filterTargets(visibleTargets, query),
+    [visibleTargets, query],
   );
   const grouped = useMemo(() => groupTargets(filtered), [filtered]);
-  const hasAnyDetected = targets.length > 0;
-  const fieldCount = targets.filter((t) => t.target_type === "field").length;
-  const tableCount = targets.filter((t) => t.target_type === "table").length;
+  const hasAnyDetected = visibleTargets.length > 0;
+  const fieldCount = visibleTargets.filter((t) => t.target_type === "field").length;
+  const tableCount = visibleTargets.filter((t) => t.target_type === "table").length;
 
   return (
     <div className="overflow-hidden rounded-xl border border-border bg-surface">
@@ -104,7 +114,7 @@ export default function TargetPicker({
         />
         {hasAnyDetected && (
           <span className="shrink-0 text-[11px] font-medium text-text-muted">
-            {targets.length} detected
+            {visibleTargets.length} detected
           </span>
         )}
       </div>
