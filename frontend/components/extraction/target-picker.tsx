@@ -344,27 +344,16 @@ export default function TargetPicker({
           type="button"
           disabled={disabled || filtered.length === 0}
           onClick={() => onSelectAllVisible(filtered.map((t) => t.id))}
-          className="rounded-lg px-3 py-1.5 text-xs font-medium text-primary transition hover:underline disabled:opacity-40"
+          className="rounded-lg border border-border px-3 py-1.5 text-xs font-medium text-foreground transition hover:bg-surface-soft disabled:opacity-40"
         >
-          Select All{filtered.length ? ` (${filtered.length})` : ""}
+          {selectedIds.size === filtered.length && filtered.length > 0
+            ? `Select all ${filtered.length} ✓`
+            : `Select all ${filtered.length || ""}`.trim()}
         </button>
         <div className="flex-1" />
-        <button
-          type="button"
-          disabled={disabled || fieldCount === 0}
-          onClick={() => onSelectAll("field")}
-          className="rounded-lg border border-border px-3 py-1.5 text-xs font-medium text-foreground transition hover:bg-surface-soft disabled:opacity-40"
-        >
-          Extract All Fields{fieldCount ? ` (${fieldCount})` : ""}
-        </button>
-        <button
-          type="button"
-          disabled={disabled || tableCount === 0}
-          onClick={() => onSelectAll("table")}
-          className="rounded-lg border border-border px-3 py-1.5 text-xs font-medium text-foreground transition hover:bg-surface-soft disabled:opacity-40"
-        >
-          Extract All Tables{tableCount ? ` (${tableCount})` : ""}
-        </button>
+        <span className="text-xs text-text-muted">
+          {selectedIds.size} selected
+        </span>
       </div>
     </div>
   );

@@ -1,8 +1,7 @@
 "use client";
 
-import { AlertCircle, ArrowRight, CheckCircle2, Loader2, RefreshCw } from "lucide-react";
+import { AlertCircle, ArrowRight, Loader2, RefreshCw } from "lucide-react";
 import Link from "next/link";
-import type { ReactNode } from "react";
 
 interface LoadingStateProps {
   title?: string;
@@ -12,7 +11,7 @@ interface LoadingStateProps {
 
 export function LoadingState({
   title = "Loading data...",
-  description = "Retrieving verified records and synchronizing workspace...",
+  description = "Connecting to Data Agent…",
   compact = false,
 }: LoadingStateProps) {
   if (compact) {
@@ -26,18 +25,45 @@ export function LoadingState({
 
   return (
     <div className="flex flex-col items-center justify-center px-4 py-16 text-center">
-      <div className="relative mb-5 flex h-14 w-14 items-center justify-center rounded-2xl border border-border bg-surface-soft shadow-inner">
-        <Loader2 className="h-7 w-7 animate-spin text-sirion-teal" />
-        <div className="absolute inset-0 rounded-2xl bg-sirion-teal/5 animate-pulse" />
+      <div className="mb-6 w-full max-w-md space-y-3">
+        <div className="h-4 w-3/4 animate-pulse rounded bg-border/80" />
+        <div className="h-4 w-full animate-pulse rounded bg-border/60" />
+        <div className="h-4 w-5/6 animate-pulse rounded bg-border/70" />
+        <div className="mt-4 grid grid-cols-2 gap-3">
+          <div className="h-16 animate-pulse rounded-xl bg-border/50" />
+          <div className="h-16 animate-pulse rounded-xl bg-border/50" />
+        </div>
+      </div>
+      <div className="relative mb-5 flex h-10 w-10 items-center justify-center rounded-2xl border border-border bg-surface-soft">
+        <Loader2 className="h-5 w-5 animate-spin text-sirion-teal" />
       </div>
       <h3 className="text-base font-semibold text-foreground">{title}</h3>
       <p className="mt-1.5 max-w-sm text-xs leading-relaxed text-text-muted">
         {description}
       </p>
-      <div className="mt-5 flex items-center gap-2 rounded-full border border-border/80 bg-surface-soft/60 px-3.5 py-1 text-[11px] text-text-muted">
-        <span className="h-1.5 w-1.5 rounded-full bg-sirion-teal animate-ping" />
-        <span>Backend live sync · Source verification active</span>
-      </div>
+    </div>
+  );
+}
+
+export function ColdStartState({ onRetry }: { onRetry?: () => void }) {
+  return (
+    <div className="rounded-2xl border border-warning/30 bg-warning/5 px-4 py-6 text-center">
+      <Loader2 className="mx-auto h-6 w-6 animate-spin text-warning" />
+      <h3 className="mt-3 text-sm font-semibold text-foreground">
+        Processing service is waking up
+      </h3>
+      <p className="mt-1 text-xs text-text-secondary">
+        This can take up to 60 seconds on free-tier hosting.
+      </p>
+      {onRetry && (
+        <button
+          type="button"
+          onClick={onRetry}
+          className="btn-secondary mt-4 text-xs"
+        >
+          Check again
+        </button>
+      )}
     </div>
   );
 }
@@ -74,7 +100,7 @@ export function ErrorState({
             className="btn-secondary inline-flex items-center gap-1.5 px-4 py-2 text-xs font-semibold"
           >
             <RefreshCw className="h-3.5 w-3.5" />
-            Retry Connection
+            Retry
           </button>
         )}
         {actionHref && actionLabel && (

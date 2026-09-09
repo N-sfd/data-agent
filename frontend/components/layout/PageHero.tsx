@@ -6,6 +6,8 @@ interface PageHeroProps {
   description?: string;
   actions?: ReactNode;
   visual?: ReactNode;
+  /** Small secondary line under the description (e.g. specialization link). */
+  specialization?: ReactNode;
 }
 
 export default function PageHero({
@@ -14,6 +16,7 @@ export default function PageHero({
   description,
   actions,
   visual,
+  specialization,
 }: PageHeroProps) {
   return (
     <section className="page-hero">
@@ -31,6 +34,7 @@ export default function PageHero({
               <p className="page-hero-description">{description}</p>
             </div>
           )}
+          {specialization && <div className="mt-3">{specialization}</div>}
           {actions && <div className="page-hero-actions">{actions}</div>}
         </div>
         {visual && <div className="page-hero-visual">{visual}</div>}

@@ -84,8 +84,8 @@ export default function ReviewQueuePage() {
   const [query, setQuery] = useState("");
   const [documentType, setDocumentType] = useState("");
   const [activeBucket, setActiveBucket] = useState<
-    ReviewQueueBucket | "all"
-  >("all");
+    ReviewQueueBucket | "needs_review" | "all"
+  >("needs_review");
 
   const [acceptingId, setAcceptingId] = useState<string | null>(null);
   const [rowErrors, setRowErrors] = useState<Record<string, string>>({});
@@ -188,17 +188,24 @@ export default function ReviewQueuePage() {
     }
   }
 
-  const visibleSections = SECTIONS.filter(
-    (section) =>
-      activeBucket === "all" || activeBucket === section.bucket,
+  const needsReviewCount = useMemo(
+    () =>
+      filteredEntries.filter((entry) => entry.queue_bucket !== "high").length,
+    [filteredEntries],
   );
+
+  const visibleSections = SECTIONS.filter((section) => {
+    if (activeBucket === "all") return true;
+    if (activeBucket === "needs_review") return section.bucket !== "high";
+    return activeBucket === section.bucket;
+  });
 
   return (
     <>
       <PageHero
         eyebrow="Review"
         title="Review Queue"
-        description="Complete human review for extracted contract fields."
+        description="Focus on items that need human verification — low confidence, conflicts, and corrections. High-confidence results stay out of the default queue."
         actions={
           <button
             type="button"
@@ -216,6 +223,27 @@ export default function ReviewQueuePage() {
 
       <ContentSection>
       <div className="mb-4 flex flex-wrap items-center gap-2">
+        <button
+          type="button"
+          onClick={() => setActiveBucket("needs_review")}
+          className={[
+            "inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-semibold transition",
+            activeBucket === "needs_review"
+              ? "bg-primary text-white"
+              : "border border-border bg-surface text-text-secondary hover:bg-surface-soft",
+          ].join(" ")}
+        >
+          Needs Review
+          <span
+            className={
+              activeBucket === "needs_review"
+                ? "text-white/80"
+                : "text-text-muted"
+            }
+          >
+            {needsReviewCount}
+          </span>
+        </button>
         <button
           type="button"
           onClick={() => setActiveBucket("all")}

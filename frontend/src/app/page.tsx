@@ -48,12 +48,21 @@ export default function HomePage() {
         eyebrow="Consult America Data Agent"
         title={
           <>
-            Contract Intelligence
+            Document Intelligence
             <br />
             with confidence and precision
           </>
         }
-        description="Extract, search, compare and understand every agreement across your contract repository."
+        description="Extract, verify, search and understand critical information across contracts, financial documents and complex business records."
+        specialization={
+          <Link
+            href="/clauses"
+            className="inline-flex items-center gap-1.5 text-sm font-medium text-text-teal transition hover:text-primary"
+          >
+            Contract Intelligence
+            <ArrowRight className="h-3.5 w-3.5" />
+          </Link>
+        }
         actions={
           <>
             <Link href="/extraction/new" className="btn-hero-primary">
@@ -88,7 +97,7 @@ export default function HomePage() {
         {loading ? (
           <div className="mt-14 flex items-center gap-2 text-sm text-text-secondary">
             <Loader2 className="h-4 w-4 animate-spin" />
-            Building contract intelligence...
+            Building document intelligence...
           </div>
         ) : stats ? (
           <>

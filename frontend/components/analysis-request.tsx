@@ -1,9 +1,10 @@
 "use client";
 
 import { ArrowRight, Loader2, Save, Search } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import ExtractionInstruction from "@/components/extraction/extraction-instruction";
+import SuggestedExtraction from "@/components/extraction/suggested-extraction";
 import TargetPicker, {
   type CustomQuickPick,
 } from "@/components/extraction/target-picker";
@@ -12,6 +13,7 @@ import {
   createExtractionModel,
   listExtractionModels,
 } from "@/lib/extraction-models";
+import { resolveSuggestionGroups } from "@/lib/suggestion-groups";
 import type {
   DocumentTarget,
   ExtractionJob,
@@ -39,7 +41,9 @@ interface AnalysisRequestProps {
   waking?: boolean;
   extractionJob?: ExtractionJob | null;
   targets?: DocumentTarget[];
+  documentFamily?: string | null;
   documentFamilyLabel?: string | null;
+  documentFamilyConfidence?: number | null;
   schemaDiscovering?: boolean;
   schemaDiscoveryError?: string;
   onRetryDiscovery?: () => void;
@@ -60,7 +64,7 @@ interface AnalysisRequestProps {
 const CUSTOM_QUICK_PICKS: CustomQuickPick[] = [
   {
     key: "custom_instruction",
-    label: "Write a custom instruction",
+    label: "Custom Extraction…",
     prompt: "",
   },
 ];
@@ -70,7 +74,9 @@ export default function AnalysisRequest({
   waking = false,
   extractionJob = null,
   targets = [],
+  documentFamily = null,
   documentFamilyLabel = null,
+  documentFamilyConfidence = null,
   schemaDiscovering = false,
   schemaDiscoveryError = "",
   onRetryDiscovery,
@@ -84,6 +90,7 @@ export default function AnalysisRequest({
   const [extracting, setExtracting] = useState(false);
   const [extractError, setExtractError] = useState("");
   const [noMatch, setNoMatch] = useState(false);
+  const [didApplyDefaults, setDidApplyDefaults] = useState(false);
 
   const [instruction, setInstruction] = useState("");
   const [instructionExpanded, setInstructionExpanded] = useState(false);
@@ -101,6 +108,39 @@ export default function AnalysisRequest({
 
   const busy = disabled || extracting || asking;
 
+  const suggestionGroups = useMemo(
+    () => resolveSuggestionGroups(documentFamily, targets),
+    [documentFamily, targets],
+  );
+
+  const fieldTargets = useMemo(
+    () => targets.filter((t) => t.target_type !== "table"),
+    [targets],
+  );
+  const tableTargets = useMemo(
+    () => targets.filter((t) => t.target_type === "table"),
+    [targets],
+  );
+
+  useEffect(() => {
+    setDidApplyDefaults(false);
+    setSelectedIds(new Set());
+  }, [documentFamily, targets.length]);
+
+  useEffect(() => {
+    if (didApplyDefaults || suggestionGroups.length === 0) return;
+    const next = new Set<string>();
+    for (const group of suggestionGroups) {
+      if (group.defaultSelected) {
+        for (const id of group.targetIds) next.add(id);
+      }
+    }
+    if (next.size > 0) {
+      setSelectedIds(next);
+    }
+    setDidApplyDefaults(true);
+  }, [suggestionGroups, didApplyDefaults]);
+
   async function saveCurrentSelectionAsSchema() {
     if (!saveSchemaName.trim() || selectedIds.size === 0) return;
 
@@ -111,6 +151,7 @@ export default function AnalysisRequest({
       const model = await createExtractionModel(
         saveSchemaName.trim(),
         `Saved from Extraction Workspace (${selectedIds.size} fields)`,
+        documentFamily ? [documentFamily] : ["*"],
       );
 
       const selectedTargets = targets.filter((target) =>
@@ -137,7 +178,7 @@ export default function AnalysisRequest({
     setLoadingModels(true);
 
     try {
-      const models = await listExtractionModels();
+      const models = await listExtractionModels(documentFamily ?? undefined);
       setSavedModels(models);
     } catch (error) {
       setSchemaActionError(
@@ -225,20 +266,22 @@ export default function AnalysisRequest({
 
   function selectAllOfType(targetType: TargetType) {
     const ids = targets
-      .filter((target) => target.target_type === targetType)
+      .filter((target) =>
+        targetType === "field"
+          ? target.target_type !== "table"
+          : target.target_type === targetType,
+      )
       .map((target) => target.id);
 
     if (ids.length === 0) return;
-
     setSelectedIds(new Set(ids));
-    void runExtraction(ids);
+    setNoMatch(false);
   }
 
   function selectAllVisible(targetIds: string[]) {
     if (targetIds.length === 0) return;
-
     setSelectedIds(new Set(targetIds));
-    void runExtraction(targetIds);
+    setNoMatch(false);
   }
 
   function toggleGroup(targetIds: string[]) {
@@ -279,6 +322,13 @@ export default function AnalysisRequest({
     }
   }
 
+  const allFieldsSelected =
+    fieldTargets.length > 0 &&
+    fieldTargets.every((t) => selectedIds.has(t.id));
+  const allTablesSelected =
+    tableTargets.length > 0 &&
+    tableTargets.every((t) => selectedIds.has(t.id));
+
   return (
     <div className="editorial-card p-6 sm:p-8">
       <div className="flex items-start gap-3">
@@ -294,22 +344,31 @@ export default function AnalysisRequest({
             What do you want to extract?
           </p>
           <p className="mt-1 text-sm leading-6 text-text-secondary">
-            Search the document schema — fields, tables, sections, and clauses
-            actually detected in this file.
+            Suggestions follow this document&apos;s detected schema — not
+            static presets or unrelated saved models.
           </p>
         </div>
       </div>
 
       {documentFamilyLabel && (
-        <p className="mt-4 text-xs text-text-secondary">
-          Detected as{" "}
-          <span className="font-medium text-foreground">
-            {documentFamilyLabel}
-          </span>
-        </p>
+        <div className="mt-4 rounded-xl border border-border bg-surface-soft/60 px-4 py-3">
+          <p className="text-[11px] font-semibold uppercase tracking-wider text-text-muted">
+            Detected document
+          </p>
+          <div className="mt-1 flex flex-wrap items-baseline justify-between gap-2">
+            <p className="text-sm font-semibold text-foreground">
+              {documentFamilyLabel}
+            </p>
+            {typeof documentFamilyConfidence === "number" && (
+              <p className="text-xs font-medium text-text-secondary">
+                {Math.round(documentFamilyConfidence * 100)}% confidence
+              </p>
+            )}
+          </div>
+        </div>
       )}
 
-      <div className="mt-5">
+      <div className="mt-5 space-y-4">
         {schemaDiscovering ? (
           <div className="space-y-3 rounded-xl border border-border bg-surface-soft px-4 py-5">
             <div className="flex items-center gap-2 text-sm text-text-secondary">
@@ -326,10 +385,6 @@ export default function AnalysisRequest({
                 />
               ))}
             </div>
-            <p className="text-xs leading-5 text-text-muted">
-            Only structures with source evidence appear — Detected means Data Agent
-            can show where it exists in this file, not that AI thinks it might.
-            </p>
           </div>
         ) : schemaDiscoveryError ? (
           <div className="space-y-3 rounded-xl border border-danger/20 bg-danger/5 p-4">
@@ -350,21 +405,66 @@ export default function AnalysisRequest({
             )}
           </div>
         ) : (
-          <TargetPicker
-            targets={targets}
-            customQuickPicks={CUSTOM_QUICK_PICKS}
-            selectedIds={selectedIds}
-            disabled={busy}
-            onToggle={toggleTarget}
-            onToggleGroup={toggleGroup}
-            onSelectAll={selectAllOfType}
-            onSelectAllVisible={selectAllVisible}
-            onClear={clearSelection}
-            onSelectCustom={selectCustomQuickPick}
-            onAddCustomField={onAddCustomField}
-            onRenameCustomField={onRenameCustomField}
-            onDeleteCustomField={onDeleteCustomField}
-          />
+          <>
+            <SuggestedExtraction
+              groups={suggestionGroups}
+              selectedIds={selectedIds}
+              disabled={busy}
+              onToggleGroup={toggleGroup}
+              fieldCount={fieldTargets.length}
+              tableCount={tableTargets.length}
+              allFieldsSelected={allFieldsSelected}
+              allTablesSelected={allTablesSelected}
+              onSelectAllFields={() => {
+                if (allFieldsSelected) {
+                  setSelectedIds((current) => {
+                    const next = new Set(current);
+                    for (const t of fieldTargets) next.delete(t.id);
+                    return next;
+                  });
+                } else {
+                  setSelectedIds((current) => {
+                    const next = new Set(current);
+                    for (const t of fieldTargets) next.add(t.id);
+                    return next;
+                  });
+                }
+                setNoMatch(false);
+              }}
+              onSelectAllTables={() => {
+                if (allTablesSelected) {
+                  setSelectedIds((current) => {
+                    const next = new Set(current);
+                    for (const t of tableTargets) next.delete(t.id);
+                    return next;
+                  });
+                } else {
+                  setSelectedIds((current) => {
+                    const next = new Set(current);
+                    for (const t of tableTargets) next.add(t.id);
+                    return next;
+                  });
+                }
+                setNoMatch(false);
+              }}
+            />
+
+            <TargetPicker
+              targets={targets}
+              customQuickPicks={CUSTOM_QUICK_PICKS}
+              selectedIds={selectedIds}
+              disabled={busy}
+              onToggle={toggleTarget}
+              onToggleGroup={toggleGroup}
+              onSelectAll={selectAllOfType}
+              onSelectAllVisible={selectAllVisible}
+              onClear={clearSelection}
+              onSelectCustom={selectCustomQuickPick}
+              onAddCustomField={onAddCustomField}
+              onRenameCustomField={onRenameCustomField}
+              onDeleteCustomField={onDeleteCustomField}
+            />
+          </>
         )}
       </div>
 
@@ -392,6 +492,7 @@ export default function AnalysisRequest({
             className="rounded-lg px-2.5 py-1.5 text-xs font-medium text-text-secondary transition hover:text-foreground disabled:opacity-40"
           >
             Reuse saved schema
+            {documentFamilyLabel ? ` (${documentFamilyLabel})` : ""}
           </button>
         </div>
       )}
@@ -417,35 +518,40 @@ export default function AnalysisRequest({
       )}
 
       {savedModels !== null && (
-        <div className="mt-2 rounded-xl border border-border bg-surface-soft p-2.5">
-          {loadingModels ? (
-            <p className="px-1.5 py-1 text-sm text-text-secondary">
-              Loading saved schemas…
+        <div className="mt-2 rounded-xl border border-border bg-surface-soft p-3">
+          <div className="mb-2 flex items-center justify-between gap-2">
+            <p className="text-xs font-medium text-foreground">
+              Saved schemas
+              {documentFamilyLabel ? ` for ${documentFamilyLabel}` : ""}
             </p>
+            <button
+              type="button"
+              onClick={() => setSavedModels(null)}
+              className="text-xs text-text-muted hover:text-foreground"
+            >
+              Close
+            </button>
+          </div>
+          {loadingModels ? (
+            <p className="text-xs text-text-muted">Loading…</p>
           ) : savedModels.length === 0 ? (
-            <p className="px-1.5 py-1 text-sm text-text-secondary">
-              No saved schemas yet.
+            <p className="text-xs text-text-muted">
+              No saved schemas for this document type.
             </p>
           ) : (
-            <ul className="divide-y divide-border">
+            <ul className="space-y-1">
               {savedModels.map((model) => (
-                <li
-                  key={model.id}
-                  className="flex items-center justify-between gap-2 px-1.5 py-1.5"
-                >
-                  <span className="min-w-0 truncate text-sm text-foreground">
-                    {model.name}{" "}
-                    <span className="text-xs text-text-muted">
-                      ({model.fields.length} fields)
-                    </span>
-                  </span>
+                <li key={model.id}>
                   <button
                     type="button"
                     disabled={schemaActionBusy}
                     onClick={() => void applySchema(model)}
-                    className="btn-secondary px-2.5 py-1 text-xs disabled:cursor-not-allowed disabled:opacity-40"
+                    className="w-full rounded-lg px-2 py-1.5 text-left text-sm text-foreground hover:bg-surface disabled:opacity-50"
                   >
-                    Apply
+                    {model.name}
+                    <span className="ml-2 text-xs text-text-muted">
+                      {model.fields.length} fields
+                    </span>
                   </button>
                 </li>
               ))}
@@ -458,95 +564,65 @@ export default function AnalysisRequest({
         <p className="mt-2 text-xs text-danger">{schemaActionError}</p>
       )}
 
-      <button
-        type="button"
-        disabled={busy || selectedIds.size === 0}
-        onClick={() => void runExtraction(Array.from(selectedIds))}
-        className="btn-primary mt-4 disabled:cursor-not-allowed disabled:opacity-40"
-      >
-        {extracting ? (
-          <>
-            <Loader2 className="h-4 w-4 animate-spin" />
-            Extracting selected targets...
-          </>
-        ) : (
-          <>
-            Extract Selected{selectedIds.size ? ` (${selectedIds.size})` : ""}
-            <ArrowRight className="h-4 w-4" />
-          </>
-        )}
-      </button>
-
-      {extracting && (
-        <div className="mt-4 rounded-xl border border-primary/15 bg-primary/5 px-3.5 py-2.5 text-sm text-text-secondary">
-          {waking
-            ? "Waking processing service — first request after idle can take up to a minute."
-            : extractionStageLabel(extractionJob)}
-          {extractionJob && extractionJob.progress > 0 && (
-            <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-primary/10">
-              <div
-                className="h-full rounded-full bg-primary transition-all"
-                style={{ width: `${extractionJob.progress}%` }}
-              />
-            </div>
+      <div className="mt-5 flex flex-wrap items-center gap-3">
+        <p className="text-sm text-text-secondary">
+          {selectedIds.size} selected
+        </p>
+        <button
+          type="button"
+          disabled={busy || selectedIds.size === 0}
+          onClick={() => void runExtraction(Array.from(selectedIds))}
+          className="btn-primary inline-flex items-center gap-2 disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          {extracting ? (
+            <>
+              <Loader2 className="h-4 w-4 animate-spin" />
+              {extractionStageLabel(extractionJob)}
+            </>
+          ) : (
+            <>
+              Extract {selectedIds.size} selected
+              <ArrowRight className="h-4 w-4" />
+            </>
           )}
-        </div>
-      )}
-
-      {noMatch && (
-        <div className="mt-4 rounded-xl border border-warning/25 bg-warning/5 p-4 text-sm text-warning">
-          That selection didn&apos;t resolve to any values in this document.
-        </div>
-      )}
+        </button>
+      </div>
 
       {extractError && (
-        <div className="mt-4 rounded-xl border border-danger/20 bg-danger/5 p-3 text-sm text-danger">
-          {extractError}
-        </div>
+        <p className="mt-3 text-sm text-danger">{extractError}</p>
+      )}
+      {noMatch && (
+        <p className="mt-3 text-sm text-text-secondary">
+          No values were resolved for the selected targets in this document.
+        </p>
       )}
 
       <div className="mt-6 border-t border-border pt-5">
-        <p className="text-xs font-medium text-text-muted">
-          Or ask anything not listed above
-        </p>
-        <div className="mt-2">
-          <ExtractionInstruction
-            value={instruction}
-            disabled={busy}
-            expanded={instructionExpanded}
-            onChange={setInstruction}
-            onToggleExpand={() =>
-              setInstructionExpanded((value) => !value)
-            }
-          />
-        </div>
-
         <button
           type="button"
-          disabled={busy || !instruction.trim()}
-          onClick={() => void askQuestion()}
-          className="btn-secondary mt-3 disabled:cursor-not-allowed disabled:opacity-40"
+          onClick={() => setInstructionExpanded((v) => !v)}
+          className="text-xs font-medium text-text-secondary hover:text-foreground"
         >
-          {asking ? (
-            <>
-              <Loader2 className="h-4 w-4 animate-spin" />
-              Analyzing...
-            </>
-          ) : (
-            "Ask / Extract Custom"
-          )}
+          {instructionExpanded ? "Hide" : "Show"} custom instruction
         </button>
-
-        {asking && waking && (
-          <div className="mt-3 rounded-xl border border-primary/15 bg-primary/5 px-3.5 py-2.5 text-sm text-text-secondary">
-            Waking processing service — first request after idle can take up to
-            a minute.
-          </div>
-        )}
-
-        {askError && (
-          <div className="mt-3 rounded-xl border border-danger/20 bg-danger/5 p-3 text-sm text-danger">
-            {askError}
+        {instructionExpanded && (
+          <div className="mt-3 space-y-3">
+            <ExtractionInstruction
+              value={instruction}
+              onChange={setInstruction}
+              disabled={busy}
+              expanded={instructionExpanded}
+              onToggleExpand={() => setInstructionExpanded((v) => !v)}
+            />
+            <button
+              type="button"
+              disabled={busy || !instruction.trim()}
+              onClick={() => void askQuestion()}
+              className="btn-secondary text-sm disabled:opacity-40"
+            >
+              {asking ? "Asking…" : "Ask with custom instruction"}
+            </button>
+            {askError && <p className="text-xs text-danger">{askError}</p>}
           </div>
         )}
       </div>

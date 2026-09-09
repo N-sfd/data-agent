@@ -11,6 +11,7 @@ import WorkflowBreadcrumb from "@/components/workflow-breadcrumb";
 import ExtractionResultsWorkspace from "@/components/extraction/extraction-results-workspace";
 import ProcessingDetailsDrawer from "@/components/extraction/processing-details-drawer";
 import TargetResults from "@/components/extraction/target-results";
+import ExtractionSummaryBar from "@/components/extraction/extraction-summary-bar";
 import AnalysisRequest from "@/components/analysis-request";
 import UniversalResults from "@/components/universal-results";
 import SourceVerificationPanel, {
@@ -403,6 +404,20 @@ export default function NewExtractionPage() {
 
       setTargetResult(result);
       setTargetResultDurationMs(Date.now() - startedAt);
+
+      const first = result.scalars[0];
+      if (first) {
+        setSourceRequest({
+          id: first.normalized_key,
+          label: first.target,
+          value: String(first.value ?? ""),
+          pageNumber: first.page,
+          highlightText: String(first.value ?? ""),
+          confidence: first.confidence,
+          verified: first.verified,
+        });
+      }
+
       requestAnimationFrame(() => {
         targetResultRef.current?.scrollIntoView({
           behavior: "smooth",
@@ -614,8 +629,12 @@ export default function NewExtractionPage() {
                         target.source !== "template" &&
                         target.source_examples.length > 0,
                     )}
+                    documentFamily={schemaDiscovery?.document_family}
                     documentFamilyLabel={
                       schemaDiscovery?.document_family_label
+                    }
+                    documentFamilyConfidence={
+                      schemaDiscovery?.document_family_confidence
                     }
                     schemaDiscovering={schemaDiscovering || extracting}
                     schemaDiscoveryError={schemaDiscoveryError}
@@ -768,8 +787,16 @@ export default function NewExtractionPage() {
               className="extraction-workspace-inner animate-fade-in"
             >
               <p className="text-base font-medium text-foreground">
-                Extraction Result
+                Extraction Workspace
               </p>
+              <p className="mt-1 text-sm text-text-secondary">
+                Source evidence first — click any result to highlight it in the
+                PDF.
+              </p>
+
+              <div className="mt-4">
+                <ExtractionSummaryBar result={targetResult} />
+              </div>
 
               {/*
                 Responsive strategy:
@@ -781,7 +808,7 @@ export default function NewExtractionPage() {
                   (only hidden/fixed via CSS) so its render cache survives
                   opening and closing the drawer repeatedly.
               */}
-              <div className="mt-4 grid gap-5 lg:grid-cols-[minmax(0,0.58fr)_minmax(0,0.42fr)]">
+              <div className="mt-4 grid gap-5 lg:grid-cols-[minmax(0,0.48fr)_minmax(0,0.52fr)]">
                 <div
                   className={[
                     mobileSourceOpen
@@ -802,15 +829,27 @@ export default function NewExtractionPage() {
                       </button>
                     </div>
                   )}
-                  <SourceVerificationPanel
-                    documentId={document.document_id}
-                    documentName={document.original_filename}
-                    pageCount={document.page_count}
-                    request={sourceRequest}
-                  />
+                  <div className="overflow-hidden rounded-xl border border-border bg-surface">
+                    <div className="border-b border-border bg-surface-soft px-3 py-2">
+                      <p className="text-[11px] font-semibold uppercase tracking-wider text-text-muted">
+                        Source PDF
+                      </p>
+                    </div>
+                    <SourceVerificationPanel
+                      documentId={document.document_id}
+                      documentName={document.original_filename}
+                      pageCount={document.page_count}
+                      request={sourceRequest}
+                    />
+                  </div>
                 </div>
 
                 <div className="min-w-0">
+                  <div className="mb-2">
+                    <p className="text-[11px] font-semibold uppercase tracking-wider text-text-muted">
+                      Extraction Results
+                    </p>
+                  </div>
                   <TargetResults
                     result={targetResult}
                     targets={(schemaDiscovery?.targets ?? []).filter(

@@ -25,9 +25,9 @@ export default function GlobalHeader({ onOpenSearch }: GlobalHeaderProps) {
 
   return (
     <>
-      <header className="global-header shrink-0">
-        {/* Left: Logo & Brand, plus desktop navigation links */}
-        <div className="flex min-w-0 items-center gap-3 lg:gap-8">
+      <header className="global-header app-header shrink-0">
+        {/* Brand — never shrink */}
+        <div className="header-left">
           <Link href="/" className="flex shrink-0 items-center gap-2.5 sm:gap-3">
             <Image
               src="/consult-america-logo.jpg"
@@ -46,23 +46,22 @@ export default function GlobalHeader({ onOpenSearch }: GlobalHeaderProps) {
               </p>
             </div>
           </Link>
+        </div>
 
-          {/* Desktop mega menu dropdowns (lg+ only) */}
-          <nav
-            className="hidden items-center gap-1 lg:flex"
-            aria-label="Main navigation"
-          >
-            <NavDropdown
-              label="Platform"
-              overviewTitle="Platform Overview"
-              overviewLinks={OVERVIEW_LINKS}
-              sections={PLATFORM_SECTIONS}
-            />
-            <NavDropdown
-              label="Intelligence"
-              overviewTitle="Intelligence Overview"
-              sections={INTELLIGENCE_SECTIONS}
-            />
+        {/* Primary nav — can shrink; secondary items collapse first */}
+        <nav className="header-nav" aria-label="Main navigation">
+          <NavDropdown
+            label="Platform"
+            overviewTitle="Platform Overview"
+            overviewLinks={OVERVIEW_LINKS}
+            sections={PLATFORM_SECTIONS}
+          />
+          <NavDropdown
+            label="Intelligence"
+            overviewTitle="Intelligence Overview"
+            sections={INTELLIGENCE_SECTIONS}
+          />
+          <div className="header-nav-secondary">
             <NavDropdown
               label="Review"
               overviewTitle="Review Overview"
@@ -73,17 +72,24 @@ export default function GlobalHeader({ onOpenSearch }: GlobalHeaderProps) {
               overviewTitle="Governance Overview"
               sections={GOVERNANCE_SECTIONS}
             />
-          </nav>
-        </div>
+          </div>
+          <div className="header-nav-more">
+            <NavDropdown
+              label="More"
+              overviewTitle="More"
+              sections={[...REVIEW_SECTIONS, ...GOVERNANCE_SECTIONS]}
+            />
+          </div>
+        </nav>
 
-        {/* Right side: Desktop actions (lg+ only) */}
-        <div className="hidden items-center gap-3 lg:flex">
-          <Link href="/extraction/new" className="btn-new-extraction">
+        {/* Actions — never shrink, never wrap onto nav */}
+        <div className="header-actions">
+          <Link href="/extraction/new" className="btn-new-extraction shrink-0">
             <Plus className="h-4 w-4 shrink-0" strokeWidth={2} />
             <span className="whitespace-nowrap">New Extraction</span>
           </Link>
 
-          <Link href="/ask" className="btn-ask-agent">
+          <Link href="/ask" className="btn-ask-agent shrink-0">
             <Sparkles className="h-4 w-4 shrink-0" strokeWidth={1.75} />
             <span className="whitespace-nowrap">Ask Data Agent</span>
           </Link>
@@ -92,16 +98,20 @@ export default function GlobalHeader({ onOpenSearch }: GlobalHeaderProps) {
             type="button"
             onClick={onOpenSearch}
             aria-label="Search"
-            className="nav-icon-button"
+            className="nav-icon-button shrink-0"
           >
             <Search className="h-4 w-4" strokeWidth={1.75} />
           </button>
 
-          <button type="button" aria-label="Notifications" className="nav-icon-button">
+          <button
+            type="button"
+            aria-label="Notifications"
+            className="nav-icon-button shrink-0"
+          >
             <Bell className="h-4 w-4" strokeWidth={1.75} />
           </button>
 
-          <div className="flex items-center gap-3 border-l border-white/10 pl-3">
+          <div className="flex shrink-0 items-center gap-3 border-l border-white/10 pl-3">
             <BackendStatusPill />
             <Image
               src="/consult-america-logo.jpg"
@@ -113,8 +123,8 @@ export default function GlobalHeader({ onOpenSearch }: GlobalHeaderProps) {
           </div>
         </div>
 
-        {/* Right side: Mobile & Tablet triggers (<lg only) */}
-        <div className="flex items-center gap-1.5 sm:gap-2 lg:hidden">
+        {/* Mobile / tablet triggers */}
+        <div className="header-mobile-triggers">
           <BackendStatusPill />
 
           <button

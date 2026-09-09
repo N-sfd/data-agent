@@ -31,20 +31,47 @@ const PAGE_SIZE = 20;
 
 type QuickFilter =
   | "all"
-  | "active"
+  | "contracts"
+  | "financial"
+  | "invoices"
+  | "laboratory"
+  | "government"
   | "needs_review"
-  | "msa"
-  | "amendment"
-  | "sow";
+  | "active";
 
 const QUICK_FILTERS: { id: QuickFilter; label: string }[] = [
   { id: "all", label: "All" },
-  { id: "active", label: "Active" },
+  { id: "contracts", label: "Contracts" },
+  { id: "financial", label: "Financial" },
+  { id: "invoices", label: "Invoices" },
+  { id: "laboratory", label: "Laboratory" },
+  { id: "government", label: "Government" },
   { id: "needs_review", label: "Needs Review" },
-  { id: "msa", label: "MSA" },
-  { id: "amendment", label: "Amendment" },
-  { id: "sow", label: "SOW" },
+  { id: "active", label: "Active" },
 ];
+
+const CATEGORY_TYPE_MAP: Partial<Record<QuickFilter, string[]>> = {
+  contracts: [
+    "Master Services Agreement",
+    "NDA",
+    "Supplier Agreement",
+    "Purchase Agreement",
+    "Professional Services Agreement",
+    "Software Agreement",
+    "SaaS Agreement",
+    "Lease",
+    "Statement of Work",
+    "Amendment",
+    "Change Order",
+    "Service Level Agreement",
+    "License Agreement",
+    "Consulting Agreement",
+    "Construction Agreement",
+    "Subcontract",
+  ],
+  government: ["Government Contract"],
+  invoices: ["Purchase Order"],
+};
 
 type ViewMode = "table" | "hierarchy";
 
@@ -78,17 +105,17 @@ export default function RepositoryPage() {
       setStatus("review_required");
       setDocumentType("");
       setRepositoryStatus("not_approved");
-    } else if (quickFilter === "msa") {
-      setDocumentType("Master Services Agreement");
+    } else if (quickFilter === "government") {
+      setDocumentType("Government Contract");
       setStatus("");
       setRepositoryStatus("");
-    } else if (quickFilter === "amendment") {
-      setDocumentType("Amendment");
+    } else if (quickFilter === "invoices") {
+      setDocumentType("Purchase Order");
       setStatus("");
       setRepositoryStatus("");
-    } else if (quickFilter === "sow") {
-      setDocumentType("Statement of Work");
+    } else {
       setStatus("");
+      setDocumentType("");
       setRepositoryStatus("");
     }
     setOffset(0);
@@ -115,8 +142,35 @@ export default function RepositoryPage() {
         });
 
         if (!active) return;
-        setDocuments(result.documents);
-        setTotal(result.total);
+
+        let docs = result.documents;
+        const allowedTypes = CATEGORY_TYPE_MAP[quickFilter];
+        if (allowedTypes && allowedTypes.length > 0) {
+          docs = docs.filter(
+            (doc) =>
+              doc.document_type != null &&
+              allowedTypes.includes(doc.document_type),
+          );
+        } else if (quickFilter === "financial") {
+          docs = docs.filter((doc) => {
+            const hay = `${doc.document_type ?? ""} ${doc.original_filename}`.toLowerCase();
+            return /financial|budget|statement|revenue|expense/.test(hay);
+          });
+        } else if (quickFilter === "laboratory") {
+          docs = docs.filter((doc) => {
+            const hay = `${doc.document_type ?? ""} ${doc.original_filename}`.toLowerCase();
+            return /lab|laboratory|cbc|hematology|blood/.test(hay);
+          });
+        }
+
+        setDocuments(docs);
+        setTotal(
+          allowedTypes ||
+            quickFilter === "financial" ||
+            quickFilter === "laboratory"
+            ? docs.length
+            : result.total,
+        );
       } catch (err) {
         if (active) {
           setError(
@@ -142,6 +196,7 @@ export default function RepositoryPage() {
     confidenceMin,
     repositoryStatus,
     offset,
+    quickFilter,
     reloadKey,
   ]);
 
@@ -162,7 +217,7 @@ export default function RepositoryPage() {
           setError(
             err instanceof Error
               ? err.message
-              : "Unable to load the contract hierarchy.",
+              : "Unable to load the document hierarchy.",
           );
         }
       } finally {
@@ -183,13 +238,13 @@ export default function RepositoryPage() {
     <>
       <PageHero
         eyebrow="Store / Repository"
-        title="Contract Repository"
-        description="Search and analyze every agreement from one trusted source."
+        title="Document Repository"
+        description="Search and analyze every document from one trusted source — contracts, financial reports, invoices, and more."
         actions={
           <>
             <Link href="/extraction/new" className="btn-hero-primary">
               <Plus className="h-4 w-4 shrink-0" />
-              <span className="whitespace-nowrap">Add Contract</span>
+              <span className="whitespace-nowrap">Add Document</span>
             </Link>
             <button type="button" className="btn-hero-secondary">
               <Upload className="h-4 w-4 shrink-0" />
@@ -212,7 +267,7 @@ export default function RepositoryPage() {
                 setOffset(0);
                 setQuery(event.target.value);
               }}
-              placeholder="Search contracts, counterparties, fields, or clauses..."
+              placeholder="Search documents, counterparties, fields, or clauses..."
               className="w-full rounded-2xl border border-border bg-surface py-3.5 pl-11 pr-4 text-[15px] outline-none transition duration-200 focus:border-primary/30 focus:shadow-[var(--shadow-soft)]"
             />
           </div>
@@ -327,13 +382,13 @@ export default function RepositoryPage() {
       <div className="editorial-card overflow-hidden">
         {loading ? (
           <LoadingState
-            title="Indexing repository contracts..."
-            description="Querying verified document metadata, family hierarchies, and extraction status."
+            title="Loading documents..."
+            description="Connecting to Data Agent…"
           />
         ) : view === "table" ? (
           <DocumentResultsTable
             documents={documents}
-            emptyMessage="No contracts match your filters."
+            emptyMessage="No documents match your filters."
             repositoryMode
           />
         ) : (

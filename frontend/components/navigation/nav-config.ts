@@ -30,23 +30,41 @@ export interface MegaMenuSection {
 
 export const PLATFORM_SECTIONS: MegaMenuSection[] = [
   {
-    title: "Store",
+    title: "Document Intelligence",
     tiles: [
       {
         label: "Extraction",
-        description: "Upload and extract contract intelligence",
+        description: "Upload and extract with source verification",
         href: "/extraction/new",
         icon: FileSearch,
       },
       {
         label: "Repository",
-        description: "Browse all agreements and metadata",
+        description: "Browse all documents and metadata",
         href: "/repository",
         icon: Archive,
       },
       {
+        label: "Field Explorer",
+        description: "Compare fields across documents",
+        href: "/explorer",
+        icon: Compass,
+      },
+      {
+        label: "Ask Data Agent",
+        description: "Source-grounded questions across the repository",
+        href: "/ask",
+        icon: Sparkles,
+      },
+      {
+        label: "Review Queue",
+        description: "Items that need human verification",
+        href: "/review-queue",
+        icon: ListChecks,
+      },
+      {
         label: "Search",
-        description: "Search contracts, fields, and clauses",
+        description: "Search documents, fields, and evidence",
         href: "/search",
         icon: Search,
       },
@@ -56,10 +74,10 @@ export const PLATFORM_SECTIONS: MegaMenuSection[] = [
     title: "Contract Intelligence",
     tiles: [
       {
-        label: "Field Explorer",
-        description: "Analyze fields across the repository",
-        href: "/explorer",
-        icon: Compass,
+        label: "FAR / DFARS",
+        description: "Federal acquisition clause intelligence",
+        href: "/clauses",
+        icon: ScrollText,
       },
       {
         label: "Relationships",
@@ -67,26 +85,31 @@ export const PLATFORM_SECTIONS: MegaMenuSection[] = [
         href: "/relationships",
         icon: GitBranch,
       },
-      {
-        label: "Review Queue",
-        description: "Documents awaiting human review",
-        href: "/review-queue",
-        icon: ListChecks,
-      },
     ],
   },
 ];
 
 export const INTELLIGENCE_SECTIONS: MegaMenuSection[] = [
   {
-    title: "Intelligence",
+    title: "Document Intelligence",
     tiles: [
       {
         label: "Field Explorer",
-        description: "Cross-contract field analysis",
+        description: "Cross-document field comparison",
         href: "/explorer",
         icon: Compass,
       },
+      {
+        label: "Ask Data Agent",
+        description: "Source-grounded answers across documents",
+        href: "/ask",
+        icon: Sparkles,
+      },
+    ],
+  },
+  {
+    title: "Contract Intelligence",
+    tiles: [
       {
         label: "FAR / DFARS Clauses",
         description: "Federal acquisition clause intelligence",
@@ -121,15 +144,9 @@ export const REVIEW_SECTIONS: MegaMenuSection[] = [
     tiles: [
       {
         label: "Review Queue",
-        description: "Pending human review items",
+        description: "Low confidence, conflicts, and corrections",
         href: "/review-queue",
         icon: ListChecks,
-      },
-      {
-        label: "Extraction Review",
-        description: "Validate extracted contract fields",
-        href: "/review-queue",
-        icon: FileSearch,
       },
       {
         label: "Recent Extractions",

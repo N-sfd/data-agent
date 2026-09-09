@@ -1,7 +1,5 @@
 import { CheckCheck } from "lucide-react";
 
-import ConfidenceIndicator from "@/components/confidence-indicator";
-
 interface ExtractedRow {
   marker: number;
   label: string;
@@ -15,11 +13,51 @@ const ROWS: ExtractedRow[] = [
   { marker: 3, label: "Total Value", value: "$1.25M", confidence: 0.94 },
 ];
 
-/** Marker badge positioned at a highlighted extraction zone on the mock page. */
 function ZoneMarker({ number }: { number: number }) {
   return (
     <span className="absolute -right-2 -top-2 flex h-5 w-5 items-center justify-center rounded-full bg-primary text-[10px] font-semibold text-white shadow-[var(--shadow-soft)]">
       {number}
+    </span>
+  );
+}
+
+function ConfidenceRing({ confidence }: { confidence: number }) {
+  const pct = Math.round(confidence * 100);
+  const radius = 10;
+  const circumference = 2 * Math.PI * radius;
+  const offset = circumference * (1 - confidence);
+
+  return (
+    <span
+      className="relative inline-flex h-7 w-7 items-center justify-center"
+      title={`${pct}%`}
+    >
+      <svg width="28" height="28" className="-rotate-90" aria-hidden>
+        <circle
+          cx="14"
+          cy="14"
+          r={radius}
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          className="text-border"
+        />
+        <circle
+          cx="14"
+          cy="14"
+          r={radius}
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeDasharray={circumference}
+          strokeDashoffset={offset}
+          className="text-primary"
+        />
+      </svg>
+      <span className="absolute text-[8px] font-semibold text-text-secondary">
+        {pct}
+      </span>
     </span>
   );
 }
@@ -30,8 +68,17 @@ export default function HeroExtractionPreview() {
       aria-hidden
       className="hero-extraction-preview relative mx-auto w-full max-w-[440px]"
     >
-      <div className="doc-shape-layered pb-6">
-        {/* Faint back layer — stacked-document effect */}
+      {/* Subtle intelligence grid behind the stack */}
+      <div className="hero-doc-grid pointer-events-none absolute inset-0 -z-10 opacity-40" />
+
+      <div className="doc-shape-layered hero-doc-drift pb-6">
+        {/* Deep back sheet — financial / secondary document */}
+        <div
+          className="doc-shape-layer-far doc-shape-corner-clip rounded-[var(--radius-card)] border border-border/30 bg-surface-soft/80"
+          style={{ height: "17rem" }}
+        />
+
+        {/* Mid back layer — stacked-document effect */}
         <div
           className="doc-shape-layer-back doc-shape-corner-clip rounded-[var(--radius-card)] border border-border/40 bg-surface-soft"
           style={{ height: "18rem" }}
@@ -41,22 +88,20 @@ export default function HeroExtractionPreview() {
         <div className="doc-shape-layer-front doc-shape-corner-clip rounded-[var(--radius-card)] border border-border bg-surface p-5 shadow-[var(--shadow-elevated)]">
           <div className="flex items-center justify-between">
             <p className="text-xs font-medium text-text-secondary">
-              Contract.pdf
+              Document.pdf
             </p>
             <span className="rounded-full bg-surface-soft px-2 py-0.5 text-[10px] font-medium text-text-muted">
               Page 1
             </span>
           </div>
 
-          {/* Decorative header/body lines */}
           <div className="mt-4 space-y-2">
             <div className="h-2 w-3/5 rounded-full bg-border" />
             <div className="h-1.5 w-4/5 rounded-full bg-border/70" />
             <div className="h-1.5 w-2/3 rounded-full bg-border/70" />
           </div>
 
-          {/* Highlighted extraction zones */}
-          <div className="relative mt-4 rounded-lg border border-primary/25 bg-primary/8 px-3 py-2">
+          <div className="relative mt-4 rounded-sm border border-primary/30 bg-primary/8 px-3 py-2">
             <ZoneMarker number={1} />
             <p className="text-[10px] font-medium uppercase tracking-wide text-primary/70">
               Contract No.
@@ -66,7 +111,7 @@ export default function HeroExtractionPreview() {
             </p>
           </div>
 
-          <div className="relative mt-3 rounded-lg border border-success/25 bg-success/8 px-3 py-2">
+          <div className="relative mt-3 rounded-sm border border-success/30 bg-success/8 px-3 py-2">
             <ZoneMarker number={2} />
             <p className="text-[10px] font-medium uppercase tracking-wide text-success/70">
               Award Date
@@ -76,7 +121,7 @@ export default function HeroExtractionPreview() {
             </p>
           </div>
 
-          <div className="relative mt-3 rounded-lg border border-primary/25 bg-primary/8 px-3 py-2">
+          <div className="relative mt-3 rounded-sm border border-primary/30 bg-primary/8 px-3 py-2">
             <ZoneMarker number={3} />
             <p className="text-[10px] font-medium uppercase tracking-wide text-primary/70">
               Total Value
@@ -91,8 +136,24 @@ export default function HeroExtractionPreview() {
         </div>
       </div>
 
+      {/* Thin connector from source stack to results */}
+      <svg
+        className="pointer-events-none absolute right-[18%] top-[42%] h-16 w-12 text-primary/35"
+        viewBox="0 0 48 64"
+        fill="none"
+        aria-hidden
+      >
+        <path
+          d="M8 4 C 20 20, 28 36, 40 58"
+          stroke="currentColor"
+          strokeWidth="1.25"
+          strokeDasharray="3 3"
+        />
+        <circle cx="40" cy="58" r="2.5" fill="currentColor" />
+      </svg>
+
       {/* Extracted fields panel — layered on top, offset toward the corner */}
-      <div className="relative -mt-14 ml-auto w-[82%] rounded-[var(--radius-card)] border border-border bg-surface p-4 shadow-[var(--shadow-elevated)]">
+      <div className="hero-results-panel relative -mt-14 ml-auto w-[82%] rounded-[var(--radius-card)] border border-border bg-surface p-4 shadow-[var(--shadow-elevated)]">
         <div className="flex items-center justify-between">
           <p className="text-xs font-semibold text-foreground">
             Extracted fields
@@ -122,7 +183,7 @@ export default function HeroExtractionPreview() {
                   </p>
                 </div>
               </div>
-              <ConfidenceIndicator confidence={row.confidence} />
+              <ConfidenceRing confidence={row.confidence} />
             </div>
           ))}
         </div>

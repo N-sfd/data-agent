@@ -14,14 +14,14 @@ const CAPABILITIES = [
   {
     title: "Extraction",
     description:
-      "Upload contracts and pull fields, tables, and clauses with source-level evidence.",
+      "Upload documents and pull fields, tables, and clauses with source-level evidence.",
     href: "/extraction/new",
     icon: ScanSearch,
   },
   {
     title: "Repository",
     description:
-      "Browse every processed agreement in one searchable contract library.",
+      "Browse every processed document in one searchable library.",
     href: "/repository",
     icon: FolderOpen,
   },
@@ -73,8 +73,8 @@ export default function CapabilitySection() {
           What Data Agent can do
         </h2>
         <p className="mt-2 text-sm leading-6 text-text-secondary">
-          Contract intelligence across extraction, discovery, compliance, and
-          review — not just a single upload gateway.
+          Document intelligence across extraction, discovery, verification, and
+          review — with Contract Intelligence as a deep specialization.
         </p>
       </div>
 

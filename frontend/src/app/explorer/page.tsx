@@ -99,12 +99,12 @@ function ExplorerContent() {
         eyebrow="Intelligence / Field Explorer"
         title={
           <>
-            Explore contract intelligence
+            Cross-Document Explorer
             <br />
             across your entire repository
           </>
         }
-        description="Analyze any extracted field across your repository with cross-contract matching and confidence scoring."
+        description="Compare any extracted field across contracts, financial reports, lab results, and more — with confidence and source links."
       />
 
       <ContentSection>
@@ -172,7 +172,7 @@ function ExplorerContent() {
               {aggregation.field_label}
             </h2>
             <p className="mt-1 text-sm text-text-secondary">
-              {aggregation.total_analyzed} contracts analyzed
+              {aggregation.total_analyzed} documents analyzed
             </p>
             <div className="mt-5 max-h-[28rem] space-y-2 overflow-y-auto">
               {aggregation.buckets.length === 0 ? (
