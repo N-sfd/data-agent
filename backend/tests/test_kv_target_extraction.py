@@ -2,9 +2,11 @@ from types import SimpleNamespace
 
 from app.schemas.document_target import DocumentTarget
 from app.services.generic_kv_scanner import (
+    format_display_label,
     is_internal_form_name,
     is_plausible_kv_label,
     map_form_value_to_visible_label,
+    scan_page_for_labeled_pairs,
 )
 from app.services.target_extraction_service import (
     _resolve_scalar_from_source_examples,
@@ -113,23 +115,45 @@ def test_prose_fragments_are_not_plausible_kv_labels() -> None:
     )
 
 
-def test_is_internal_form_name() -> None:
+def test_is_internal_form_name_uses_multi_signal_scoring() -> None:
+    # Strong hierarchy paths
     assert is_internal_form_name("topmostSubform[0].Page1[0].PG11I[0]") is True
     assert is_internal_form_name("form1[0].Page2[0].TextField[3]") is True
+    assert is_internal_form_name("xfa.form.root") is True
+    assert is_internal_form_name("#subform[2]") is True
+
+    # Pure widget / page tokens
     assert is_internal_form_name("Page1") is True
     assert is_internal_form_name("PG11I") is True
-    assert is_internal_form_name("#subform[2]") is True
-    assert is_internal_form_name("xfa.form.root") is True
     assert is_internal_form_name("CheckBox1") is True
+    assert is_internal_form_name("TextField3") is True
     assert is_internal_form_name("") is True
+
+    # Lone bracket index is NOT enough (legitimate labels may contain [0])
+    assert is_internal_form_name("Item [0] Code") is False
+    assert is_internal_form_name("Schedule [1]") is False
 
     # Real business labels should NOT be internal
     assert is_internal_form_name("SOLICITATION NO.") is False
+    assert is_internal_form_name("Solicitation No.") is False
     assert is_internal_form_name("Contract Number") is False
     assert is_internal_form_name("Contract Form Number") is False
     assert is_internal_form_name("DODAAC") is False
     assert is_internal_form_name("Effective Date") is False
     assert is_internal_form_name("WAWF Payment Office") is False
+
+
+def test_format_display_label() -> None:
+    assert format_display_label("SOLICITATION NO.") == "Solicitation No."
+    assert format_display_label("CONTRACT NO") == "Contract No."
+    assert format_display_label("DATE ISSUED") == "Date Issued"
+    assert (
+        format_display_label("REQUISITION/PURCHASE REQUEST/PROJECT NO.")
+        == "Requisition / Purchase Request / Project No."
+    )
+    assert format_display_label("DODAAC") == "DODAAC"
+    assert format_display_label("PSC CD") == "PSC CD"
+    assert format_display_label("WAWF Payment Office") == "WAWF Payment Office"
 
 
 def test_map_form_value_to_visible_label() -> None:
@@ -141,11 +165,11 @@ def test_map_form_value_to_visible_label() -> None:
     )
     assert (
         map_form_value_to_visible_label(text, "FA300224C0008")
-        == "SOLICITATION NO"
+        == "Solicitation No."
     )
     assert (
         map_form_value_to_visible_label(text, "FA300224C0009")
-        == "CONTRACT NO"
+        == "Contract No."
     )
     assert map_form_value_to_visible_label(text, "MISSING") is None
     assert (
@@ -157,9 +181,7 @@ def test_map_form_value_to_visible_label() -> None:
     )
 
 
-def test_scan_form_fields_maps_xfa_path_to_visible_label() -> None:
-    from app.services.generic_kv_scanner import scan_page_for_labeled_pairs
-
+def test_scan_xfa_form_maps_to_readable_label_with_provenance() -> None:
     page = SimpleNamespace(
         page_number=1,
         final_text="SOLICITATION NO. FA300224C0008\nIssued By: ACC",
@@ -172,10 +194,53 @@ def test_scan_form_fields_maps_xfa_path_to_visible_label() -> None:
     pairs = scan_page_for_labeled_pairs(page=page)
     labels = {pair.raw_label for pair in pairs}
 
-    assert "SOLICITATION NO." in labels or "SOLICITATION NO" in labels
+    assert "Solicitation No." in labels
     assert not any("topmostSubform" in label for label in labels)
     assert not any("PG11I" in label for label in labels)
+    assert not any("[0]" in label for label in labels)
     assert "NO_VISIBLE_LABEL_VALUE" not in {pair.value for pair in pairs}
+
+    mapped = next(p for p in pairs if p.raw_label == "Solicitation No.")
+    assert mapped.source_field_path == "topmostSubform[0].Page1[0].PG11I[0]"
+
+
+def test_scan_acroform_human_label_is_kept() -> None:
+    page = SimpleNamespace(
+        page_number=1,
+        final_text="Contract Number: ABC-123\nEffective Date: 2024-01-15",
+        form_fields_json={
+            "Contract Number": "ABC-123",
+            "Effective Date": "2024-01-15",
+        },
+        tables_json=[],
+    )
+    pairs = scan_page_for_labeled_pairs(page=page)
+    labels = {pair.raw_label for pair in pairs}
+
+    assert "Contract Number" in labels
+    assert "Effective Date" in labels
+    assert all(p.source_field_path is None for p in pairs if p.method == "form_field")
+
+
+def test_scan_ordinary_text_pdf_keeps_human_labels() -> None:
+    page = SimpleNamespace(
+        page_number=1,
+        final_text=(
+            "SOLICITATION NO. FA300224C0008\n"
+            "DATE ISSUED: 15 JAN 2024\n"
+            "DODAAC: HQ0338\n"
+        ),
+        form_fields_json={},
+        tables_json=[],
+    )
+    pairs = scan_page_for_labeled_pairs(page=page)
+    labels = {pair.raw_label for pair in pairs}
+
+    assert "Solicitation No." in labels
+    assert "Date Issued" in labels
+    assert "DODAAC" in labels
+    assert not any("topmostSubform" in label for label in labels)
+    assert not any(is_internal_form_name(label) for label in labels)
 
 
 def test_field_probe_evidence_resolves_via_source_examples() -> None:

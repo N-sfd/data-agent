@@ -892,6 +892,12 @@ async def detect_document_structures(
             if is_internal_form_name(slug) or is_internal_form_name(f"kv_{slug}"):
                 continue
 
+            method_note = pair.method
+            if pair.source_field_path:
+                method_note = (
+                    f"{pair.method}; raw_path={pair.source_field_path}"
+                )
+
             detected.append(
                 _target(
                     key=f"kv_{slug}",
@@ -901,7 +907,7 @@ async def detect_document_structures(
                     confidence=pair.confidence,
                     evidence=[
                         f"'{pair.raw_label}: {pair.value}' on page "
-                        f"{page.page_number} ({pair.method})"
+                        f"{page.page_number} ({method_note})"
                     ],
                 )
             )

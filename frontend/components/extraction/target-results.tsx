@@ -115,10 +115,41 @@ function matchesMethodFilter(row: FieldRow, filter: string): boolean {
   return row.extraction_method !== "ai";
 }
 
+function isInternalFormName(name: string): boolean {
+  if (!name.trim()) return true;
+  const stripped = name.trim();
+  if (stripped.startsWith("#")) return true;
+  if (
+    /^(TextField|CheckBox|RadioButton|SignatureField|NumericField|DateTimeField|DropDownList)\d*$/i.test(
+      stripped,
+    ) ||
+    /^(Page\d+|PG\d+[A-Z]*)$/i.test(stripped)
+  ) {
+    return true;
+  }
+
+  let signals = 0;
+  if (/topmostSubform|\bsubform\b|\bxfa\b|\bform\d+\b/i.test(stripped)) {
+    signals += 2;
+  }
+  if (/\bPage\d+\b|\bPG\d+[A-Z]*\b/i.test(stripped)) {
+    signals += 1;
+  }
+  if (/\[\d+\]/.test(stripped)) {
+    signals += 1;
+  }
+  if (
+    /TextField\d*|CheckBox\d*|RadioButton\d*|SignatureField\d*|NumericField\d*|DateTimeField\d*|DropDownList\d*/i.test(
+      stripped,
+    )
+  ) {
+    signals += 1;
+  }
+  return signals >= 2;
+}
+
 function isInternalKey(key: string, label: string): boolean {
-  const pattern =
-    /\[\d+\]|topmostsubform|\bsubform\b|\bxfa\b|\bpg\d+[a-z]*\b|\bform\d+\b|textfield\d*|checkbox\d*/i;
-  return pattern.test(key) || pattern.test(label);
+  return isInternalFormName(key) || isInternalFormName(label);
 }
 
 export default function TargetResults({

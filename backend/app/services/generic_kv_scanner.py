@@ -57,31 +57,109 @@ _ALL_CAPS = re.compile(r"^[A-Z0-9 /#.'\-]+$")
 _NUMERIC_ONLY = re.compile(r"^[\s\d.,$%()-]+$")
 
 # Internal PDF form field names (XFA, AcroForm, LiveCycle).
-# These are never meaningful business labels for the schema picker.
-_INTERNAL_FORM_PATTERNS = [
-    re.compile(r"\[\d+\]"),                     # array indices: [0], [1]
-    re.compile(r"\btopmostsubform\b", re.I),    # XFA root
-    re.compile(r"\bsubform\b", re.I),           # XFA subform nodes
-    re.compile(r"\bPage\d+\b"),                 # Page1, Page2
-    re.compile(r"\bPG\d+[A-Z]*\b"),             # PG11I, PG2A
-    re.compile(r"\bxfa\b", re.I),               # xfa namespace
-    re.compile(r"\bform\d+\b", re.I),           # form1 (not bare "Form")
-    re.compile(r"\bTextField\d*\b", re.I),
-    re.compile(r"\bCheckBox\d*\b", re.I),
-    re.compile(r"\bRadioButton\d*\b", re.I),
-    re.compile(r"\bSignatureField\d*\b", re.I),
-    re.compile(r"\bNumericField\d*\b", re.I),
-    re.compile(r"\bDateTimeField\d*\b", re.I),
-    re.compile(r"\bDropDownList\d*\b", re.I),
-    re.compile(r"^#"),                          # #subform, #field
-]
+# Use multi-signal scoring so a lone "[0]" or "Page" in a real label
+# is not enough to reject it.
+_STRONG_INTERNAL = re.compile(
+    r"topmostSubform|\bsubform\b|\bxfa\b|\bform\d+\b",
+    re.IGNORECASE,
+)
+_PAGE_HIERARCHY = re.compile(r"\bPage\d+\b|\bPG\d+[A-Z]*\b", re.IGNORECASE)
+_ARRAY_INDEX = re.compile(r"\[\d+\]")
+_WIDGET_TYPE = re.compile(
+    r"TextField\d*|CheckBox\d*|RadioButton\d*|SignatureField\d*"
+    r"|NumericField\d*|DateTimeField\d*|DropDownList\d*",
+    re.IGNORECASE,
+)
+_PURE_WIDGET = re.compile(
+    r"^(TextField|CheckBox|RadioButton|SignatureField|NumericField"
+    r"|DateTimeField|DropDownList)\d*$",
+    re.IGNORECASE,
+)
+_PURE_PAGE_TOKEN = re.compile(r"^(Page\d+|PG\d+[A-Z]*)$", re.IGNORECASE)
+
+_KEEP_UPPER_TOKENS = {
+    "DODAAC",
+    "CAGE",
+    "NAICS",
+    "PSC",
+    "WAWF",
+    "CLIN",
+    "FAR",
+    "DFARS",
+    "SF",
+    "ACO",
+    "PCO",
+    "TIN",
+    "EIN",
+    "DUNS",
+    "UEI",
+    "POC",
+    "FOB",
+    "CD",
+}
 
 
 def is_internal_form_name(name: str) -> bool:
-    """Return True if the name looks like an internal PDF form field path."""
+    """
+    Return True if the name looks like an internal PDF form field path.
+
+    Requires multiple hierarchy signals so legitimate labels that happen
+    to contain brackets (e.g. "Item [0] Code") are not rejected alone.
+    """
     if not name or not name.strip():
         return True
-    return any(pattern.search(name) for pattern in _INTERNAL_FORM_PATTERNS)
+
+    stripped = name.strip()
+    if stripped.startswith("#"):
+        return True
+    if _PURE_WIDGET.fullmatch(stripped) or _PURE_PAGE_TOKEN.fullmatch(stripped):
+        return True
+
+    signals = 0
+    if _STRONG_INTERNAL.search(stripped):
+        signals += 2
+    if _PAGE_HIERARCHY.search(stripped):
+        signals += 1
+    if _ARRAY_INDEX.search(stripped):
+        signals += 1
+    if _WIDGET_TYPE.search(stripped):
+        signals += 1
+
+    return signals >= 2
+
+
+def format_display_label(label: str) -> str:
+    """
+    Polish form/KV labels for the schema picker.
+
+    SOLICITATION NO. → Solicitation No.
+    CONTRACT NO → Contract No.
+    DATE ISSUED → Date Issued
+    REQUISITION/PURCHASE REQUEST/PROJECT NO.
+        → Requisition / Purchase Request / Project No.
+    """
+    cleaned = " ".join((label or "").split()).strip().rstrip(":")
+    if not cleaned:
+        return cleaned
+
+    segments: list[str] = []
+    for segment in cleaned.split("/"):
+        words: list[str] = []
+        for word in segment.strip().split():
+            bare = word.rstrip(".")
+            upper = bare.upper()
+            if upper in _KEEP_UPPER_TOKENS:
+                words.append(upper)
+            elif upper in {"NO", "NOS"}:
+                words.append("No." if upper == "NO" else "Nos.")
+            elif bare.isupper() or bare.islower():
+                words.append(bare.capitalize())
+            else:
+                words.append(word)
+        if words:
+            segments.append(" ".join(words))
+
+    return " / ".join(segments)
 
 
 def map_form_value_to_visible_label(text: str, value: str) -> str | None:
@@ -90,7 +168,7 @@ def map_form_value_to_visible_label(text: str, value: str) -> str | None:
 
     Example: XFA path topmostSubform[0].Page1[0].PG11I[0] with value
     FA300224C0008 and nearby text "SOLICITATION NO. FA300224C0008"
-    → returns "SOLICITATION NO."
+    → returns "Solicitation No."
     """
     cleaned_value = " ".join((value or "").split()).strip()
     cleaned_text = text or ""
@@ -110,10 +188,11 @@ def map_form_value_to_visible_label(text: str, value: str) -> str | None:
             and not is_internal_form_name(label)
             and is_plausible_kv_label(label)
         ):
-            return label
+            return format_display_label(label)
 
     # Stacked layout: previous line is the label, current line is the value.
-    for index, line in enumerate(cleaned_text.splitlines()):
+    lines = cleaned_text.splitlines()
+    for index, line in enumerate(lines):
         line_stripped = line.strip()
         if cleaned_value not in line_stripped:
             continue
@@ -124,14 +203,14 @@ def map_form_value_to_visible_label(text: str, value: str) -> str | None:
             cleaned_value
         ):
             continue
-        prev = cleaned_text.splitlines()[index - 1].strip().rstrip(".:-")
+        prev = lines[index - 1].strip().rstrip(".:-")
         prev = " ".join(prev.split())
         if (
             prev
             and not is_internal_form_name(prev)
             and is_plausible_kv_label(prev)
         ):
-            return prev
+            return format_display_label(prev)
 
     return None
 
@@ -143,6 +222,8 @@ class ScannedPair:
     value: str
     method: ScanMethod
     confidence: float
+    # Original XFA/AcroForm field path when the display label was mapped.
+    source_field_path: str | None = None
 
 
 def _normalize_label(label: str) -> str:
@@ -299,6 +380,7 @@ def _scan_form_fields(page: DocumentPage) -> list[ScannedPair]:
             continue
         label_str = str(raw_label).strip()
         value_str = str(value).strip()
+        source_field_path: str | None = None
 
         # Raw XFA/AcroForm paths are never shown as targets. Prefer a
         # nearby visible label when the filled value appears in page text.
@@ -306,7 +388,10 @@ def _scan_form_fields(page: DocumentPage) -> list[ScannedPair]:
             mapped = map_form_value_to_visible_label(page_text, value_str)
             if not mapped:
                 continue
+            source_field_path = label_str
             label_str = mapped
+        else:
+            label_str = format_display_label(label_str)
 
         if not is_plausible_kv_label(label_str):
             continue
@@ -318,6 +403,7 @@ def _scan_form_fields(page: DocumentPage) -> list[ScannedPair]:
                 value=value_str,
                 method="form_field",
                 confidence=0.95,
+                source_field_path=source_field_path,
             )
         )
     return pairs
@@ -343,10 +429,11 @@ def _scan_two_column_tables(page: DocumentPage) -> list[ScannedPair]:
                 continue
             if _NUMERIC_ONLY.match(label):
                 continue
+            display = format_display_label(label)
             pairs.append(
                 ScannedPair(
-                    raw_label=label,
-                    normalized_label=_normalize_label(label),
+                    raw_label=display,
+                    normalized_label=_normalize_label(display),
                     value=value,
                     method="table_2col",
                     confidence=0.85,
@@ -374,10 +461,11 @@ def _scan_inline_regex(text: str) -> list[ScannedPair]:
             boosted = confidence
             if _ALL_CAPS.match(label):
                 boosted = max(confidence, 0.82)
+            display = format_display_label(label)
             pairs.append(
                 ScannedPair(
-                    raw_label=label,
-                    normalized_label=_normalize_label(label),
+                    raw_label=display,
+                    normalized_label=_normalize_label(display),
                     value=value,
                     method="inline_regex",
                     confidence=boosted,
@@ -394,10 +482,11 @@ def _scan_stacked_lines(text: str) -> list[ScannedPair]:
             continue
         if _ALL_CAPS.match(value):
             continue
+        display = format_display_label(label)
         pairs.append(
             ScannedPair(
-                raw_label=label,
-                normalized_label=_normalize_label(label),
+                raw_label=display,
+                normalized_label=_normalize_label(display),
                 value=value,
                 method="stacked_line",
                 # All-caps stacked labels are common on SF/OF forms —
