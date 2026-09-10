@@ -35,7 +35,11 @@ from app.services.dashboard_stats import (
     compute_document_confidence,
     compute_document_status,
 )
-from app.services.document_storage import is_file_available, upload_object
+from app.services.document_storage import (
+    is_file_available,
+    source_status_for,
+    upload_object,
+)
 from app.services.file_upload import (
     UploadValidationError,
     sanitize_display_filename,
@@ -770,6 +774,8 @@ def _build_document_summary(
     else:
         repository_status = "not_approved"
 
+    settings = get_settings()
+
     return DocumentSummaryResponse(
         document_id=document.id,
         original_filename=document.original_filename,
@@ -792,6 +798,9 @@ def _build_document_summary(
         ),
         relationship=relationship,
         repository_status=repository_status,
+        source_status=source_status_for(
+            settings, stored_filename=document.stored_filename
+        ),
     )
 
 
@@ -1063,4 +1072,7 @@ async def get_document(
         approved_at=document.approved_at,
         promoted_by=document.promoted_by,
         promoted_at=document.promoted_at,
+        source_status=source_status_for(
+            get_settings(), stored_filename=document.stored_filename
+        ),
     )

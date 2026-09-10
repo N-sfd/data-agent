@@ -37,6 +37,7 @@ class UploadedDocumentResponse(BaseModel):
     approved_at: datetime | None = None
     promoted_by: str | None = None
     promoted_at: datetime | None = None
+    source_status: Literal["available", "missing"] = "available"
 
 
 class ResolveDuplicateRequest(BaseModel):
@@ -66,6 +67,10 @@ class DocumentSummaryResponse(BaseModel):
     repository_status: Literal[
         "not_approved", "approved", "repository"
     ] = "not_approved"
+    # Whether the original PDF can still be opened for Source Verification
+    # (local cache or Supabase backup). Surfaces older DB rows whose file
+    # disappeared before remote backup existed.
+    source_status: Literal["available", "missing"] = "available"
 
 
 class DocumentSearchResponse(BaseModel):

@@ -48,11 +48,11 @@ export default function DocumentResultsTable({
         <thead>
           <tr className="border-b border-border">
             <th className="px-8 py-4 text-left text-xs font-medium uppercase tracking-wider text-text-secondary">
-              Contract
+              Document
             </th>
             {fullRepository && (
               <th className="px-4 py-4 text-left text-xs font-medium uppercase tracking-wider text-text-secondary">
-                Counterparty
+                Party
               </th>
             )}
             <th className="px-4 py-4 text-left text-xs font-medium uppercase tracking-wider text-text-secondary">
@@ -82,6 +82,11 @@ export default function DocumentResultsTable({
             {fullRepository && (
               <th className="px-4 py-4 text-left text-xs font-medium uppercase tracking-wider text-text-secondary">
                 Relationship
+              </th>
+            )}
+            {(fullRepository || dashboardMode) && (
+              <th className="px-4 py-4 text-left text-xs font-medium uppercase tracking-wider text-text-secondary">
+                Source
               </th>
             )}
             {!dashboardMode && showExtendedColumns && !fullRepository && (
@@ -178,6 +183,22 @@ export default function DocumentResultsTable({
               {fullRepository && (
                 <td className="px-5 py-[18px] text-sm text-text-secondary">
                   {document.relationship ?? "—"}
+                </td>
+              )}
+              {(fullRepository || dashboardMode) && (
+                <td className="px-5 py-[18px] text-sm">
+                  {document.source_status === "missing" ? (
+                    <span
+                      className="font-medium text-warning"
+                      title="Original PDF is missing — re-upload required for Source Verification"
+                    >
+                      ⚠ Missing — Re-upload required
+                    </span>
+                  ) : (
+                    <span className="font-medium text-success">
+                      ✓ Available
+                    </span>
+                  )}
                 </td>
               )}
               {!dashboardMode && showExtendedColumns && !fullRepository && (

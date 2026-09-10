@@ -147,6 +147,31 @@ def delete_object(settings: Settings, object_name: str) -> None:
     )
 
 
+def classify_source_location(
+    settings: Settings, *, stored_filename: str
+) -> str:
+    """Return where the original bytes live: local | remote_only | missing."""
+
+    local_path = settings.upload_path / stored_filename
+
+    if local_path.exists():
+        return "local"
+
+    if object_exists(settings, stored_filename):
+        return "remote_only"
+
+    return "missing"
+
+
+def source_status_for(
+    settings: Settings, *, stored_filename: str
+) -> str:
+    location = classify_source_location(
+        settings, stored_filename=stored_filename
+    )
+    return "available" if location != "missing" else "missing"
+
+
 def ensure_local_copy(
     settings: Settings, *, stored_filename: str
 ) -> Path:

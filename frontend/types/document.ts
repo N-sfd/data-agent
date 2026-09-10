@@ -25,6 +25,7 @@ export interface UploadedDocument {
   approved_at?: string | null;
   promoted_by?: string | null;
   promoted_at?: string | null;
+  source_status?: "available" | "missing";
 }
 
 export type DuplicateResolution = "use_existing" | "upload_anyway";
@@ -56,6 +57,7 @@ export interface DocumentSummary {
   contract_value?: string | null;
   relationship?: string | null;
   repository_status?: RepositoryStatus;
+  source_status?: "available" | "missing";
 }
 
 export interface HierarchyNode {
