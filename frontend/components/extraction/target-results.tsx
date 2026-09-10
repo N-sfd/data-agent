@@ -18,6 +18,7 @@ import { downloadCsv, downloadJson } from "@/lib/export";
 import {
   listTargetCorrections,
   markTargetVerified,
+  rejectTargetValue,
   saveTargetCorrection,
 } from "@/lib/target-corrections";
 import type {
@@ -344,6 +345,28 @@ export default function TargetResults({
     });
   }
 
+  async function handleReject(row: FieldRow) {
+    if (!documentId) return;
+    const originalValue = row.correction ? row.correction.original_value : row.value;
+    const saved = await rejectTargetValue(
+      documentId,
+      row.id,
+      originalValue,
+      row.evidence
+        ? {
+            page_number: row.evidence.page_number,
+            source_text: row.evidence.source_text,
+            source_reference: row.evidence.source_reference,
+          }
+        : null,
+    );
+    setCorrections((prev) => {
+      const next = new Map(prev);
+      next.set(row.id, saved);
+      return next;
+    });
+  }
+
   function handleIssueClick(rowId: string) {
     setSearchQuery("");
     setConfidenceFilter("all");
@@ -573,6 +596,7 @@ export default function TargetResults({
           onViewSource={onViewSource}
           onSaveCorrection={documentId ? handleSaveCorrection : undefined}
           onMarkVerified={documentId ? handleMarkVerified : undefined}
+          onReject={documentId ? handleReject : undefined}
         />
         <FieldsTable
           title="Identifiers & codes"
@@ -581,6 +605,7 @@ export default function TargetResults({
           onViewSource={onViewSource}
           onSaveCorrection={documentId ? handleSaveCorrection : undefined}
           onMarkVerified={documentId ? handleMarkVerified : undefined}
+          onReject={documentId ? handleReject : undefined}
         />
         <FieldsTable
           title="Contacts"
@@ -589,6 +614,7 @@ export default function TargetResults({
           onViewSource={onViewSource}
           onSaveCorrection={documentId ? handleSaveCorrection : undefined}
           onMarkVerified={documentId ? handleMarkVerified : undefined}
+          onReject={documentId ? handleReject : undefined}
         />
       </div>
 

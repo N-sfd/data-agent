@@ -75,6 +75,10 @@ class Settings(BaseSettings):
     ai_fallback_max_providers: int = 3
     ai_provider_attempt_timeout_seconds: float = 45.0
 
+    # When true, clean high-confidence grounded fields may auto-accept.
+    # Default false — enterprise governance prefers explicit human accept.
+    auto_accept_high_confidence: bool = False
+
     ocr_enabled: bool = True
     ocr_language: str = "eng"
     ocr_dpi: int = 300

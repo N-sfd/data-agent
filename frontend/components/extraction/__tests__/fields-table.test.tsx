@@ -234,7 +234,7 @@ describe("FieldsTable", () => {
     render(<FieldsTable title="Fields" rows={rows} onMarkVerified={onMarkVerified} />);
 
     expandRow("contract_number");
-    fireEvent.click(screen.getByText("Mark verified"));
+    fireEvent.click(screen.getByText("Accept"));
 
     expect(onMarkVerified).toHaveBeenCalledWith(
       expect.objectContaining({ id: "contract_number", value: "W912DR-26-C-0042" }),

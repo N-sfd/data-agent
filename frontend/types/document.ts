@@ -104,6 +104,29 @@ export interface ReviewQueueEntry {
   confidence: number | null;
   queue_bucket: ReviewQueueBucket;
   uploaded_at: string;
+  pending_field_count?: number;
+  attention_field_count?: number;
+  top_reasons?: string[];
+  review_href?: string | null;
+}
+
+export interface ReviewQueueFieldItem {
+  document_id: string;
+  original_filename: string;
+  field_key: string;
+  label: string;
+  value: string;
+  confidence: number;
+  confidence_band?: string | null;
+  review_status: string;
+  extraction_source: string;
+  extraction_method?: string | null;
+  reasons: string[];
+  reason_labels: string[];
+  priority: string;
+  decision_status: string;
+  page_number?: number | null;
+  review_href?: string | null;
 }
 
 export interface DocumentSearchResponse {
@@ -302,6 +325,11 @@ export interface ScalarTargetResult {
   retrieval?: RetrievalTrace | null;
   confidence_detail?: ConfidenceDetail | null;
   validation?: ValidationResult | null;
+  review_decision?: {
+    status?: string;
+    priority?: string;
+    reasons?: string[];
+  } | null;
   confidence_signals?: Array<Record<string, unknown>>;
   validation_status?: "passed" | "failed" | "skipped";
 }
@@ -321,7 +349,7 @@ export interface ExtractTargetsResult {
   warnings: string[];
 }
 
-export type CorrectionAction = "edit" | "verify";
+export type CorrectionAction = "edit" | "verify" | "reject";
 
 export interface TargetCorrection {
   id: number;

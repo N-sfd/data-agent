@@ -12,6 +12,7 @@ from app.models.document_page import DocumentPage
 from app.schemas.dashboard import (
     DashboardStatsResponse,
     ReviewQueueEntry,
+    ReviewQueueFieldItem,
 )
 from app.services.dashboard_stats import (
     compute_document_confidence,
@@ -19,8 +20,31 @@ from app.services.dashboard_stats import (
     compute_document_status,
     compute_review_queue_bucket,
 )
+from app.services.review_routing import human_reason_labels
 
 router = APIRouter()
+
+
+def _field_review_meta(field: DocumentMetadataField) -> dict:
+    evidence = field.evidence_json or {}
+    decision = evidence.get("review_decision") or {}
+    reasons = list(decision.get("reasons") or [])
+    page_number = None
+    if isinstance(evidence.get("page_number"), int):
+        page_number = evidence["page_number"]
+    return {
+        "reasons": reasons,
+        "priority": decision.get("priority") or "medium",
+        "decision_status": decision.get("status") or "needs_review",
+        "page_number": page_number,
+    }
+
+
+def _review_href(document_id: str, *, field_key: str | None = None) -> str:
+    base = f"/extraction/new?documentId={document_id}"
+    if field_key:
+        return f"{base}&focus={field_key}"
+    return base
 
 
 @router.get("/stats", response_model=DashboardStatsResponse)
@@ -147,20 +171,108 @@ async def get_review_queue(
         )
     )
 
-    return [
-        ReviewQueueEntry(
-            document_id=document.id,
-            original_filename=document.original_filename,
-            document_type=document.document_type,
-            confidence=compute_document_confidence(
-                database, document
-            ),
-            queue_bucket=compute_review_queue_bucket(
-                database, document
-            ),
-            uploaded_at=document.uploaded_at,
+    entries: list[ReviewQueueEntry] = []
+    for document in documents:
+        if compute_document_status(database, document) != "review_required":
+            continue
+
+        fields = list(
+            database.scalars(
+                select(DocumentMetadataField).where(
+                    DocumentMetadataField.document_id == document.id
+                )
+            )
         )
-        for document in documents
-        if compute_document_status(database, document)
-        == "review_required"
-    ]
+        pending = [field for field in fields if field.review_status == "pending"]
+        attention = 0
+        reason_counts: dict[str, int] = {}
+        for field in pending:
+            meta = _field_review_meta(field)
+            if meta["decision_status"] == "needs_review" or meta["reasons"]:
+                attention += 1
+            for reason in meta["reasons"]:
+                reason_counts[reason] = reason_counts.get(reason, 0) + 1
+
+        top_reasons = [
+            reason
+            for reason, _ in sorted(
+                reason_counts.items(), key=lambda item: (-item[1], item[0])
+            )[:3]
+        ]
+
+        entries.append(
+            ReviewQueueEntry(
+                document_id=document.id,
+                original_filename=document.original_filename,
+                document_type=document.document_type,
+                confidence=compute_document_confidence(database, document),
+                queue_bucket=compute_review_queue_bucket(database, document),
+                uploaded_at=document.uploaded_at,
+                pending_field_count=len(pending),
+                attention_field_count=attention,
+                top_reasons=human_reason_labels(top_reasons),
+                review_href=_review_href(document.id),
+            )
+        )
+    return entries
+
+
+@router.get(
+    "/review-queue/fields",
+    response_model=list[ReviewQueueFieldItem],
+)
+async def get_review_queue_fields(
+    database: Session = Depends(get_database),
+) -> list[ReviewQueueFieldItem]:
+    """Field-level Review Queue for target + contract pending items."""
+
+    documents = {
+        document.id: document
+        for document in database.scalars(select(Document)).all()
+    }
+    fields = list(
+        database.scalars(
+            select(DocumentMetadataField)
+            .where(DocumentMetadataField.review_status == "pending")
+            .order_by(DocumentMetadataField.extracted_at.desc())
+        )
+    )
+
+    items: list[ReviewQueueFieldItem] = []
+    for field in fields:
+        document = documents.get(field.document_id)
+        if document is None:
+            continue
+        meta = _field_review_meta(field)
+        items.append(
+            ReviewQueueFieldItem(
+                document_id=field.document_id,
+                original_filename=document.original_filename,
+                field_key=field.field_key,
+                label=field.label,
+                value=field.value,
+                confidence=field.confidence,
+                confidence_band=field.confidence_band,
+                review_status=field.review_status,
+                extraction_source=field.extraction_source,
+                extraction_method=field.extraction_method,
+                reasons=meta["reasons"],
+                reason_labels=human_reason_labels(meta["reasons"]),
+                priority=meta["priority"],
+                decision_status=meta["decision_status"],
+                page_number=meta["page_number"],
+                review_href=_review_href(
+                    field.document_id, field_key=field.field_key
+                ),
+            )
+        )
+
+    priority_rank = {"low": 0, "medium": 1, "high": 2}
+    items.sort(
+        key=lambda item: (
+            priority_rank.get(item.priority, 1),
+            -item.confidence,
+            item.original_filename,
+        )
+    )
+    return items

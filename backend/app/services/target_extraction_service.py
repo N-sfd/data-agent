@@ -42,6 +42,7 @@ from app.services.page_retrieval import (
     pages_from_trace,
 )
 from app.services.result_validation import build_validation_result
+from app.services.review_routing import decide_review_for_scalar
 from app.services.source_validator import validate_source_value
 
 settings = get_settings()
@@ -67,7 +68,7 @@ def _scalar_result(
     retrieval: RetrievalTrace | None,
     verified: bool,
 ) -> ScalarTargetResult:
-    return ScalarTargetResult(
+    scalar = ScalarTargetResult(
         target=target.key,
         normalized_key=target.key,
         value=value,
@@ -83,6 +84,16 @@ def _scalar_result(
         validation=validation,
         confidence_signals=confidence_detail_to_legacy_signals(confidence),
         validation_status=validation.status,
+    )
+    decision = decide_review_for_scalar(scalar)
+    return scalar.model_copy(
+        update={
+            "review_decision": {
+                "status": decision["status"],
+                "priority": decision["priority"],
+                "reasons": decision["reasons"],
+            }
+        }
     )
 
 

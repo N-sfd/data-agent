@@ -5,7 +5,7 @@ from pydantic import BaseModel
 
 from app.schemas.universal_extraction import SourceEvidence
 
-CorrectionAction = Literal["edit", "verify"]
+CorrectionAction = Literal["edit", "verify", "reject"]
 
 
 class TargetCorrectionCreate(BaseModel):

@@ -17,11 +17,16 @@ import {
 import ContentSection from "@/components/layout/ContentSection";
 import PageHero from "@/components/layout/PageHero";
 import ConfidenceBadge from "@/components/confidence-badge";
-import { acceptAllMetadataFields, getReviewQueue } from "@/lib/documents";
+import {
+  acceptAllMetadataFields,
+  getReviewQueue,
+  getReviewQueueFields,
+} from "@/lib/documents";
 import {
   DOCUMENT_TYPE_OPTIONS,
   type ReviewQueueBucket,
   type ReviewQueueEntry,
+  type ReviewQueueFieldItem,
 } from "@/types/document";
 
 const DEFAULT_REVIEWER = "Consult America";
@@ -78,6 +83,7 @@ const SECTIONS: {
 
 export default function ReviewQueuePage() {
   const [entries, setEntries] = useState<ReviewQueueEntry[]>([]);
+  const [fieldItems, setFieldItems] = useState<ReviewQueueFieldItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
@@ -95,8 +101,14 @@ export default function ReviewQueuePage() {
     setError("");
 
     try {
-      const result = await getReviewQueue();
-      if (active()) setEntries(result);
+      const [result, fields] = await Promise.all([
+        getReviewQueue(),
+        getReviewQueueFields(),
+      ]);
+      if (active()) {
+        setEntries(result);
+        setFieldItems(fields);
+      }
     } catch (err) {
       if (active()) {
         setError(
@@ -205,7 +217,7 @@ export default function ReviewQueuePage() {
       <PageHero
         eyebrow="Review"
         title="Review Queue"
-        description="Focus on items that need human verification — low confidence, conflicts, and corrections. High-confidence results stay out of the default queue."
+        description="Route machine extraction into human governance — accept, correct, or reject with a durable audit trail."
         actions={
           <button
             type="button"
@@ -327,6 +339,64 @@ export default function ReviewQueuePage() {
         </div>
       )}
 
+      {!loading && fieldItems.length > 0 && (
+        <div className="editorial-card mb-6 overflow-hidden">
+          <div className="flex items-center gap-2 border-b border-border px-6 py-4">
+            <ShieldAlert className="h-4 w-4 text-amber-600" />
+            <div>
+              <p className="text-sm font-semibold text-foreground">
+                Fields needing attention
+                <span className="ml-2 text-xs font-normal text-text-muted">
+                  {fieldItems.length}
+                </span>
+              </p>
+              <p className="text-xs text-text-secondary">
+                Routed from validation, confidence, ambiguity, and AI escalation
+                signals.
+              </p>
+            </div>
+          </div>
+          <div className="divide-y divide-border">
+            {fieldItems
+              .filter((item) => item.decision_status === "needs_review" || item.reasons.length > 0)
+              .slice(0, 40)
+              .map((item) => (
+                <div
+                  key={`${item.document_id}:${item.field_key}`}
+                  className="flex flex-wrap items-center justify-between gap-3 px-6 py-3"
+                >
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-medium text-foreground">
+                      {item.label}
+                      <span className="ml-2 text-xs font-normal text-text-muted">
+                        {item.original_filename}
+                      </span>
+                    </p>
+                    <p className="truncate text-xs text-text-secondary">
+                      {item.value || "—"}
+                      {item.reason_labels.length > 0 && (
+                        <> · {item.reason_labels.join(", ")}</>
+                      )}
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <ConfidenceBadge confidence={item.confidence} />
+                    <Link
+                      href={
+                        item.review_href ||
+                        `/extraction/new?documentId=${item.document_id}`
+                      }
+                      className="text-xs font-semibold text-text-teal hover:text-primary"
+                    >
+                      Review
+                    </Link>
+                  </div>
+                </div>
+              ))}
+          </div>
+        </div>
+      )}
+
       {loading && entries.length === 0 && (
         <div className="space-y-3">
           {[0, 1, 2].map((index) => (
@@ -397,6 +467,12 @@ export default function ReviewQueuePage() {
                       <p className="text-xs text-text-secondary">
                         {entry.document_type ?? "Unclassified"} ·{" "}
                         {new Date(entry.uploaded_at).toLocaleDateString()}
+                        {typeof entry.pending_field_count === "number" && (
+                          <> · {entry.pending_field_count} pending</>
+                        )}
+                        {entry.top_reasons && entry.top_reasons.length > 0 && (
+                          <> · {entry.top_reasons.join(", ")}</>
+                        )}
                       </p>
                       {rowErrors[entry.document_id] && (
                         <p className="mt-1 text-xs text-danger">
@@ -423,7 +499,10 @@ export default function ReviewQueuePage() {
                       </button>
 
                       <Link
-                        href={`/documents/${entry.document_id}/review`}
+                        href={
+                          entry.review_href ||
+                          `/documents/${entry.document_id}/review`
+                        }
                         className="text-xs font-semibold text-text-teal hover:text-primary"
                       >
                         Review

@@ -51,6 +51,22 @@ export async function markTargetVerified(
   });
 }
 
+/** Reject an extracted value — keeps the value but marks review_status rejected. */
+export async function rejectTargetValue(
+  documentId: string,
+  normalizedKey: string,
+  originalValue: unknown,
+  evidence?: SaveTargetCorrectionPayload["evidence"],
+  changedBy?: string,
+): Promise<TargetCorrection> {
+  return saveTargetCorrection(documentId, normalizedKey, {
+    action: "reject",
+    originalValue,
+    evidence,
+    changedBy,
+  });
+}
+
 export async function listTargetCorrections(
   documentId: string,
 ): Promise<TargetCorrection[]> {

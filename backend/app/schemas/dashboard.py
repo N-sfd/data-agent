@@ -34,3 +34,26 @@ class ReviewQueueEntry(BaseModel):
     confidence: float | None
     queue_bucket: ReviewQueueBucket
     uploaded_at: datetime
+    pending_field_count: int = 0
+    attention_field_count: int = 0
+    top_reasons: list[str] = []
+    review_href: str | None = None
+
+
+class ReviewQueueFieldItem(BaseModel):
+    document_id: str
+    original_filename: str
+    field_key: str
+    label: str
+    value: str
+    confidence: float
+    confidence_band: str | None = None
+    review_status: str
+    extraction_source: str
+    extraction_method: str | None = None
+    reasons: list[str] = []
+    reason_labels: list[str] = []
+    priority: str = "medium"
+    decision_status: str = "needs_review"
+    page_number: int | None = None
+    review_href: str | None = None

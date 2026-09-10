@@ -31,6 +31,7 @@ import type {
   RelationshipAction,
   ReviewAction,
   ReviewQueueEntry,
+  ReviewQueueFieldItem,
   SignatureExtractionResult,
   StructureDetectionResult,
   StructuredContractOutput,
@@ -96,6 +97,10 @@ export async function getGlobalAuditLog(
 
 export async function getReviewQueue(): Promise<ReviewQueueEntry[]> {
   return apiFetch("/api/dashboard/review-queue");
+}
+
+export async function getReviewQueueFields(): Promise<ReviewQueueFieldItem[]> {
+  return apiFetch("/api/dashboard/review-queue/fields");
 }
 
 export async function resolveDuplicate(

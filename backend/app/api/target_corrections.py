@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 from app.database.dependencies import get_database
 from app.models.document import Document
 from app.models.document_metadata_field import DocumentMetadataField
+from app.models.metadata_field_audit_log import MetadataFieldAuditLog
 from app.models.target_correction import TargetCorrection
 from app.schemas.target_correction import (
     TargetCorrectionCreate,
@@ -12,6 +13,17 @@ from app.schemas.target_correction import (
 )
 
 router = APIRouter()
+
+_ACTION_TO_REVIEW_STATUS = {
+    "edit": "edited",
+    "verify": "accepted",
+    "reject": "rejected",
+}
+_ACTION_TO_AUDIT = {
+    "edit": "edit",
+    "verify": "accept",
+    "reject": "reject",
+}
 
 
 def _load_document_or_404(database: Session, document_id: str) -> Document:
@@ -34,6 +46,12 @@ async def create_target_correction(
 ) -> TargetCorrection:
     _load_document_or_404(database, document_id)
 
+    if request.action == "edit" and request.corrected_value is None:
+        raise HTTPException(
+            status_code=400,
+            detail="corrected_value is required for edit actions.",
+        )
+
     correction = TargetCorrection(
         document_id=document_id,
         normalized_key=normalized_key,
@@ -55,14 +73,37 @@ async def create_target_correction(
             DocumentMetadataField.extraction_source == "target",
         )
     )
+    previous_value = field.value if field is not None else (
+        None if request.original_value is None else str(request.original_value)
+    )
+    new_value = previous_value
+
     if field is not None:
         if request.action == "edit" and request.corrected_value is not None:
             field.value = str(request.corrected_value)
             field.review_status = "edited"
+            field.human_approved = True
+            new_value = field.value
         elif request.action == "verify":
             field.verified = True
             field.human_approved = True
             field.review_status = "accepted"
+            new_value = field.value
+        elif request.action == "reject":
+            field.human_approved = False
+            field.review_status = "rejected"
+            new_value = field.value
+
+    database.add(
+        MetadataFieldAuditLog(
+            document_id=document_id,
+            field_key=normalized_key[:50],
+            action=_ACTION_TO_AUDIT[request.action],
+            previous_value=previous_value,
+            new_value=new_value,
+            changed_by=request.changed_by or "reviewer",
+        )
+    )
 
     database.commit()
     database.refresh(correction)

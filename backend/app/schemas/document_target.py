@@ -91,6 +91,7 @@ class ScalarTargetResult(BaseModel):
     retrieval: RetrievalTrace | None = None
     confidence_detail: ConfidenceDetail | None = None
     validation: ValidationResult | None = None
+    review_decision: dict[str, Any] | None = None
     # Legacy list-shaped signals kept for older UI consumers.
     confidence_signals: list[dict[str, Any]] = Field(default_factory=list)
     validation_status: Literal["passed", "failed", "skipped"] = "passed"

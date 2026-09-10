@@ -152,6 +152,37 @@ def test_edit_after_verify_replaces_latest_action() -> None:
     assert corrections[0]["corrected_value"] == "W912DR-26-C-0099"
 
 
+def test_reject_records_action_and_audit_log() -> None:
+    document_id = upload_document(f"correction-reject-{uuid4()}.pdf")
+
+    reject = client.post(
+        f"/api/documents/{document_id}/targets/contract_number/corrections",
+        json={
+            "action": "reject",
+            "original_value": "W912DR-26-C-0042",
+            "changed_by": "reviewer@example.com",
+        },
+    )
+    assert reject.status_code == 201, reject.text
+    assert reject.json()["action"] == "reject"
+
+    audit = client.get("/api/documents/audit-log?limit=20")
+    assert audit.status_code == 200, audit.text
+    entries = audit.json()["entries"]
+    match = next(
+        (
+            entry
+            for entry in entries
+            if entry["document_id"] == document_id
+            and entry["field_key"] == "contract_number"
+            and entry["action"] == "reject"
+        ),
+        None,
+    )
+    assert match is not None
+    assert match["changed_by"] == "reviewer@example.com"
+
+
 def test_correction_requires_existing_document() -> None:
     response = client.post(
         f"/api/documents/{uuid4()}/targets/contract_number/corrections",

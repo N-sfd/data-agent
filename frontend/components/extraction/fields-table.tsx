@@ -1,6 +1,6 @@
 "use client";
 
-import { Check, CheckCircle2, ChevronDown, ChevronRight, Eye, Pencil, ShieldCheck, X } from "lucide-react";
+import { Check, CheckCircle2, ChevronDown, ChevronRight, Eye, Pencil, ShieldCheck, X, XCircle } from "lucide-react";
 import { useEffect, useState } from "react";
 
 import type { FieldRow } from "@/components/extraction/field-row";
@@ -14,6 +14,7 @@ interface FieldsTableProps {
   onViewSource?: (request: SourceViewRequest) => void;
   onSaveCorrection?: (row: FieldRow, correctedValue: string) => Promise<void> | void;
   onMarkVerified?: (row: FieldRow) => Promise<void> | void;
+  onReject?: (row: FieldRow) => Promise<void> | void;
 }
 
 const SNIPPET_MAX_LENGTH = 220;
@@ -71,6 +72,24 @@ function isEditCorrection(row: FieldRow): boolean {
 
 function isHumanVerified(row: FieldRow): boolean {
   return row.correction?.action === "verify";
+}
+
+function isRejected(row: FieldRow): boolean {
+  return row.correction?.action === "reject";
+}
+
+function reviewReasonLabels(row: FieldRow): string[] {
+  const reasons = row.scalar?.review_decision?.reasons;
+  if (!reasons?.length) return [];
+  const labels: Record<string, string> = {
+    low_confidence: "Low confidence",
+    validation_failed: "Validation failed",
+    not_source_grounded: "Not source-grounded",
+    ambiguous_candidates: "Ambiguous candidates",
+    ai_escalation: "AI escalation",
+    unresolved_or_weak_method: "Weak extraction method",
+  };
+  return reasons.map((reason) => labels[reason] ?? reason);
 }
 
 function displayValue(row: FieldRow): string {
@@ -141,6 +160,7 @@ function FieldCard({
   onViewSource,
   onSaveCorrection,
   onMarkVerified,
+  onReject,
 }: {
   row: FieldRow;
   selected: boolean;
@@ -149,15 +169,19 @@ function FieldCard({
   onViewSource?: (request: SourceViewRequest) => void;
   onSaveCorrection?: (row: FieldRow, correctedValue: string) => Promise<void> | void;
   onMarkVerified?: (row: FieldRow) => Promise<void> | void;
+  onReject?: (row: FieldRow) => Promise<void> | void;
 }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(displayValue(row));
   const [saving, setSaving] = useState(false);
   const [verifying, setVerifying] = useState(false);
+  const [rejecting, setRejecting] = useState(false);
   const value = displayValue(row);
   const canEdit = Boolean(onSaveCorrection) && row.status !== "not_found";
   const canVerify = Boolean(onMarkVerified) && row.status !== "not_found";
+  const canReject = Boolean(onReject) && row.status !== "not_found";
   const highlighted = selected || expanded;
+  const reasonLabels = reviewReasonLabels(row);
 
   async function handleSave() {
     if (!onSaveCorrection) return;
@@ -177,6 +201,16 @@ function FieldCard({
       await onMarkVerified(row);
     } finally {
       setVerifying(false);
+    }
+  }
+
+  async function handleReject() {
+    if (!onReject) return;
+    setRejecting(true);
+    try {
+      await onReject(row);
+    } finally {
+      setRejecting(false);
     }
   }
 
@@ -240,6 +274,15 @@ function FieldCard({
                 Verified
               </span>
             )}
+            {isRejected(row) && (
+              <span className="inline-flex items-center gap-0.5 text-danger">
+                <XCircle className="h-3 w-3" />
+                Rejected
+              </span>
+            )}
+            {reasonLabels.length > 0 && !isHumanVerified(row) && !isRejected(row) && (
+              <span className="text-warning">· Needs review</span>
+            )}
             {isEditCorrection(row) && (
               <span
                 title={`Corrected from "${String(row.correction!.original_value ?? "")}"`}
@@ -298,6 +341,24 @@ function FieldCard({
             <ValidationDetail row={row} />
           </div>
 
+          {reasonLabels.length > 0 && (
+            <div className="mt-3">
+              <p className="text-[11px] font-semibold uppercase tracking-wide text-text-muted">
+                Review routing
+              </p>
+              <ul className="mt-1 flex flex-wrap gap-1.5">
+                {reasonLabels.map((label) => (
+                  <li
+                    key={label}
+                    className="rounded bg-warning/10 px-1.5 py-0.5 text-xs font-medium text-warning"
+                  >
+                    {label}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
           <IntelligenceTrace scalar={row.scalar} />
 
           {isEditCorrection(row) && (
@@ -342,7 +403,7 @@ function FieldCard({
               </button>
             </div>
           ) : (
-            (canEdit || canVerify) && (
+            (canEdit || canVerify || canReject) && (
               <div className="mt-3 flex flex-wrap items-center gap-3">
                 {canEdit && (
                   <button
@@ -365,7 +426,18 @@ function FieldCard({
                     className="inline-flex items-center gap-1 text-xs font-semibold text-text-secondary hover:text-primary disabled:cursor-default disabled:text-success disabled:opacity-100"
                   >
                     <ShieldCheck className="h-3 w-3" />
-                    {isHumanVerified(row) ? "Verified" : verifying ? "Marking…" : "Mark verified"}
+                    {isHumanVerified(row) ? "Verified" : verifying ? "Marking…" : "Accept"}
+                  </button>
+                )}
+                {canReject && (
+                  <button
+                    type="button"
+                    onClick={handleReject}
+                    disabled={rejecting || isRejected(row)}
+                    className="inline-flex items-center gap-1 text-xs font-semibold text-text-secondary hover:text-danger disabled:cursor-default disabled:text-danger disabled:opacity-100"
+                  >
+                    <XCircle className="h-3 w-3" />
+                    {isRejected(row) ? "Rejected" : rejecting ? "Rejecting…" : "Reject"}
                   </button>
                 )}
               </div>
@@ -384,6 +456,7 @@ export default function FieldsTable({
   onViewSource,
   onSaveCorrection,
   onMarkVerified,
+  onReject,
 }: FieldsTableProps) {
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
@@ -411,6 +484,7 @@ export default function FieldsTable({
             onViewSource={onViewSource}
             onSaveCorrection={onSaveCorrection}
             onMarkVerified={onMarkVerified}
+            onReject={onReject}
           />
         ))}
       </div>

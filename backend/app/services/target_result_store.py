@@ -29,6 +29,8 @@ from app.schemas.extraction_intelligence import (
 )
 from app.schemas.universal_extraction import SourceEvidence
 from app.services.detected_target_store import load_document_targets
+from app.services.review_routing import decide_review_for_scalar
+from app.core.config import get_settings
 
 
 def _stringify_value(value: Any) -> str:
@@ -115,6 +117,19 @@ def persist_target_extraction_results(
         if scalar.validation is not None:
             evidence["validation"] = scalar.validation.model_dump()
 
+        decision = decide_review_for_scalar(
+            scalar,
+            auto_accept_high_confidence=bool(
+                get_settings().auto_accept_high_confidence
+            ),
+        )
+        evidence["review_decision"] = {
+            "status": decision["status"],
+            "priority": decision["priority"],
+            "reasons": decision["reasons"],
+        }
+        initial_review_status = decision["review_status"]
+
         if existing is None:
             database.add(
                 DocumentMetadataField(
@@ -133,7 +148,8 @@ def persist_target_extraction_results(
                     display_method=(scalar.display_method or None),
                     evidence_json=evidence,
                     verified=bool(scalar.verified),
-                    review_status="pending",
+                    human_approved=initial_review_status == "accepted",
+                    review_status=initial_review_status,
                     extraction_source="target",
                     extraction_job_id=extraction_job_id,
                     extracted_at=now,
@@ -156,6 +172,10 @@ def persist_target_extraction_results(
             existing.display_method = scalar.display_method or existing.display_method
             existing.evidence_json = evidence
             existing.verified = bool(scalar.verified)
+            # Never clobber human rejected/edited decisions on re-extract.
+            if existing.review_status in {"pending"}:
+                existing.review_status = initial_review_status
+                existing.human_approved = initial_review_status == "accepted"
             existing.extraction_job_id = extraction_job_id
             existing.extracted_at = now
 
@@ -251,6 +271,7 @@ def load_persisted_extract_results(
         retrieval_raw = raw_evidence.pop("retrieval", None)
         confidence_detail_raw = raw_evidence.pop("confidence_detail", None)
         validation_raw = raw_evidence.pop("validation", None)
+        review_decision_raw = raw_evidence.pop("review_decision", None)
         evidence = SourceEvidence.model_validate(
             raw_evidence
             or {
@@ -326,6 +347,9 @@ def load_persisted_extract_results(
                 retrieval=retrieval,
                 confidence_detail=confidence_detail,
                 validation=validation,
+                review_decision=review_decision_raw
+                if isinstance(review_decision_raw, dict)
+                else None,
                 confidence_signals=signals,
                 validation_status=validation.status,
             )
