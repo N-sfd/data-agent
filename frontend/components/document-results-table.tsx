@@ -111,7 +111,9 @@ export default function DocumentResultsTable({
             <tr
               key={document.document_id}
               onClick={() =>
-                router.push(`/documents/${document.document_id}/review`)
+                router.push(
+                  `/extraction/new?documentId=${document.document_id}`,
+                )
               }
               className="cursor-pointer border-b border-border/60 transition duration-200 last:border-0 table-row-hover"
             >

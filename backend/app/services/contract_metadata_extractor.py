@@ -277,7 +277,8 @@ async def extract_contract_metadata(
 
     database.execute(
         delete(DocumentMetadataField).where(
-            DocumentMetadataField.document_id == document.id
+            DocumentMetadataField.document_id == document.id,
+            DocumentMetadataField.extraction_source == "contract",
         )
     )
 
@@ -295,6 +296,7 @@ async def extract_contract_metadata(
                 evidence_json=field.evidence.model_dump(),
                 verified=field.verified,
                 review_status="pending",
+                extraction_source="contract",
             )
         )
 

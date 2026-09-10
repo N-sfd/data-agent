@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { Suspense, useEffect, useRef, useState } from "react";
+import { useSearchParams } from "next/navigation";
 
 
 import { Sparkles } from "lucide-react";
@@ -30,9 +31,12 @@ import {
   discoverSchema,
   extractDocumentPages,
   extractTargetsViaJob,
+  getDocument,
   getDocumentPages,
+  getExtractResults,
   getExtractionProgress,
   getStructuredOutput,
+  getTargets,
   renameCustomTarget,
   universalExtract,
 } from "@/lib/documents";
@@ -65,6 +69,17 @@ const ANALYZE_STAGE_MESSAGES = [
 ];
 
 export default function NewExtractionPage() {
+  return (
+    <Suspense fallback={null}>
+      <NewExtractionPageContent />
+    </Suspense>
+  );
+}
+
+function NewExtractionPageContent() {
+  const searchParams = useSearchParams();
+  const reopenDocumentId = searchParams.get("documentId");
+
   const [document, setDocument] =
     useState<UploadedDocument | null>(null);
 
@@ -160,6 +175,72 @@ export default function NewExtractionPage() {
       active = false;
     };
   }, [schemaDiscovery?.document_family]);
+
+  // Reopen durable intelligence record — never re-extract automatically.
+  useEffect(() => {
+    if (!reopenDocumentId || document) return;
+
+    let active = true;
+
+    async function hydrate() {
+      try {
+        const [doc, pagesResult, targets, extractResults] =
+          await Promise.all([
+            getDocument(reopenDocumentId!),
+            getDocumentPages(reopenDocumentId!),
+            getTargets(reopenDocumentId!).catch(() => null),
+            getExtractResults(reopenDocumentId!).catch(() => null),
+          ]);
+        if (!active) return;
+
+        setDocument(doc);
+        setPages(pagesResult);
+        setExtraction({
+          document_id: doc.document_id,
+          status: "completed",
+          total_document_pages: doc.page_count,
+          pages_requested: doc.page_count,
+          pages_processed: pagesResult.length || doc.page_count,
+          native_pages: pagesResult.length || doc.page_count,
+          ocr_required_pages: 0,
+          ocr_completed_pages: 0,
+          failed_pages: 0,
+          page_numbers_processed: pagesResult.map((p) => p.page_number),
+          warnings: [],
+          completed_at: doc.uploaded_at,
+        });
+        if (targets) setSchemaDiscovery(targets);
+        if (extractResults) {
+          setTargetResult(extractResults);
+          const first = extractResults.scalars[0];
+          if (first?.evidence) {
+            setSourceRequest({
+              id: first.normalized_key,
+              pageNumber: first.page,
+              highlightText: first.evidence.source_text || String(first.value),
+              label: first.target,
+              value: String(first.value ?? ""),
+              confidence: first.confidence,
+              verified: first.verified,
+            });
+          }
+        }
+      } catch (error) {
+        if (active) {
+          setWorkflowError(
+            error instanceof Error
+              ? error.message
+              : "Unable to reopen persisted document.",
+          );
+        }
+      }
+    }
+
+    hydrate();
+    return () => {
+      active = false;
+    };
+  }, [reopenDocumentId, document]);
 
   useEffect(() => {
     if (!extracting || !document) {

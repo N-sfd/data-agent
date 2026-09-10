@@ -278,7 +278,7 @@ function ExplorerContent() {
                           </td>
                           <td className="px-4 py-3.5">
                             <Link
-                              href={`/documents/${row.document_id}/review`}
+                              href={`/extraction/new?documentId=${row.document_id}`}
                               className="inline-flex items-center gap-1 text-sm text-text-teal hover:text-primary"
                             >
                               Open

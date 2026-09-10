@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session
 
 from app.database.dependencies import get_database
 from app.models.document import Document
+from app.models.document_metadata_field import DocumentMetadataField
 from app.models.target_correction import TargetCorrection
 from app.schemas.target_correction import (
     TargetCorrectionCreate,
@@ -45,6 +46,24 @@ async def create_target_correction(
         changed_by=request.changed_by,
     )
     database.add(correction)
+
+    # Keep durable intelligence record in sync so Explorer/reopen see truth.
+    field = database.scalar(
+        select(DocumentMetadataField).where(
+            DocumentMetadataField.document_id == document_id,
+            DocumentMetadataField.field_key == normalized_key,
+            DocumentMetadataField.extraction_source == "target",
+        )
+    )
+    if field is not None:
+        if request.action == "edit" and request.corrected_value is not None:
+            field.value = str(request.corrected_value)
+            field.review_status = "edited"
+        elif request.action == "verify":
+            field.verified = True
+            field.human_approved = True
+            field.review_status = "accepted"
+
     database.commit()
     database.refresh(correction)
     return correction

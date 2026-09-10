@@ -59,6 +59,9 @@ from app.models import document_line_item as document_line_item_model  # noqa: F
 from app.models import (  # noqa: F401
     document_metadata_field as document_metadata_field_model,
 )
+from app.models import (  # noqa: F401
+    document_extracted_table as document_extracted_table_model,
+)
 from app.models import document_order_range as document_order_range_model  # noqa: F401
 from app.models import document_page as document_page_model  # noqa: F401
 from app.models import (  # noqa: F401

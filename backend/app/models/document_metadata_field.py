@@ -37,13 +37,13 @@ class DocumentMetadataField(Base):
     )
 
     field_key: Mapped[str] = mapped_column(
-        String(50),
+        String(120),
         nullable=False,
         index=True,
     )
 
     label: Mapped[str] = mapped_column(
-        String(80),
+        String(255),
         nullable=False,
     )
 
@@ -58,10 +58,25 @@ class DocumentMetadataField(Base):
         default=0.0,
     )
 
-    extraction_method: Mapped[str] = mapped_column(
+    confidence_band: Mapped[str | None] = mapped_column(
+        String(10),
+        nullable=True,
+    )
+
+    value_type: Mapped[str | None] = mapped_column(
         String(30),
+        nullable=True,
+    )
+
+    extraction_method: Mapped[str] = mapped_column(
+        String(40),
         nullable=False,
         default="label_value",
+    )
+
+    display_method: Mapped[str | None] = mapped_column(
+        String(80),
+        nullable=True,
     )
 
     evidence_json: Mapped[dict] = mapped_column(
@@ -91,6 +106,18 @@ class DocumentMetadataField(Base):
         Text,
         nullable=False,
         default="",
+    )
+
+    # contract = analyze-contract path; target = Select All / jobs/extract
+    extraction_source: Mapped[str] = mapped_column(
+        String(20),
+        nullable=False,
+        default="contract",
+    )
+
+    extraction_job_id: Mapped[int | None] = mapped_column(
+        Integer,
+        nullable=True,
     )
 
     extracted_at: Mapped[datetime] = mapped_column(

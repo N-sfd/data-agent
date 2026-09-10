@@ -20,6 +20,8 @@ from app.services.document_storage import (
 )
 from app.services.schema_discovery import discover_document_schema
 from app.services.target_extraction_service import extract_by_targets
+from app.services.target_result_store import persist_target_extraction_results
+from app.schemas.document_target import ScalarTargetResult, TableTargetResult
 
 settings = get_settings()
 
@@ -196,6 +198,19 @@ async def run_extraction_job(
             "unresolved_targets": unresolved,
             "warnings": warnings,
         }
+
+        # Durable intelligence record — Repository / Explorer / reopen
+        # reconstruct from PostgreSQL, not React state or job polling alone.
+        persist_target_extraction_results(
+            database=database,
+            document_id=document.id,
+            scalars=[
+                ScalarTargetResult.model_validate(item) for item in scalars
+            ],
+            tables=[TableTargetResult.model_validate(item) for item in tables],
+            extraction_job_id=job.id,
+        )
+
         job.status = "complete"
         job.stage = "complete"
         job.progress = 100

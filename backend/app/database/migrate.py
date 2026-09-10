@@ -50,6 +50,11 @@ DOCUMENT_METADATA_FIELD_COLUMNS: dict[str, str | dict[str, str]] = {
     "human_approved": {"sqlite": "BOOLEAN NOT NULL DEFAULT 0", "postgresql": "BOOLEAN NOT NULL DEFAULT false"},
     "review_status": "VARCHAR(20) NOT NULL DEFAULT 'pending'",
     "original_value": "TEXT NOT NULL DEFAULT ''",
+    "confidence_band": "VARCHAR(10)",
+    "value_type": "VARCHAR(30)",
+    "display_method": "VARCHAR(80)",
+    "extraction_source": "VARCHAR(20) NOT NULL DEFAULT 'contract'",
+    "extraction_job_id": "INTEGER",
 }
 
 

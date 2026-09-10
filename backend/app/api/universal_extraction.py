@@ -39,6 +39,10 @@ from app.services.detected_target_store import (
     persist_document_targets,
     rename_custom_target,
 )
+from app.services.target_result_store import (
+    load_persisted_extract_results,
+    persist_target_extraction_results,
+)
 from app.services.schema_discovery import discover_document_schema
 from app.services.structure_detection import (
     detect_document_structures,
@@ -307,6 +311,36 @@ async def delete_custom_target_endpoint(
         raise http_error(404, TARGET_NOT_FOUND, str(exc)) from exc
 
 
+@router.get(
+    "/{document_id}/extract-results",
+    response_model=ExtractTargetsResponse,
+)
+async def get_extract_results(
+    document_id: str,
+    database: Session = Depends(get_database),
+) -> ExtractTargetsResponse:
+    """Return durable targeted-extraction results without re-running extract.
+
+    Reopen after restart must use this path — not jobs/extract — unless the
+    user explicitly requests reprocess.
+    """
+
+    _load_document_or_404(database, document_id)
+    result = load_persisted_extract_results(
+        database=database,
+        document_id=document_id,
+    )
+    if result is None:
+        raise HTTPException(
+            status_code=404,
+            detail=(
+                "No persisted extraction results for this document yet. "
+                "Run targeted extraction first."
+            ),
+        )
+    return result
+
+
 @router.post(
     "/{document_id}/extract-targets",
     response_model=ExtractTargetsResponse,
@@ -321,7 +355,7 @@ async def extract_targets(
 
     ai_provider = create_ai_provider(settings)
 
-    return await extract_by_targets(
+    result = await extract_by_targets(
         database=database,
         document=document,
         target_ids=request.target_ids,
@@ -330,3 +364,11 @@ async def extract_targets(
         ),
         ai_provider=ai_provider,
     )
+    persist_target_extraction_results(
+        database=database,
+        document_id=document_id,
+        scalars=result.scalars,
+        tables=result.tables,
+        extraction_job_id=None,
+    )
+    return result

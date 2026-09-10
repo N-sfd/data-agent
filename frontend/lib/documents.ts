@@ -457,6 +457,12 @@ export async function getTargets(
   return apiFetch(`/api/documents/${documentId}/targets`);
 }
 
+export async function getExtractResults(
+  documentId: string,
+): Promise<ExtractTargetsResult> {
+  return apiFetch(`/api/documents/${documentId}/extract-results`);
+}
+
 export async function createCustomTarget(
   documentId: string,
   label: string,
