@@ -54,6 +54,13 @@ def test_resolve_scalar_from_source_examples_uses_discovery_evidence() -> None:
     assert result.value == "Jane A. Smith"
     assert result.extraction_method == "source_evidence"
     assert result.verified is True
+    assert result.confidence_detail is not None
+    assert result.confidence_detail.signals.exact_label_match is True
+    assert result.validation is not None
+    assert result.validation.status == "passed"
+    assert result.retrieval is not None
+    assert result.retrieval.deterministic_status == "resolved"
+    assert result.retrieval.ai_fallback_required is False
 
 
 def test_resolve_scalar_target_prefers_source_evidence_over_label_search() -> None:
@@ -69,8 +76,11 @@ def test_resolve_scalar_target_prefers_source_evidence_over_label_search() -> No
         all_pages=[page],
     )
 
-    assert result is not None
-    assert result.value == "Jane A. Smith"
+    assert result[0] is not None
+    assert result[0].value == "Jane A. Smith"
+    assert result[0].retrieval is not None
+    assert result[0].retrieval.deterministic_status == "resolved"
+    assert result[2] is False
 
 
 def test_prose_fragments_are_not_plausible_kv_labels() -> None:

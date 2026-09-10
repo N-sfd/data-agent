@@ -242,6 +242,52 @@ export interface DiscoverSchemaResult {
 
 export type ConfidenceBand = "high" | "medium" | "low";
 
+export interface CandidatePageScore {
+  page: number;
+  score: number;
+}
+
+export interface RetrievalTrace {
+  target_key: string;
+  candidate_pages: CandidatePageScore[];
+  selected_pages: number[];
+  deterministic_status:
+    | "resolved"
+    | "ambiguous"
+    | "unresolved"
+    | "not_attempted";
+  ai_fallback_required: boolean;
+}
+
+export interface ConfidenceSignals {
+  exact_label_match: boolean;
+  label_proximity: "strong" | "moderate" | "weak" | "none";
+  native_text: boolean;
+  format_validation: boolean;
+  source_grounded: boolean;
+  corroborating_occurrences: number;
+  ambiguity: boolean;
+  ai_fallback: boolean;
+}
+
+export interface ConfidenceDetail {
+  score: number;
+  band: ConfidenceBand;
+  signals: ConfidenceSignals;
+}
+
+export interface ValidationCheck {
+  type: string;
+  status: "passed" | "failed" | "skipped";
+  detail?: string | null;
+}
+
+export interface ValidationResult {
+  status: "passed" | "failed" | "skipped";
+  checks: ValidationCheck[];
+  warnings: string[];
+}
+
 export interface ScalarTargetResult {
   target: string;
   normalized_key: string;
@@ -253,6 +299,11 @@ export interface ScalarTargetResult {
   extraction_method: string;
   display_method: string;
   evidence: SourceEvidence;
+  retrieval?: RetrievalTrace | null;
+  confidence_detail?: ConfidenceDetail | null;
+  validation?: ValidationResult | null;
+  confidence_signals?: Array<Record<string, unknown>>;
+  validation_status?: "passed" | "failed" | "skipped";
 }
 
 export interface TableTargetResult {

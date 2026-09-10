@@ -110,6 +110,17 @@ def test_extract_persists_and_reopens_without_reextract() -> None:
     assert field_ids
     job = _run_job(document_id, field_ids[:10])
     assert job["result"]["scalars"] or job["result"]["unresolved_targets"]
+    if job["result"]["scalars"]:
+        first = job["result"]["scalars"][0]
+        assert "retrieval" in first
+        assert first["retrieval"]["target_key"]
+        assert "selected_pages" in first["retrieval"]
+        assert "confidence_detail" in first
+        assert "signals" in first["confidence_detail"]
+        assert "exact_label_match" in first["confidence_detail"]["signals"]
+        assert "validation" in first
+        assert first["validation"]["status"] in {"passed", "failed", "skipped"}
+        assert isinstance(first["validation"]["checks"], list)
 
     # Durable rows in PostgreSQL / SQLite
     database = SessionLocal()
@@ -146,6 +157,12 @@ def test_extract_persists_and_reopens_without_reextract() -> None:
     assert scalar["evidence"]["page_number"] >= 1
     assert scalar["extraction_method"]
     assert "confidence" in scalar
+    # Intelligence objects survive reopen (may be reconstructed for older rows).
+    assert scalar.get("confidence_detail") is not None
+    assert scalar.get("validation") is not None
+    if scalar.get("retrieval"):
+        assert "selected_pages" in scalar["retrieval"]
+        assert "candidate_pages" in scalar["retrieval"]
 
     # Source verification from persisted evidence
     render = client.get(

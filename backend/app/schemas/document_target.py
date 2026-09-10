@@ -3,6 +3,11 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
+from app.schemas.extraction_intelligence import (
+    ConfidenceDetail,
+    RetrievalTrace,
+    ValidationResult,
+)
 from app.schemas.universal_extraction import SourceEvidence
 
 TargetType = Literal[
@@ -82,6 +87,13 @@ class ScalarTargetResult(BaseModel):
     extraction_method: str
     display_method: str = ""
     evidence: SourceEvidence
+    # Inspectable intelligence layer (retrieval → confidence → validation).
+    retrieval: RetrievalTrace | None = None
+    confidence_detail: ConfidenceDetail | None = None
+    validation: ValidationResult | None = None
+    # Legacy list-shaped signals kept for older UI consumers.
+    confidence_signals: list[dict[str, Any]] = Field(default_factory=list)
+    validation_status: Literal["passed", "failed", "skipped"] = "passed"
 
 
 class TableTargetResult(BaseModel):

@@ -1,33 +1,23 @@
-"""Blends real extraction signals into a single confidence score.
+"""Blends real extraction signals into an explainable confidence object."""
 
-Every extraction path in target_extraction_service.py used to assign
-confidence as either a flat per-method constant, a floor-clamped
-discovery-time score, or (for AI results) whatever number the model
-itself claimed. None of that reflects the signals the spec calls for:
-label/match exactness, corroboration across the document, and source
-page quality (native text vs. OCR). This module is the single place
-that turns those signals into a score, so "confidence" means something
-inspectable rather than an arbitrary percentage.
-"""
+from __future__ import annotations
 
 from typing import Literal
 
 from app.models.document_page import DocumentPage
+from app.schemas.extraction_intelligence import (
+    ConfidenceDetail,
+    ConfidenceSignals,
+)
 
 ConfidenceBand = Literal["high", "medium", "low"]
 
-# Reflects each mechanism's inherent reliability before any per-instance
-# adjustment. source_evidence requires both a strict "label: value"
-# pattern match at discovery time AND a passing validate_source_value
-# grounding check, so a clean hit on native text lands in the "high"
-# band without needing extra corroboration. label_value is a looser
-# generic label scan with no discovery-time corroboration, so it starts
-# in "medium" territory. AI starts lowest because it's an interpretive
-# fallback rather than a pattern match.
 _BASE_CONFIDENCE_BY_METHOD: dict[str, float] = {
     "source_evidence": 0.90,
     "form_field": 0.82,
     "label_value": 0.72,
+    "layout_proximity": 0.68,
+    "regex": 0.70,
     "ai": 0.55,
 }
 
@@ -38,46 +28,13 @@ _OCR_SUCCEEDED_PENALTY = 0.08
 _OCR_FAILED_PENALTY = 0.25
 _OCR_LOW_COVERAGE_PENALTY = 0.05
 _LOW_TEXT_COVERAGE_THRESHOLD = 0.3
+_SOURCE_GROUNDED_BONUS = 0.05
+_VALIDATION_PASSED_BONUS = 0.05
+_AMBIGUITY_PENALTY = 0.15
+_EXACT_LABEL_BONUS = 0.05
 
 _MIN_CONFIDENCE = 0.05
 _MAX_CONFIDENCE = 0.99
-
-
-def compute_confidence(
-    *,
-    method: str,
-    match_exactness: float = 1.0,
-    occurrence_count: int = 1,
-    page: DocumentPage | None = None,
-) -> float:
-    """Blend method reliability, match quality, corroboration, and
-    source page quality into a single 0-1 confidence score."""
-
-    score = _BASE_CONFIDENCE_BY_METHOD.get(method, 0.60)
-
-    # A fuzzy or partial match pulls the score down from the method's
-    # base rate; an exact match (1.0) leaves it unchanged.
-    score += (match_exactness - 1.0) * 0.15
-
-    if occurrence_count > 1:
-        score += min(
-            _MAX_CORROBORATION_BONUS,
-            _CORROBORATION_BONUS_PER_OCCURRENCE * (occurrence_count - 1),
-        )
-
-    # getattr with defaults: some callers pass lightweight page-like
-    # fakes (e.g. tests) that don't carry every DocumentPage column.
-    if page is not None and getattr(page, "requires_ocr", False):
-        if not getattr(page, "ocr_succeeded", False):
-            score -= _OCR_FAILED_PENALTY
-        else:
-            score -= _OCR_SUCCEEDED_PENALTY
-            if (
-                getattr(page, "text_coverage_ratio", None) or 0
-            ) < _LOW_TEXT_COVERAGE_THRESHOLD:
-                score -= _OCR_LOW_COVERAGE_PENALTY
-
-    return round(max(_MIN_CONFIDENCE, min(_MAX_CONFIDENCE, score)), 2)
 
 
 def confidence_band(confidence: float) -> ConfidenceBand:
@@ -88,17 +45,124 @@ def confidence_band(confidence: float) -> ConfidenceBand:
     return "low"
 
 
-def display_method(extraction_method: str, page: DocumentPage | None) -> str:
-    """Map internal extraction_method values to the "Native / OCR / AI
-    Fallback / Manual" vocabulary the extraction workspace shows."""
+def _label_proximity(
+    *,
+    method: str,
+    match_exactness: float,
+) -> Literal["strong", "moderate", "weak", "none"]:
+    if method in {"source_evidence", "form_field"} and match_exactness >= 0.9:
+        return "strong"
+    if method == "label_value" or match_exactness >= 0.75:
+        return "moderate"
+    if method == "ai":
+        return "weak"
+    if match_exactness > 0:
+        return "weak"
+    return "none"
 
-    if extraction_method == "ai":
-        return "AI Fallback"
 
-    if extraction_method == "manual":
-        return "Manual"
+def explain_confidence(
+    *,
+    method: str,
+    match_exactness: float = 1.0,
+    occurrence_count: int = 1,
+    page: DocumentPage | None = None,
+    source_grounded: bool = True,
+    validation_passed: bool = True,
+    ambiguous_candidates: int = 0,
+    exact_label_match: bool | None = None,
+) -> ConfidenceDetail:
+    """Return score + band + inspectable boolean/enum signals."""
+
+    exact = (
+        exact_label_match
+        if exact_label_match is not None
+        else method in {"source_evidence", "form_field", "label_value"}
+        and match_exactness >= 0.95
+    )
+    native = bool(
+        page is not None and not getattr(page, "requires_ocr", False)
+    )
+    ambiguity = ambiguous_candidates > 1
+    ai_fallback = method == "ai"
+
+    score = _BASE_CONFIDENCE_BY_METHOD.get(method, 0.60)
+    score += (match_exactness - 1.0) * 0.15
+
+    if exact:
+        score += _EXACT_LABEL_BONUS
+
+    if occurrence_count > 1:
+        score += min(
+            _MAX_CORROBORATION_BONUS,
+            _CORROBORATION_BONUS_PER_OCCURRENCE * (occurrence_count - 1),
+        )
 
     if page is not None and getattr(page, "requires_ocr", False):
-        return "OCR"
+        if not getattr(page, "ocr_succeeded", False):
+            score -= _OCR_FAILED_PENALTY
+        else:
+            score -= _OCR_SUCCEEDED_PENALTY
+            if (
+                getattr(page, "text_coverage_ratio", None) or 0
+            ) < _LOW_TEXT_COVERAGE_THRESHOLD:
+                score -= _OCR_LOW_COVERAGE_PENALTY
 
+    if source_grounded:
+        score += _SOURCE_GROUNDED_BONUS
+    if validation_passed:
+        score += _VALIDATION_PASSED_BONUS
+    if ambiguity:
+        score -= _AMBIGUITY_PENALTY
+
+    final = round(max(_MIN_CONFIDENCE, min(_MAX_CONFIDENCE, score)), 2)
+    signals = ConfidenceSignals(
+        exact_label_match=exact,
+        label_proximity=_label_proximity(
+            method=method, match_exactness=match_exactness
+        ),
+        native_text=native,
+        format_validation=validation_passed,
+        source_grounded=source_grounded,
+        corroborating_occurrences=max(0, occurrence_count),
+        ambiguity=ambiguity,
+        ai_fallback=ai_fallback,
+    )
+    return ConfidenceDetail(
+        score=final,
+        band=confidence_band(final),
+        signals=signals,
+    )
+
+
+def compute_confidence(
+    *,
+    method: str,
+    match_exactness: float = 1.0,
+    occurrence_count: int = 1,
+    page: DocumentPage | None = None,
+    source_grounded: bool = True,
+    validation_passed: bool = True,
+    ambiguous_candidates: int = 0,
+    exact_label_match: bool | None = None,
+) -> float:
+    return explain_confidence(
+        method=method,
+        match_exactness=match_exactness,
+        occurrence_count=occurrence_count,
+        page=page,
+        source_grounded=source_grounded,
+        validation_passed=validation_passed,
+        ambiguous_candidates=ambiguous_candidates,
+        exact_label_match=exact_label_match,
+    ).score
+
+
+def display_method(extraction_method: str, page: DocumentPage | None) -> str:
+    if extraction_method == "ai":
+        return "AI Fallback"
+    if extraction_method == "manual":
+        return "Manual"
+    if page is not None and getattr(page, "requires_ocr", False):
+        return "OCR"
     return "Native"

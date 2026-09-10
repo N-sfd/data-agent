@@ -20,6 +20,13 @@ from app.schemas.document_target import (
     ScalarTargetResult,
     TableTargetResult,
 )
+from app.schemas.extraction_intelligence import (
+    ConfidenceDetail,
+    ConfidenceSignals,
+    RetrievalTrace,
+    ValidationResult,
+    confidence_detail_to_legacy_signals,
+)
 from app.schemas.universal_extraction import SourceEvidence
 from app.services.detected_target_store import load_document_targets
 
@@ -97,6 +104,16 @@ def persist_target_extraction_results(
         label = label_by_key.get(key) or scalar.target or key
         group = group_by_key.get(key) or "extracted"
         value_type = value_type_by_key.get(key) or "string"
+        if scalar.confidence_signals:
+            evidence["confidence_signals"] = scalar.confidence_signals
+        evidence["validation_status"] = scalar.validation_status
+        evidence["confidence_band"] = scalar.confidence_band
+        if scalar.retrieval is not None:
+            evidence["retrieval"] = scalar.retrieval.model_dump()
+        if scalar.confidence_detail is not None:
+            evidence["confidence_detail"] = scalar.confidence_detail.model_dump()
+        if scalar.validation is not None:
+            evidence["validation"] = scalar.validation.model_dump()
 
         if existing is None:
             database.add(
@@ -227,8 +244,15 @@ def load_persisted_extract_results(
 
     scalars: list[ScalarTargetResult] = []
     for row in scalar_rows:
+        raw_evidence = dict(row.evidence_json or {})
+        signals = list(raw_evidence.pop("confidence_signals", []) or [])
+        validation_status = raw_evidence.pop("validation_status", "passed")
+        raw_evidence.pop("confidence_band", None)
+        retrieval_raw = raw_evidence.pop("retrieval", None)
+        confidence_detail_raw = raw_evidence.pop("confidence_detail", None)
+        validation_raw = raw_evidence.pop("validation", None)
         evidence = SourceEvidence.model_validate(
-            row.evidence_json
+            raw_evidence
             or {
                 "page_number": 1,
                 "source_text": "",
@@ -242,6 +266,51 @@ def load_persisted_extract_results(
             if row.confidence >= 0.6
             else "low"
         )
+
+        retrieval = None
+        if isinstance(retrieval_raw, dict):
+            try:
+                retrieval = RetrievalTrace.model_validate(retrieval_raw)
+            except Exception:
+                retrieval = None
+
+        confidence_detail = None
+        if isinstance(confidence_detail_raw, dict):
+            try:
+                confidence_detail = ConfidenceDetail.model_validate(
+                    confidence_detail_raw
+                )
+            except Exception:
+                confidence_detail = None
+        if confidence_detail is None:
+            confidence_detail = ConfidenceDetail(
+                score=float(row.confidence or 0),
+                band=band,  # type: ignore[arg-type]
+                signals=ConfidenceSignals(
+                    source_grounded=bool(row.verified),
+                    format_validation=validation_status == "passed",
+                    ai_fallback=(row.extraction_method or "") == "ai",
+                ),
+            )
+
+        validation = None
+        if isinstance(validation_raw, dict):
+            try:
+                validation = ValidationResult.model_validate(validation_raw)
+            except Exception:
+                validation = None
+        if validation is None:
+            validation = ValidationResult(
+                status=validation_status  # type: ignore[arg-type]
+                if validation_status in {"passed", "failed", "skipped"}
+                else "passed",
+                checks=[],
+                warnings=[],
+            )
+
+        if not signals:
+            signals = confidence_detail_to_legacy_signals(confidence_detail)
+
         scalars.append(
             ScalarTargetResult(
                 target=row.label,
@@ -254,6 +323,11 @@ def load_persisted_extract_results(
                 extraction_method=row.extraction_method,
                 display_method=row.display_method or "",
                 evidence=evidence,
+                retrieval=retrieval,
+                confidence_detail=confidence_detail,
+                validation=validation,
+                confidence_signals=signals,
+                validation_status=validation.status,
             )
         )
 
