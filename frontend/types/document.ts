@@ -315,6 +315,9 @@ export interface ScalarTargetResult {
   target: string;
   normalized_key: string;
   value: unknown;
+  /** Latest machine extract when it differs from reviewed ``value``. */
+  extracted_value?: unknown;
+  review_status?: string | null;
   page: number;
   confidence: number;
   confidence_band: ConfidenceBand;

@@ -14,7 +14,11 @@ import ResultSummaryBar from "@/components/extraction/result-summary-bar";
 import TableResult from "@/components/extraction/table-result";
 import ValidationIssuesPanel from "@/components/extraction/validation-issues-panel";
 import type { SourceViewRequest } from "@/components/source-verification-panel";
-import { downloadCsv, downloadJson } from "@/lib/export";
+import {
+  downloadReviewedCsv,
+  downloadReviewedJson,
+  scalarToExportField,
+} from "@/lib/reviewed-export";
 import {
   listTargetCorrections,
   markTargetVerified,
@@ -385,36 +389,17 @@ export default function TargetResults({
   }
 
   function exportFieldsJson() {
-    downloadJson(
-      `${result.document_id}-fields.json`,
-      allRows.map((row) => ({
-        field: row.label,
-        value: row.correction ? row.correction.corrected_value : row.value,
-        confidence: row.confidence,
-        confidence_band: row.confidence_band,
-        extraction_method: row.extraction_method,
-        source_page: row.evidence?.page_number ?? null,
-        validation_status: row.status,
-        corrected: Boolean(row.correction),
-      })),
-    );
+    const fields = allRows
+      .filter((row) => row.scalar)
+      .map((row) => scalarToExportField(row.scalar!, row.correction));
+    downloadReviewedJson(`${result.document_id}-fields.json`, fields);
   }
 
   function exportFieldsCsv() {
-    downloadCsv(
-      `${result.document_id}-fields.csv`,
-      ["field", "value", "confidence", "method", "source_page", "validation_status"],
-      allRows.map((row) => ({
-        field: row.label,
-        value: String(
-          (row.correction ? row.correction.corrected_value : row.value) ?? "",
-        ),
-        confidence: row.confidence ?? "",
-        method: row.extraction_method ?? "",
-        source_page: row.evidence?.page_number ?? "",
-        validation_status: row.status,
-      })),
-    );
+    const fields = allRows
+      .filter((row) => row.scalar)
+      .map((row) => scalarToExportField(row.scalar!, row.correction));
+    downloadReviewedCsv(`${result.document_id}-fields.csv`, fields);
   }
 
   return (

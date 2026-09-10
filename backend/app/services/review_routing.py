@@ -21,6 +21,7 @@ REASON_NOT_SOURCE_GROUNDED = "not_source_grounded"
 REASON_AMBIGUOUS = "ambiguous_candidates"
 REASON_AI_ESCALATION = "ai_escalation"
 REASON_UNRESOLVED_METHOD = "unresolved_or_weak_method"
+REASON_EXTRACTION_DIFFERS = "extraction_differs_from_reviewed"
 
 
 def decide_review_for_scalar(
@@ -105,5 +106,6 @@ def human_reason_labels(reasons: list[str]) -> list[str]:
         REASON_AMBIGUOUS: "Ambiguous candidates",
         REASON_AI_ESCALATION: "AI escalation",
         REASON_UNRESOLVED_METHOD: "Weak extraction method",
+        REASON_EXTRACTION_DIFFERS: "New extraction differs from reviewed value",
     }
     return [labels.get(reason, reason) for reason in reasons]

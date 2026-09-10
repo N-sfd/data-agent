@@ -92,6 +92,9 @@ class ScalarTargetResult(BaseModel):
     confidence_detail: ConfidenceDetail | None = None
     validation: ValidationResult | None = None
     review_decision: dict[str, Any] | None = None
+    # Durable governance — effective ``value`` may differ from machine extract.
+    extracted_value: Any | None = None
+    review_status: str | None = None
     # Legacy list-shaped signals kept for older UI consumers.
     confidence_signals: list[dict[str, Any]] = Field(default_factory=list)
     validation_status: Literal["passed", "failed", "skipped"] = "passed"

@@ -88,6 +88,7 @@ function reviewReasonLabels(row: FieldRow): string[] {
     ambiguous_candidates: "Ambiguous candidates",
     ai_escalation: "AI escalation",
     unresolved_or_weak_method: "Weak extraction method",
+    extraction_differs_from_reviewed: "New extraction differs from reviewed value",
   };
   return reasons.map((reason) => labels[reason] ?? reason);
 }
@@ -463,7 +464,14 @@ export default function FieldsTable({
   // Clicking "View Source" elsewhere selects a result — auto-expand it
   // here too, so the compact detail panel appears alongside the PDF jump.
   useEffect(() => {
-    if (selectedId) setExpandedId(selectedId);
+    if (selectedId) {
+      setExpandedId(selectedId);
+      window.setTimeout(() => {
+        window.document
+          .getElementById(`field-row-${selectedId}`)
+          ?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+      }, 50);
+    }
   }, [selectedId]);
 
   if (rows.length === 0) return null;

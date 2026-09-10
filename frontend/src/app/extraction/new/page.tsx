@@ -79,6 +79,7 @@ export default function NewExtractionPage() {
 function NewExtractionPageContent() {
   const searchParams = useSearchParams();
   const reopenDocumentId = searchParams.get("documentId");
+  const focusFieldKey = searchParams.get("focus");
 
   const [document, setDocument] =
     useState<UploadedDocument | null>(null);
@@ -212,17 +213,32 @@ function NewExtractionPageContent() {
         if (targets) setSchemaDiscovery(targets);
         if (extractResults) {
           setTargetResult(extractResults);
-          const first = extractResults.scalars[0];
-          if (first?.evidence) {
+          const focused =
+            (focusFieldKey
+              ? extractResults.scalars.find(
+                  (scalar) =>
+                    scalar.normalized_key === focusFieldKey ||
+                    scalar.target === focusFieldKey,
+                )
+              : null) ?? extractResults.scalars[0];
+          if (focused?.evidence) {
             setSourceRequest({
-              id: first.normalized_key,
-              pageNumber: first.page,
-              highlightText: first.evidence.source_text || String(first.value),
-              label: first.target,
-              value: String(first.value ?? ""),
-              confidence: first.confidence,
-              verified: first.verified,
+              id: focused.normalized_key,
+              pageNumber: focused.page,
+              highlightText:
+                focused.evidence.source_text || String(focused.value),
+              label: focused.target,
+              value: String(focused.value ?? ""),
+              confidence: focused.confidence,
+              verified: focused.verified,
             });
+            setMobileSourceOpen(true);
+            // Defer scroll until results DOM is painted.
+            window.setTimeout(() => {
+              window.document
+                .getElementById(`field-row-${focused.normalized_key}`)
+                ?.scrollIntoView({ behavior: "smooth", block: "center" });
+            }, 250);
           }
         }
       } catch (error) {
@@ -240,7 +256,7 @@ function NewExtractionPageContent() {
     return () => {
       active = false;
     };
-  }, [reopenDocumentId, document]);
+  }, [reopenDocumentId, document, focusFieldKey]);
 
   useEffect(() => {
     if (!extracting || !document) {

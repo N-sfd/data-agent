@@ -26,9 +26,15 @@ from app.database.migrate import (  # noqa: E402
     ensure_document_page_columns,
     ensure_documents_columns,
     ensure_extraction_model_columns,
+    ensure_metadata_field_audit_log_columns,
     ensure_target_correction_columns,
 )
 from app.database.session import engine  # noqa: E402
+from app.models import actor as _actor_model  # noqa: E402,F401
+from app.models import (  # noqa: E402,F401
+    integration_audit_log as _integration_audit_log_model,
+)
+from app.services.actor_seed import ensure_actors_seeded  # noqa: E402
 from app.models import (  # noqa: E402,F401
     classification_audit_log as _classification_audit_log_model,
 )
@@ -113,7 +119,16 @@ def _initialize_database() -> None:
     ensure_document_metadata_field_columns(engine)
     ensure_extraction_model_columns(engine)
     ensure_target_correction_columns(engine)
+    ensure_metadata_field_audit_log_columns(engine)
     ensure_detected_target_columns(engine)
+
+    from app.database.session import SessionLocal
+
+    database = SessionLocal()
+    try:
+        ensure_actors_seeded(database)
+    finally:
+        database.close()
 
 
 @pytest.fixture

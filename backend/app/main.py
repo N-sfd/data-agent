@@ -3,6 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 
 from app.api import (
+    actors,
     contract_analysis,
     dashboard,
     documents,
@@ -10,12 +11,15 @@ from app.api import (
     financial_analysis,
     jobs,
     page_extraction,
+    reviewed_export,
     system,
     target_corrections,
     universal_extraction,
 )
 from app.core.config import get_settings
 from app.core.observability import RequestIdMiddleware
+from app.core.security_headers import SecurityHeadersMiddleware
+from app.core.version import resolve_git_sha
 from app.database.base import Base
 from app.database.migrate import (
     ensure_detected_target_columns,
@@ -23,6 +27,7 @@ from app.database.migrate import (
     ensure_document_page_columns,
     ensure_documents_columns,
     ensure_extraction_model_columns,
+    ensure_metadata_field_audit_log_columns,
     ensure_target_correction_columns,
     run_alembic_upgrade,
 )
@@ -81,6 +86,10 @@ from app.models import (  # noqa: F401
 from app.models import (  # noqa: F401
     metadata_field_audit_log as metadata_field_audit_log_model,
 )
+from app.models import actor as actor_model  # noqa: F401
+from app.models import (  # noqa: F401
+    integration_audit_log as integration_audit_log_model,
+)
 from app.models import page_text_block as page_text_block_model  # noqa: F401
 from app.models import (  # noqa: F401
     relationship_audit_log as relationship_audit_log_model,
@@ -102,6 +111,8 @@ app = FastAPI(
 )
 
 # Last added = outermost. Request ID wraps CORS so responses always get it.
+# Security headers sit outside so every response (incl. errors) is hardened.
+app.add_middleware(SecurityHeadersMiddleware)
 app.add_middleware(RequestIdMiddleware)
 app.add_middleware(
     CORSMiddleware,
@@ -188,6 +199,18 @@ app.include_router(
     tags=["Target Corrections"],
 )
 
+app.include_router(
+    reviewed_export.router,
+    prefix="/api/documents",
+    tags=["Export"],
+)
+
+app.include_router(
+    actors.router,
+    prefix="/api/actors",
+    tags=["Actors"],
+)
+
 
 @app.on_event("startup")
 async def create_database_tables() -> None:
@@ -223,7 +246,17 @@ async def create_database_tables() -> None:
     ensure_document_metadata_field_columns(engine)
     ensure_extraction_model_columns(engine)
     ensure_target_correction_columns(engine)
+    ensure_metadata_field_audit_log_columns(engine)
     ensure_detected_target_columns(engine)
+
+    from app.database.session import SessionLocal
+    from app.services.actor_seed import ensure_actors_seeded
+
+    seed_db = SessionLocal()
+    try:
+        ensure_actors_seeded(seed_db)
+    finally:
+        seed_db.close()
 
     _recover_interrupted_jobs()
 
@@ -261,6 +294,19 @@ async def root() -> dict[str, str]:
         "application": settings.app_name,
         "status": "running",
         "mode": "oracle-dry-run",
+        "git_sha": resolve_git_sha(),
+        "environment": settings.app_env,
+    }
+
+
+@app.get("/version")
+async def version() -> dict[str, str]:
+    """Deployment fingerprint for release certification."""
+
+    return {
+        "git_sha": resolve_git_sha(),
+        "environment": settings.app_env,
+        "service": "data-agent",
     }
 
 
@@ -376,6 +422,33 @@ async def readiness_check(response: Response) -> dict[str, object]:
         "migration_mode": documents_via_convera and not ai_via_convera,
     }
 
+    checks["auth"] = {
+        "status": "ok",
+        "rbac_enforced": settings.effective_rbac_enforced,
+        "entra_configured": settings.entra_configured,
+        "entra_tenant_set": bool(settings.entra_tenant_id),
+        "mode": (
+            "entra+service"
+            if settings.entra_configured
+            else "service_or_dev"
+        ),
+    }
+    if (
+        (settings.app_env or "").strip().lower() == "production"
+        and not settings.entra_configured
+    ):
+        # Soft warn — do not fail readiness so existing deploys keep serving;
+        # production still forces RBAC via service keys until Entra is wired.
+        checks["auth"] = {
+            **checks["auth"],  # type: ignore[dict-item]
+            "status": "warn",
+            "detail": (
+                "Production without Entra: set ENTRA_TENANT_ID and "
+                "ENTRA_API_AUDIENCE for IdP JWT validation. "
+                "Service API keys remain valid under RBAC."
+            ),
+        }
+
     if not ready:
         response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
 
@@ -383,7 +456,10 @@ async def readiness_check(response: Response) -> dict[str, object]:
         "status": "ready" if ready else "not_ready",
         "service": "data-agent",
         "environment": settings.app_env,
+        "git_sha": resolve_git_sha(),
         "oracle_dry_run": settings.oracle_dry_run,
+        "rbac_enforced": settings.effective_rbac_enforced,
+        "entra_configured": settings.entra_configured,
         "checks": checks,
         # Flat ai/convera mirrors keep existing frontend clients working
         # when pointed at /ready instead of the old fat /health payload.

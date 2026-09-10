@@ -6,6 +6,8 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
+from app.core.auth import ActorContext, get_current_actor
+from app.core.observability import get_request_id
 from app.database.dependencies import get_database
 from app.models.classification_audit_log import ClassificationAuditLog
 from app.models.document import Document
@@ -937,7 +939,21 @@ async def review_metadata_field(
     field_key: str,
     payload: FieldReviewRequest,
     database: Session = Depends(get_database),
+    actor: ActorContext = Depends(get_current_actor),
 ) -> MetadataFieldResult:
+    permission_by_action = {
+        "accept": "review.accept",
+        "edit": "review.edit",
+        "reject": "review.reject",
+        "mark_unknown": "review.edit",
+    }
+    needed = permission_by_action.get(payload.action, "review.edit")
+    if not actor.has(needed):  # type: ignore[arg-type]
+        raise HTTPException(
+            status_code=403,
+            detail=f"Permission denied: {needed}",
+        )
+
     field = get_metadata_field(
         database,
         document_id=document_id,
@@ -957,6 +973,7 @@ async def review_metadata_field(
         )
 
     previous_value = field.value
+    previous_status = field.review_status
     new_value = (
         payload.value if payload.action == "edit" else field.value
     )
@@ -965,6 +982,7 @@ async def review_metadata_field(
         field.value = payload.value or ""
 
     field.review_status = _ACTION_TO_STATUS[payload.action]
+    display_name = payload.changed_by or actor.display_name
 
     database.add(
         MetadataFieldAuditLog(
@@ -973,7 +991,19 @@ async def review_metadata_field(
             action=payload.action,
             previous_value=previous_value,
             new_value=new_value,
-            changed_by=payload.changed_by,
+            previous_status=previous_status,
+            new_status=field.review_status,
+            reason={
+                "edit": "Reviewer correction",
+                "accept": "Reviewer accept",
+                "reject": "Reviewer reject",
+                "mark_unknown": "Marked unknown",
+            }.get(payload.action),
+            request_id=get_request_id(),
+            actor_id=actor.id,
+            actor_type=actor.actor_type,
+            actor_role=actor.role,
+            changed_by=display_name,
         )
     )
 
@@ -990,7 +1020,14 @@ async def accept_all_metadata_fields(
     document_id: str,
     payload: AcceptAllRequest,
     database: Session = Depends(get_database),
+    actor: ActorContext = Depends(get_current_actor),
 ) -> list[MetadataFieldResult]:
+    if not actor.has("review.accept"):
+        raise HTTPException(
+            status_code=403,
+            detail="Permission denied: review.accept",
+        )
+
     fields = list(
         database.scalars(
             select(DocumentMetadataField).where(
@@ -1005,10 +1042,13 @@ async def accept_all_metadata_fields(
             detail="No metadata fields found for this document.",
         )
 
+    display_name = payload.changed_by or actor.display_name
+
     for field in fields:
         if field.review_status != "pending":
             continue
 
+        previous_status = field.review_status
         field.review_status = "accepted"
 
         database.add(
@@ -1018,7 +1058,14 @@ async def accept_all_metadata_fields(
                 action="accept",
                 previous_value=field.value,
                 new_value=field.value,
-                changed_by=payload.changed_by,
+                previous_status=previous_status,
+                new_status=field.review_status,
+                reason="Accept all pending fields",
+                request_id=get_request_id(),
+                actor_id=actor.id,
+                actor_type=actor.actor_type,
+                actor_role=actor.role,
+                changed_by=display_name,
             )
         )
 
@@ -1052,6 +1099,13 @@ async def get_field_audit_log(
             action=entry.action,
             previous_value=entry.previous_value,
             new_value=entry.new_value,
+            previous_status=entry.previous_status,
+            new_status=entry.new_status,
+            reason=entry.reason,
+            request_id=entry.request_id,
+            actor_id=entry.actor_id,
+            actor_type=entry.actor_type,
+            actor_role=entry.actor_role,
             changed_by=entry.changed_by,
             changed_at=entry.changed_at,
         )

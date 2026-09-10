@@ -48,13 +48,30 @@ async function fetchWithRetry(
   init: RequestInit | undefined,
   onRetry?: (attempt: number, total: number) => void,
 ): Promise<Response> {
+  const headers = new Headers(init?.headers);
+  if (typeof window !== "undefined") {
+    if (!headers.has("Authorization")) {
+      const accessToken = window.localStorage.getItem(
+        "data-agent-access-token",
+      );
+      if (accessToken) {
+        headers.set("Authorization", `Bearer ${accessToken}`);
+      }
+    }
+    if (!headers.has("X-Actor-Id") && !headers.has("Authorization")) {
+      const actorId = window.localStorage.getItem("data-agent-actor-id");
+      if (actorId) headers.set("X-Actor-Id", actorId);
+    }
+  }
+  const nextInit: RequestInit = { ...init, headers };
+
   for (
     let attempt = 0;
     attempt <= COLD_START_RETRY_DELAYS_MS.length;
     attempt += 1
   ) {
     try {
-      return await fetch(apiUrl(path), init);
+      return await fetch(apiUrl(path), nextInit);
     } catch (error) {
       const isLastAttempt =
         attempt === COLD_START_RETRY_DELAYS_MS.length;

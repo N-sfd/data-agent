@@ -8,6 +8,7 @@ import {
   GitCompare,
   History,
   Key,
+  Layers,
   ListChecks,
   ScrollText,
   Search,
@@ -168,6 +169,12 @@ export const GOVERNANCE_SECTIONS: MegaMenuSection[] = [
   {
     title: "Governance",
     tiles: [
+      {
+        label: "Architecture",
+        description: "Platform lifecycle, trust loop, and deploy topology",
+        href: "/architecture",
+        icon: Layers,
+      },
       {
         label: "Integration Center",
         description: "Oracle ERP, n8n workflows & approved data",

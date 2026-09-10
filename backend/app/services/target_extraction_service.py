@@ -72,6 +72,8 @@ def _scalar_result(
         target=target.key,
         normalized_key=target.key,
         value=value,
+        extracted_value=value,
+        review_status=None,  # filled after decide_review_for_scalar
         page=page_number,
         confidence=confidence.score,
         confidence_band=confidence.band,
@@ -88,11 +90,12 @@ def _scalar_result(
     decision = decide_review_for_scalar(scalar)
     return scalar.model_copy(
         update={
+            "review_status": decision["review_status"],
             "review_decision": {
                 "status": decision["status"],
                 "priority": decision["priority"],
                 "reasons": decision["reasons"],
-            }
+            },
         }
     )
 

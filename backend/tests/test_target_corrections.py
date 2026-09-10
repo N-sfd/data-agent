@@ -181,6 +181,8 @@ def test_reject_records_action_and_audit_log() -> None:
     )
     assert match is not None
     assert match["changed_by"] == "reviewer@example.com"
+    assert match["actor_id"] == "actor-admin-default"
+    assert match["actor_role"] == "admin"
 
 
 def test_correction_requires_existing_document() -> None:

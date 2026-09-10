@@ -61,3 +61,15 @@ services:
         value: "10"
       - key: AI_MAX_CONTEXT_CHARS
         value: "60000"
+      - key: RBAC_ENFORCED
+        value: "true"
+      - key: DB_POOL_SIZE
+        value: "5"
+      - key: DB_MAX_OVERFLOW
+        value: "5"
+      - key: SEARCH_SCAN_CAP
+        value: "500"
+      - key: ENTRA_TENANT_ID
+        sync: false
+      - key: ENTRA_API_AUDIENCE
+        sync: false

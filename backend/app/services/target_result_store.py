@@ -29,7 +29,10 @@ from app.schemas.extraction_intelligence import (
 )
 from app.schemas.universal_extraction import SourceEvidence
 from app.services.detected_target_store import load_document_targets
-from app.services.review_routing import decide_review_for_scalar
+from app.services.review_routing import (
+    REASON_EXTRACTION_DIFFERS,
+    decide_review_for_scalar,
+)
 from app.core.config import get_settings
 
 
@@ -128,6 +131,7 @@ def persist_target_extraction_results(
             "priority": decision["priority"],
             "reasons": decision["reasons"],
         }
+        evidence["machine_value"] = value
         initial_review_status = decision["review_status"]
 
         if existing is None:
@@ -156,11 +160,11 @@ def persist_target_extraction_results(
                 )
             )
         else:
-            # Preserve human review edits unless still pending/unreviewed.
-            if existing.review_status in {"pending", "accepted"}:
-                existing.value = value
-                if not existing.original_value:
-                    existing.original_value = value
+            prior_status = existing.review_status
+            human_locked = prior_status in {"edited", "accepted", "rejected"}
+            reviewed_value = existing.value
+
+            # Always refresh intelligence metadata + latest machine value.
             existing.label = label[:255]
             existing.field_group = group[:30]
             existing.confidence = scalar.confidence
@@ -170,14 +174,47 @@ def persist_target_extraction_results(
                 scalar.extraction_method or existing.extraction_method
             )[:40]
             existing.display_method = scalar.display_method or existing.display_method
-            existing.evidence_json = evidence
             existing.verified = bool(scalar.verified)
-            # Never clobber human rejected/edited decisions on re-extract.
-            if existing.review_status in {"pending"}:
-                existing.review_status = initial_review_status
-                existing.human_approved = initial_review_status == "accepted"
             existing.extraction_job_id = extraction_job_id
             existing.extracted_at = now
+
+            if not human_locked:
+                # Machine-owned pending rows can be overwritten.
+                existing.value = value
+                if not existing.original_value:
+                    existing.original_value = value
+                existing.evidence_json = evidence
+                if prior_status == "pending":
+                    existing.review_status = initial_review_status
+                    existing.human_approved = initial_review_status == "accepted"
+            else:
+                # Preserve reviewed/authoritative value; keep machine_value.
+                evidence["reviewed_value"] = reviewed_value
+                evidence["prior_review_status"] = prior_status
+                if _stringify_value(reviewed_value) != value:
+                    reasons = list(decision["reasons"])
+                    if REASON_EXTRACTION_DIFFERS not in reasons:
+                        reasons.append(REASON_EXTRACTION_DIFFERS)
+                    evidence["review_decision"] = {
+                        "status": "needs_review",
+                        "priority": "low",
+                        "reasons": reasons,
+                    }
+                    existing.review_status = "pending"
+                    existing.human_approved = False
+                else:
+                    # Same machine value — keep human decision intact.
+                    evidence["review_decision"] = {
+                        "status": "ready_to_accept"
+                        if prior_status in {"accepted", "edited"}
+                        else decision["status"],
+                        "priority": decision["priority"],
+                        "reasons": [],
+                    }
+                existing.evidence_json = evidence
+                if not existing.original_value:
+                    existing.original_value = value
+
 
     for item in tables:
         if isinstance(item, dict):
@@ -272,6 +309,10 @@ def load_persisted_extract_results(
         confidence_detail_raw = raw_evidence.pop("confidence_detail", None)
         validation_raw = raw_evidence.pop("validation", None)
         review_decision_raw = raw_evidence.pop("review_decision", None)
+        # Governance metadata stored alongside evidence — not SourceEvidence fields.
+        machine_value = raw_evidence.pop("machine_value", None)
+        raw_evidence.pop("reviewed_value", None)
+        raw_evidence.pop("prior_review_status", None)
         evidence = SourceEvidence.model_validate(
             raw_evidence
             or {
@@ -337,6 +378,12 @@ def load_persisted_extract_results(
                 target=row.label,
                 normalized_key=row.field_key,
                 value=row.value,
+                extracted_value=(
+                    machine_value
+                    if machine_value is not None
+                    else row.original_value or row.value
+                ),
+                review_status=row.review_status,
                 page=evidence.page_number,
                 confidence=row.confidence,
                 confidence_band=band,  # type: ignore[arg-type]

@@ -79,6 +79,30 @@ class Settings(BaseSettings):
     # Default false — enterprise governance prefers explicit human accept.
     auto_accept_high_confidence: bool = False
 
+    # When true, requests must present X-Actor-Id or Bearer API key.
+    # Default false keeps local/dev/tests working with seeded Dev Admin.
+    # Production (app_env=production) always enforces RBAC regardless.
+    rbac_enforced: bool = False
+
+    # SQLAlchemy pool for Postgres (ignored for SQLite).
+    db_pool_size: int = 5
+    db_max_overflow: int = 5
+    db_pool_recycle_seconds: int = 1800
+    db_pool_timeout_seconds: int = 30
+
+    # Cap document search scan when status/confidence filters need Python
+    # post-processing — avoids loading unbounded repositories into memory.
+    search_scan_cap: int = 500
+
+    # Microsoft Entra ID (Azure AD) — API access-token validation.
+    # When tenant + audience are set, Bearer JWTs are validated via JWKS.
+    entra_tenant_id: str | None = None
+    entra_api_audience: str | None = None
+    entra_client_id: str | None = None
+    entra_role_claim: str = "roles"
+    # Used when the token has no mapped app roles.
+    entra_default_role: str = "viewer"
+
     ocr_enabled: bool = True
     ocr_language: str = "eng"
     ocr_dpi: int = 300
@@ -129,6 +153,18 @@ class Settings(BaseSettings):
                     origins.append(origin)
 
         return origins
+
+    @property
+    def entra_configured(self) -> bool:
+        return bool(self.entra_tenant_id and self.entra_api_audience)
+
+    @property
+    def effective_rbac_enforced(self) -> bool:
+        """Production always enforces RBAC; otherwise honor rbac_enforced."""
+
+        if (self.app_env or "").strip().lower() == "production":
+            return True
+        return bool(self.rbac_enforced)
 
     @property
     def resolved_database_url(self) -> str:

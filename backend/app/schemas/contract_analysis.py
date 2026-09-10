@@ -134,6 +134,13 @@ class FieldAuditEntry(BaseModel):
 
     previous_value: str | None = None
     new_value: str | None = None
+    previous_status: str | None = None
+    new_status: str | None = None
+    reason: str | None = None
+    request_id: str | None = None
+    actor_id: str | None = None
+    actor_type: str | None = None
+    actor_role: str | None = None
 
     changed_by: str
     changed_at: datetime
@@ -148,6 +155,13 @@ class GlobalAuditEntry(BaseModel):
 
     previous_value: str | None = None
     new_value: str | None = None
+    previous_status: str | None = None
+    new_status: str | None = None
+    reason: str | None = None
+    request_id: str | None = None
+    actor_id: str | None = None
+    actor_type: str | None = None
+    actor_role: str | None = None
 
     changed_by: str
     changed_at: datetime

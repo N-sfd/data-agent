@@ -7,14 +7,22 @@
       - "8000:8000"
     env_file:
       - ../backend/.env
+    environment:
+      APP_ENV: development
+      DEBUG: "true"
+      FRONTEND_URL: http://localhost:3000,http://localhost
     restart: unless-stopped
 
   frontend:
     build:
       context: ../frontend
       dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: http://localhost:8000
     ports:
       - "3000:3000"
+    environment:
+      NEXT_PUBLIC_API_URL: http://localhost:8000
     depends_on:
       - backend
     restart: unless-stopped

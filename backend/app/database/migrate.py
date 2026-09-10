@@ -68,6 +68,17 @@ TARGET_CORRECTION_COLUMNS: dict[str, str | dict[str, str]] = {
 }
 
 
+METADATA_FIELD_AUDIT_LOG_COLUMNS: dict[str, str | dict[str, str]] = {
+    "previous_status": "VARCHAR(20)",
+    "new_status": "VARCHAR(20)",
+    "reason": "TEXT",
+    "request_id": "VARCHAR(64)",
+    "actor_id": "VARCHAR(64)",
+    "actor_type": "VARCHAR(20)",
+    "actor_role": "VARCHAR(32)",
+}
+
+
 DETECTED_TARGET_COLUMNS: dict[str, str | dict[str, str]] = {
     "discovery_meta_json": {
         "sqlite": "JSON NOT NULL DEFAULT '{}'",
@@ -156,6 +167,13 @@ def ensure_extraction_model_columns(engine: Engine) -> None:
 def ensure_target_correction_columns(engine: Engine) -> None:
     """Add missing target_corrections columns for an existing database."""
     _ensure_columns(engine, "target_corrections", TARGET_CORRECTION_COLUMNS)
+
+
+def ensure_metadata_field_audit_log_columns(engine: Engine) -> None:
+    """Add missing metadata_field_audit_log columns for an existing database."""
+    _ensure_columns(
+        engine, "metadata_field_audit_log", METADATA_FIELD_AUDIT_LOG_COLUMNS
+    )
 
 
 def ensure_detected_target_columns(engine: Engine) -> None:

@@ -7,6 +7,13 @@ from app.database.base import Base
 
 
 class MetadataFieldAuditLog(Base):
+    """Append-only application history for field review decisions.
+
+    Rows are never updated in place. Actor identity attaches via
+    actor_id / actor_type / actor_role; ``changed_by`` remains the
+    human-readable display name for existing UI consumers.
+    """
+
     __tablename__ = "metadata_field_audit_log"
 
     id: Mapped[int] = mapped_column(
@@ -40,6 +47,42 @@ class MetadataFieldAuditLog(Base):
 
     new_value: Mapped[str | None] = mapped_column(
         Text,
+        nullable=True,
+    )
+
+    previous_status: Mapped[str | None] = mapped_column(
+        String(20),
+        nullable=True,
+    )
+
+    new_status: Mapped[str | None] = mapped_column(
+        String(20),
+        nullable=True,
+    )
+
+    reason: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True,
+    )
+
+    request_id: Mapped[str | None] = mapped_column(
+        String(64),
+        nullable=True,
+    )
+
+    actor_id: Mapped[str | None] = mapped_column(
+        String(64),
+        nullable=True,
+        index=True,
+    )
+
+    actor_type: Mapped[str | None] = mapped_column(
+        String(20),
+        nullable=True,
+    )
+
+    actor_role: Mapped[str | None] = mapped_column(
+        String(32),
         nullable=True,
     )
 

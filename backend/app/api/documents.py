@@ -842,6 +842,10 @@ async def search_documents(
     database: Session = Depends(get_database),
 ) -> DocumentSearchResponse:
     query = q.strip()
+    settings = get_settings()
+    scan_cap = max(50, int(settings.search_scan_cap))
+    page_limit = max(1, min(limit, 100))
+    page_offset = max(0, offset)
 
     matching_ids: set[str] | None = None
 
@@ -849,9 +853,9 @@ async def search_documents(
         like = f"%{query}%"
 
         filename_matches = database.scalars(
-            select(Document.id).where(
-                Document.original_filename.ilike(like)
-            )
+            select(Document.id)
+            .where(Document.original_filename.ilike(like))
+            .limit(scan_cap)
         )
 
         field_matches = database.scalars(
@@ -867,12 +871,14 @@ async def search_documents(
                 ),
                 DocumentMetadataField.value.ilike(like),
             )
+            .limit(scan_cap)
         )
 
+        # Page-text search is the most expensive path — hard-cap matches.
         page_text_matches = database.scalars(
-            select(DocumentPage.document_id).where(
-                DocumentPage.final_text.ilike(like)
-            )
+            select(DocumentPage.document_id)
+            .where(DocumentPage.final_text.ilike(like))
+            .limit(scan_cap)
         )
 
         matching_ids = (
@@ -894,15 +900,42 @@ async def search_documents(
             Document.document_type == document_type
         )
 
-    all_matching = list(
-        database.scalars(
-            base_query.order_by(Document.uploaded_at.desc())
-        )
+    needs_computed_filter = bool(
+        status
+        or confidence_min is not None
+        or confidence_max is not None
+        or repository_status
     )
 
+    ordered = base_query.order_by(Document.uploaded_at.desc())
+
+    if not needs_computed_filter:
+        # Fast path: push pagination into SQL — no full-table materialize.
+        total = (
+            database.scalar(
+                select(func.count()).select_from(
+                    base_query.order_by(None).subquery()
+                )
+            )
+            or 0
+        )
+        page_docs = list(
+            database.scalars(
+                ordered.offset(page_offset).limit(page_limit)
+            )
+        )
+        summaries = [
+            _build_document_summary(database, document)
+            for document in page_docs
+        ]
+        return DocumentSearchResponse(documents=summaries, total=total)
+
+    # Status / confidence / repository filters depend on computed summary
+    # fields — scan a capped window instead of the entire repository.
+    candidates = list(database.scalars(ordered.limit(scan_cap)))
     summaries = [
         _build_document_summary(database, document)
-        for document in all_matching
+        for document in candidates
     ]
 
     if status:
@@ -934,7 +967,7 @@ async def search_documents(
         ]
 
     total = len(summaries)
-    page = summaries[offset : offset + limit]
+    page = summaries[page_offset : page_offset + page_limit]
 
     return DocumentSearchResponse(documents=page, total=total)
 
@@ -1032,6 +1065,13 @@ async def get_global_audit_log(
             action=row.action,
             previous_value=row.previous_value,
             new_value=row.new_value,
+            previous_status=row.previous_status,
+            new_status=row.new_status,
+            reason=row.reason,
+            request_id=row.request_id,
+            actor_id=row.actor_id,
+            actor_type=row.actor_type,
+            actor_role=row.actor_role,
             changed_by=row.changed_by,
             changed_at=row.changed_at,
         )
