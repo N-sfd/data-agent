@@ -241,32 +241,57 @@ describe("FieldsTable", () => {
     );
   });
 
-  it("shows a human-verified badge once a verify action exists, and does not treat it as an edit", () => {
-    const verifyAction = {
-      id: 1,
-      document_id: "doc-1",
-      normalized_key: "contract_number",
-      action: "verify" as const,
-      original_value: "W912DR-26-C-0042",
-      corrected_value: null,
-      evidence_snapshot: null,
-      changed_by: "reviewer@example.com",
-      created_at: new Date().toISOString(),
-    };
+  it("shows retrieval, confidence signals, and validation checks when expanded", () => {
     const rows = buildFieldRows(
-      [scalar()],
+      [
+        scalar({
+          retrieval: {
+            target_key: "contract_number",
+            candidate_pages: [
+              { page: 1, score: 0.94 },
+              { page: 4, score: 0.41 },
+            ],
+            selected_pages: [1],
+            deterministic_status: "resolved",
+            ai_fallback_required: false,
+          },
+          confidence_detail: {
+            score: 0.91,
+            band: "high",
+            signals: {
+              exact_label_match: true,
+              label_proximity: "strong",
+              native_text: true,
+              format_validation: true,
+              source_grounded: true,
+              corroborating_occurrences: 2,
+              ambiguity: false,
+              ai_fallback: false,
+            },
+          },
+          validation: {
+            status: "passed",
+            checks: [
+              { type: "data_type", status: "passed" },
+              { type: "format", status: "passed" },
+              { type: "source_presence", status: "passed" },
+            ],
+            warnings: [],
+          },
+        }),
+      ],
       [],
-      new Map([["contract_number", verifyAction]]),
+      new Map(),
     );
     render(<FieldsTable title="Fields" rows={rows} />);
-
-    // Value is untouched by a pure verification (no "Edited" tag).
-    expect(screen.getByText("W912DR-26-C-0042")).toBeInTheDocument();
-    expect(screen.queryByText("Edited")).not.toBeInTheDocument();
-    expect(screen.getByText("Verified")).toBeInTheDocument();
-
     expandRow("contract_number");
-    expect(screen.getByText("Verified by reviewer")).toBeInTheDocument();
-    expect(screen.queryByText("Original extraction")).not.toBeInTheDocument();
+
+    expect(screen.getByText("Retrieval")).toBeInTheDocument();
+    expect(screen.getByText(/Selected pages/i)).toBeInTheDocument();
+    expect(screen.getByText("Confidence signals")).toBeInTheDocument();
+    expect(screen.getByText("Exact label")).toBeInTheDocument();
+    expect(screen.getByText("Validation checks")).toBeInTheDocument();
+    expect(screen.getByText(/source presence/i)).toBeInTheDocument();
+    expect(screen.getByText(/Validation passed/i)).toBeInTheDocument();
   });
 });

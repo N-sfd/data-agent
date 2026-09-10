@@ -18,6 +18,8 @@ class FallbackAIProvider(AIProvider):
     execution seamlessly falls back to the secondary provider.
     """
 
+    provider_id = "fallback"
+
     def __init__(
         self,
         providers: list[AIProvider],
@@ -25,6 +27,11 @@ class FallbackAIProvider(AIProvider):
         self.providers = [p for p in providers if p is not None]
         if not self.providers:
             raise ValueError("FallbackAIProvider requires at least one provider.")
+        parts = [
+            getattr(item, "provider_id", item.__class__.__name__)
+            for item in self.providers
+        ]
+        self.provider_id = "fallback(" + "+".join(parts) + ")"
 
     async def _execute_with_fallback(
         self,
@@ -121,4 +128,16 @@ class FallbackAIProvider(AIProvider):
             "extract_structured_tables",
             page_context=page_context,
             table_specs=table_specs,
+        )
+
+    async def enrich_schema(
+        self,
+        *,
+        targets_json: str,
+        page_context: str,
+    ) -> dict[str, Any]:
+        return await self._execute_with_fallback(
+            "enrich_schema",
+            targets_json=targets_json,
+            page_context=page_context,
         )

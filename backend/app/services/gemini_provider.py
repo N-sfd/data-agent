@@ -20,6 +20,7 @@ from app.prompts.structured_table_extraction import (
     STRUCTURED_TABLE_EXTRACTION_SYSTEM_PROMPT,
     build_structured_table_request_block,
 )
+from app.prompts.schema_enrichment import SCHEMA_ENRICHMENT_SYSTEM_PROMPT
 from app.prompts.universal_extraction import (
     UNIVERSAL_EXTRACTION_SYSTEM_PROMPT,
 )
@@ -33,6 +34,7 @@ from app.schemas.ai_extraction import (
 from app.schemas.contract_analysis import (
     ContractClassification,
 )
+from app.schemas.schema_enrichment import SchemaEnrichmentResult
 from app.services.ai_provider import (
     AIProvider,
     AIProviderError,
@@ -42,6 +44,8 @@ from app.services.contract_structured_table_schema import StructuredTableSpec
 
 
 class GeminiAIProvider(AIProvider):
+
+    provider_id = "gemini"
 
     def __init__(
         self,
@@ -203,6 +207,31 @@ DOCUMENT CONTENT:
             user_prompt=user_prompt,
             response_schema=AIStructuredTablesResult,
             failure_label="structured table extraction",
+        )
+
+    async def enrich_schema(
+        self,
+        *,
+        targets_json: str,
+        page_context: str,
+    ) -> dict[str, Any]:
+
+        user_prompt = f"""
+DISCOVERED TARGETS (JSON):
+
+{targets_json}
+
+
+DOCUMENT CONTENT (evidence sample):
+
+{page_context}
+"""
+
+        return await self._generate(
+            system_instruction=SCHEMA_ENRICHMENT_SYSTEM_PROMPT,
+            user_prompt=user_prompt,
+            response_schema=SchemaEnrichmentResult,
+            failure_label="schema enrichment",
         )
 
     async def _generate(

@@ -78,3 +78,33 @@ def test_ai_provider_factory_disabled():
     settings = Settings(ai_fallback_enabled=False)
     provider = create_ai_provider(settings)
     assert isinstance(provider, DisabledAIProvider)
+
+
+def test_ai_provider_factory_openai_when_selected(monkeypatch):
+    from app.services.openai_provider import OpenAIAIProvider
+
+    settings = Settings(
+        ai_fallback_enabled=True,
+        ai_provider="openai",
+        openai_api_key="sk-test-key",
+        openai_model="gpt-4o-mini",
+        gemini_api_key=None,
+        ollama_base_url=None,
+        convera_enabled=False,
+    )
+    provider = create_ai_provider(settings)
+    assert isinstance(provider, OpenAIAIProvider)
+    assert provider.provider_id == "openai"
+
+
+def test_ai_provider_factory_unknown_falls_back_to_disabled_without_keys():
+    settings = Settings(
+        ai_fallback_enabled=True,
+        ai_provider="not-a-real-vendor",
+        gemini_api_key=None,
+        openai_api_key=None,
+        ollama_base_url=None,
+        convera_enabled=False,
+    )
+    provider = create_ai_provider(settings)
+    assert isinstance(provider, DisabledAIProvider)

@@ -1,5 +1,6 @@
 from datetime import datetime, timezone
 
+from app.core.config import get_settings
 from app.models.document import Document
 from app.models.document_page import DocumentPage
 from app.schemas.document_target import (
@@ -22,6 +23,7 @@ from app.services.discovery_enrichment import (
 )
 from app.services.entity_classifier import classify_target_type
 from app.services.generic_kv_scanner import is_internal_form_name
+from app.services.semantic_schema_enrichment import enrich_targets_semantically
 from app.services.structure_detection import (
     DETECTION_PAGE_LIMIT,
     KNOWN_TEMPLATE_KEYS,
@@ -275,7 +277,17 @@ async def discover_document_schema(
     ]
     targets.sort(key=lambda item: (-item.confidence, item.key))
 
-    return DiscoverSchemaResponse(
+    enrichment_warnings: list[str] = []
+    settings = get_settings()
+    if settings.ai_schema_enrichment_enabled:
+        targets, enrichment_warnings = await enrich_targets_semantically(
+            targets=targets,
+            pages=pages,
+            ai_provider=ai_provider,
+        )
+        targets.sort(key=lambda item: (-item.confidence, item.key))
+
+    response = DiscoverSchemaResponse(
         document_id=document.id,
         document_family=detection.document_family,
         document_family_label=detection.document_family_label,
@@ -284,3 +296,7 @@ async def discover_document_schema(
         counts_by_type=_count_by_type(targets),
         generated_at=datetime.now(timezone.utc),
     )
+    # Soft warnings stay out of the response schema (additive later);
+    # they are logged via the enrichment service. Keep unused quiet.
+    _ = enrichment_warnings
+    return response

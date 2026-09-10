@@ -14,7 +14,9 @@ interface AiProviderNoticeProps {
 const PROVIDER_LABELS: Record<string, string> = {
   gemini: "Gemini",
   openai: "OpenAI",
+  ollama: "Ollama",
   anthropic: "Anthropic",
+  convera: "Convera",
   disabled: "No provider configured",
 };
 

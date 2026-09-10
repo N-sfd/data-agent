@@ -59,6 +59,10 @@ class Settings(BaseSettings):
 
     ai_fallback_enabled: bool = True
 
+    # When true, discover-schema may ask the AI provider to refine
+    # display names / groups for generic heuristic targets only.
+    ai_schema_enrichment_enabled: bool = True
+
     # development | local | production
     # "development" shows the Gemini free-tier privacy notice in the UI.
     ai_provider_mode: str = "development"

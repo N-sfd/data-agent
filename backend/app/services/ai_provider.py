@@ -10,6 +10,13 @@ class AIProviderError(Exception):
 
 
 class AIProvider(ABC):
+    """Provider-agnostic AI surface used by extraction and discovery.
+
+    Callers depend on this interface, not Gemini/Ollama/OpenAI specifics.
+    Concrete providers set ``provider_id`` for diagnostics and UI notices.
+    """
+
+    provider_id: str = "ai"
 
     @abstractmethod
     async def extract(
@@ -68,8 +75,27 @@ class AIProvider(ABC):
 
         raise NotImplementedError
 
+    async def enrich_schema(
+        self,
+        *,
+        targets_json: str,
+        page_context: str,
+    ) -> dict[str, Any]:
+        """Optional semantic enrichment of discovered targets.
+
+        Default is a no-op so providers can opt in without breaking
+        deterministic discovery or DisabledAIProvider paths.
+        """
+
+        return {
+            "enrichments": [],
+            "warnings": [],
+        }
+
 
 class DisabledAIProvider(AIProvider):
+
+    provider_id = "disabled"
 
     async def extract(
         self,

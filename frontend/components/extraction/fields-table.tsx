@@ -4,6 +4,7 @@ import { Check, CheckCircle2, ChevronDown, ChevronRight, Eye, Pencil, ShieldChec
 import { useEffect, useState } from "react";
 
 import type { FieldRow } from "@/components/extraction/field-row";
+import IntelligenceTrace from "@/components/extraction/intelligence-trace";
 import type { SourceViewRequest } from "@/components/source-verification-panel";
 
 interface FieldsTableProps {
@@ -94,6 +95,28 @@ function ValidationDetail({ row }: { row: FieldRow }) {
   if (row.status === "empty") {
     return <p className="mt-1 text-sm text-text-secondary">Resolved with no captured value.</p>;
   }
+
+  const structured = row.scalar?.validation;
+  if (structured) {
+    const failed = structured.checks.filter((check) => check.status === "failed");
+    if (structured.status === "passed") {
+      return (
+        <p className="mt-1 flex items-center gap-1.5 text-sm text-success">
+          <CheckCircle2 className="h-4 w-4" />
+          Validation passed ({structured.checks.length} checks)
+        </p>
+      );
+    }
+    return (
+      <p className="mt-1 flex items-center gap-1.5 text-sm text-warning">
+        <span aria-hidden>⚠</span>
+        {failed.length
+          ? `Failed: ${failed.map((check) => check.type.replace(/_/g, " ")).join(", ")}`
+          : "Validation incomplete"}
+      </p>
+    );
+  }
+
   if (!row.verified) {
     return (
       <p className="mt-1 flex items-center gap-1.5 text-sm text-warning">
@@ -226,6 +249,16 @@ function FieldCard({
                 Edited
               </span>
             )}
+            {row.scalar?.retrieval?.ai_fallback_required && (
+              <span className="text-warning">· AI escalated</span>
+            )}
+            {row.scalar?.retrieval &&
+              row.scalar.retrieval.selected_pages.length > 0 &&
+              !row.evidence && (
+                <span>
+                  · Pages {row.scalar.retrieval.selected_pages.slice(0, 3).join(", ")}
+                </span>
+              )}
           </div>
         </div>
 
@@ -264,6 +297,8 @@ function FieldCard({
             </p>
             <ValidationDetail row={row} />
           </div>
+
+          <IntelligenceTrace scalar={row.scalar} />
 
           {isEditCorrection(row) && (
             <div className="mt-3">
