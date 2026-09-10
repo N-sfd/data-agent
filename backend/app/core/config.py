@@ -70,6 +70,11 @@ class Settings(BaseSettings):
     ai_max_pages: int = 10
     ai_max_context_chars: int = 60000
 
+    # Cap auto-chain length and per-attempt wait so cascading providers
+    # cannot hang a job for minutes when every vendor is down.
+    ai_fallback_max_providers: int = 3
+    ai_provider_attempt_timeout_seconds: float = 45.0
+
     ocr_enabled: bool = True
     ocr_language: str = "eng"
     ocr_dpi: int = 300

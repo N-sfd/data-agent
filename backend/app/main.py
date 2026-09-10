@@ -1,5 +1,6 @@
-﻿from fastapi import FastAPI
+﻿from fastapi import FastAPI, Response, status
 from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy import text
 
 from app.api import (
     contract_analysis,
@@ -14,6 +15,7 @@ from app.api import (
     universal_extraction,
 )
 from app.core.config import get_settings
+from app.core.observability import RequestIdMiddleware
 from app.database.base import Base
 from app.database.migrate import (
     ensure_detected_target_columns,
@@ -24,7 +26,7 @@ from app.database.migrate import (
     ensure_target_correction_columns,
     run_alembic_upgrade,
 )
-from app.database.session import engine
+from app.database.session import SessionLocal, engine
 from app.services.document_storage import is_remote_storage_configured
 from app.models import (  # noqa: F401
     classification_audit_log as classification_audit_log_model,
@@ -99,6 +101,8 @@ app = FastAPI(
     debug=settings.debug,
 )
 
+# Last added = outermost. Request ID wraps CORS so responses always get it.
+app.add_middleware(RequestIdMiddleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origins,
@@ -115,6 +119,7 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["X-Request-ID"],
 )
 
 app.include_router(
@@ -260,56 +265,128 @@ async def root() -> dict[str, str]:
 
 
 @app.get("/health")
-async def health_check() -> dict[str, object]:
-    provider = (settings.ai_provider or "").strip().lower()
-    fallback_enabled = bool(settings.ai_fallback_enabled)
-    provider_mode = (
-        settings.ai_provider_mode or "development"
-    ).strip().lower()
+async def health_check() -> dict[str, str]:
+    """Liveness only — cheap enough for Render / keep-alive probes."""
 
-    # Development free-tier Gemini should show a privacy notice in the UI.
+    return {
+        "status": "ok",
+        "service": "data-agent",
+    }
+
+
+def _ai_status_payload() -> dict[str, object]:
+    provider = (settings.ai_provider or "").strip().lower() or "disabled"
+    fallback_enabled = bool(settings.ai_fallback_enabled)
+    provider_mode = (settings.ai_provider_mode or "development").strip().lower()
     show_dev_ai_warning = (
         fallback_enabled
         and provider == "gemini"
         and provider_mode == "development"
     )
+    model = None
+    if provider == "gemini":
+        model = settings.gemini_model
+    elif provider == "openai":
+        model = settings.openai_model or "gpt-4o-mini"
+    elif provider == "ollama":
+        model = settings.ollama_model
+    elif provider in {"auto", "gemini_fallback", ""}:
+        model = settings.gemini_model
+    # Config-only resolution string — no live vendor client construction.
+    resolved_parts: list[str] = []
+    if not fallback_enabled:
+        resolved = "disabled"
+    elif settings.convera_enabled and settings.convera_ai_enabled:
+        resolved = "convera"
+    elif provider == "ollama":
+        resolved = "ollama" if settings.ollama_base_url else "disabled"
+    elif provider == "openai":
+        resolved = "openai" if settings.openai_api_key else "disabled"
+    elif provider == "gemini":
+        resolved = "gemini" if settings.gemini_api_key else "disabled"
+    else:
+        if settings.gemini_api_key:
+            resolved_parts.append("gemini")
+        if settings.openai_api_key:
+            resolved_parts.append("openai")
+        if settings.ollama_base_url:
+            resolved_parts.append("ollama")
+        if not resolved_parts:
+            resolved = "disabled"
+        elif len(resolved_parts) == 1:
+            resolved = resolved_parts[0]
+        else:
+            resolved = "fallback(" + "+".join(resolved_parts) + ")"
+    return {
+        "provider": provider if fallback_enabled else "disabled",
+        "fallback_enabled": fallback_enabled,
+        "mode": provider_mode,
+        "show_dev_warning": show_dev_ai_warning,
+        "model": model,
+        "schema_enrichment_enabled": bool(settings.ai_schema_enrichment_enabled),
+        "resolved": resolved,
+    }
+
+
+@app.get("/ready")
+async def readiness_check(response: Response) -> dict[str, object]:
+    """Readiness — database, storage config, and AI provider configuration."""
+
+    checks: dict[str, object] = {}
+    ready = True
+
+    # Database
+    try:
+        database = SessionLocal()
+        try:
+            database.execute(text("SELECT 1"))
+            checks["database"] = {"status": "ok"}
+        finally:
+            database.close()
+    except Exception as exc:  # noqa: BLE001
+        ready = False
+        checks["database"] = {"status": "error", "detail": str(exc)[:200]}
+
+    # Object storage (required in production; optional locally)
+    storage_configured = is_remote_storage_configured(settings)
+    if settings.app_env == "production" and not storage_configured:
+        ready = False
+        checks["storage"] = {
+            "status": "error",
+            "detail": "Remote storage required in production.",
+        }
+    else:
+        checks["storage"] = {
+            "status": "ok",
+            "mode": "remote" if storage_configured else "local",
+        }
+
+    # Provider configuration (settings only — no live vendor ping)
+    ai_payload = _ai_status_payload()
+    checks["ai"] = ai_payload
 
     documents_via_convera = (
-        settings.convera_enabled
-        and settings.convera_documents_enabled
+        settings.convera_enabled and settings.convera_documents_enabled
     )
-    ai_via_convera = (
-        settings.convera_enabled
-        and settings.convera_ai_enabled
-    )
+    ai_via_convera = settings.convera_enabled and settings.convera_ai_enabled
+    checks["convera"] = {
+        "enabled": settings.convera_enabled,
+        "documents": "convera" if documents_via_convera else "local",
+        "ai": "convera" if ai_via_convera else ai_payload["provider"],
+        "migration_mode": documents_via_convera and not ai_via_convera,
+    }
+
+    if not ready:
+        response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
 
     return {
-        "status": "healthy",
+        "status": "ready" if ready else "not_ready",
+        "service": "data-agent",
         "environment": settings.app_env,
         "oracle_dry_run": settings.oracle_dry_run,
-        "convera": {
-            "enabled": settings.convera_enabled,
-            "documents": (
-                "convera" if documents_via_convera else "local"
-            ),
-            "ai": (
-                "convera"
-                if ai_via_convera
-                else provider or "disabled"
-            ),
-            "migration_mode": (
-                documents_via_convera and not ai_via_convera
-            ),
-        },
-        "ai": {
-            "provider": provider or "disabled",
-            "fallback_enabled": fallback_enabled,
-            "mode": provider_mode,
-            "show_dev_warning": show_dev_ai_warning,
-            "model": (
-                settings.gemini_model
-                if provider == "gemini"
-                else None
-            ),
-        },
+        "checks": checks,
+        # Flat ai/convera mirrors keep existing frontend clients working
+        # when pointed at /ready instead of the old fat /health payload.
+        "ai": ai_payload,
+        "convera": checks["convera"],
     }

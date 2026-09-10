@@ -11,10 +11,11 @@ import logging
 
 from app.models.document_page import DocumentPage
 from app.schemas.document_target import DocumentTarget
-from app.schemas.schema_enrichment import SchemaEnrichmentResult
+from app.schemas.schema_enrichment import SchemaEnrichmentResult, SchemaTargetEnrichment
 from app.services.ai_context import build_page_context
 from app.services.ai_provider import AIProvider, AIProviderError, DisabledAIProvider
 from app.services.discovery_enrichment import assign_discovery_group
+from app.services.generic_kv_scanner import is_internal_form_name
 
 logger = logging.getLogger(__name__)
 
@@ -35,6 +36,8 @@ _MAX_CONTEXT_CHARS = 12000
 
 def needs_semantic_enrichment(target: DocumentTarget) -> bool:
     if target.is_custom or target.target_type == "table":
+        return False
+    if target.is_internal or not target.selectable:
         return False
     if target.group in _GENERIC_GROUPS:
         return True
@@ -59,6 +62,32 @@ def _targets_payload(targets: list[DocumentTarget]) -> str:
     return json.dumps(rows, ensure_ascii=False)
 
 
+def _is_safe_enrichment_key(key: str, known_keys: set[str]) -> bool:
+    if not key or key not in known_keys:
+        return False
+    if is_internal_form_name(key):
+        return False
+    return True
+
+
+def _dedupe_enrichments(
+    enrichments: list[SchemaTargetEnrichment],
+    *,
+    known_keys: set[str],
+) -> dict[str, SchemaTargetEnrichment]:
+    """Keep first safe suggestion per known key; drop invented/internal keys."""
+
+    by_key: dict[str, SchemaTargetEnrichment] = {}
+    for item in enrichments:
+        key = (item.key or "").strip()
+        if not _is_safe_enrichment_key(key, known_keys):
+            continue
+        if key in by_key:
+            continue
+        by_key[key] = item
+    return by_key
+
+
 def _apply_enrichment(
     target: DocumentTarget,
     *,
@@ -70,7 +99,7 @@ def _apply_enrichment(
     updates: dict = {}
     if display_name:
         cleaned = " ".join(display_name.split()).strip()
-        if cleaned and len(cleaned) <= 120:
+        if cleaned and len(cleaned) <= 120 and not is_internal_form_name(cleaned):
             updates["display_name"] = cleaned
             updates["label"] = cleaned
     if group:
@@ -91,6 +120,7 @@ def _apply_enrichment(
     method = target.discovery_method or "detected"
     if "semantic" not in method:
         updates["discovery_method"] = f"{method}+semantic"
+    # Key is never part of updates — stable by construction.
     return target.model_copy(update=updates)
 
 
@@ -126,13 +156,13 @@ async def enrich_targets_semantically(
         return targets, warnings
 
     warnings.extend(result.warnings or [])
-    by_key = {item.key: item for item in result.enrichments if item.key}
+    known_keys = {target.key for target in targets}
+    by_key = _dedupe_enrichments(result.enrichments, known_keys=known_keys)
 
     enriched: list[DocumentTarget] = []
     for target in targets:
         suggestion = by_key.get(target.key)
         if suggestion is None:
-            # Ensure generic groups still have a stable heuristic group.
             if not target.group:
                 target = target.model_copy(
                     update={

@@ -1,14 +1,16 @@
 from datetime import datetime, timezone
+import time
 
 from fastapi.concurrency import run_in_threadpool
 from sqlalchemy import select
 
 from app.core.config import get_settings
+from app.core.observability import bind_job_context, log_event
 from app.database.session import SessionLocal
 from app.models.document import Document
 from app.models.document_page import DocumentPage
 from app.models.extraction_job import ExtractionJob
-from app.services.ai_provider_factory import create_ai_provider
+from app.services.ai_provider_factory import create_ai_provider, describe_ai_provider
 from app.services.detected_target_store import persist_document_targets
 from app.services.document_extraction import (
     DocumentExtractionError,
@@ -40,6 +42,14 @@ def _fail_job(job: ExtractionJob, database, exc: Exception) -> None:
     job.error_message = str(exc)
     job.completed_at = datetime.now(timezone.utc)
     database.commit()
+    log_event(
+        "job_failed",
+        stage=job.stage or "unknown",
+        status="error",
+        error_category=type(exc).__name__,
+        job_id=job.id,
+        document_id=job.document_id,
+    )
 
 
 async def run_processing_job(job_id: int) -> None:
@@ -47,6 +57,7 @@ async def run_processing_job(job_id: int) -> None:
     extract native text/OCR/tables/pages, then discover the schema."""
 
     database = SessionLocal()
+    started = time.perf_counter()
 
     try:
         job = database.get(ExtractionJob, job_id)
@@ -57,6 +68,13 @@ async def run_processing_job(job_id: int) -> None:
         if document is None:
             _fail_job(job, database, ValueError("Document not found."))
             return
+
+        bind_job_context(document_id=document.id, job_id=job.id)
+        log_event(
+            "job_started",
+            stage="processing_document",
+            job_type="processing",
+        )
 
         job.status = "processing"
         job.stage = "processing_document"
@@ -107,6 +125,12 @@ async def run_processing_job(job_id: int) -> None:
         )
 
         ai_provider = create_ai_provider(settings)
+        log_event(
+            "schema_discovery_start",
+            stage="discovering_fields",
+            provider=describe_ai_provider(ai_provider),
+            page_count=len(pages),
+        )
 
         try:
             schema_result = await discover_document_schema(
@@ -124,6 +148,13 @@ async def run_processing_job(job_id: int) -> None:
         job.progress = 100
         job.completed_at = datetime.now(timezone.utc)
         database.commit()
+        log_event(
+            "job_complete",
+            stage="complete",
+            job_type="processing",
+            duration_ms=int((time.perf_counter() - started) * 1000),
+            target_count=len(schema_result.targets),
+        )
 
     finally:
         database.close()
@@ -138,6 +169,7 @@ async def run_extraction_job(
     targets, batching internally so the caller never sees a batch limit."""
 
     database = SessionLocal()
+    started = time.perf_counter()
 
     try:
         job = database.get(ExtractionJob, job_id)
@@ -149,12 +181,22 @@ async def run_extraction_job(
             _fail_job(job, database, ValueError("Document not found."))
             return
 
+        bind_job_context(document_id=document.id, job_id=job.id)
+
         job.status = "processing"
         job.stage = "extracting_data"
         job.started_at = datetime.now(timezone.utc)
         database.commit()
 
         ai_provider = create_ai_provider(settings)
+        log_event(
+            "job_started",
+            stage="extracting_data",
+            job_type="extraction",
+            provider=describe_ai_provider(ai_provider),
+            target_count=len(target_ids),
+            use_ai_fallback=use_ai_fallback,
+        )
 
         batches = _chunk(target_ids, EXTRACTION_BATCH_SIZE)
         scalars: list[dict] = []
@@ -199,8 +241,6 @@ async def run_extraction_job(
             "warnings": warnings,
         }
 
-        # Durable intelligence record — Repository / Explorer / reopen
-        # reconstruct from PostgreSQL, not React state or job polling alone.
         persist_target_extraction_results(
             database=database,
             document_id=document.id,
@@ -216,6 +256,15 @@ async def run_extraction_job(
         job.progress = 100
         job.completed_at = datetime.now(timezone.utc)
         database.commit()
+        log_event(
+            "job_complete",
+            stage="complete",
+            job_type="extraction",
+            duration_ms=int((time.perf_counter() - started) * 1000),
+            scalar_count=len(scalars),
+            table_count=len(tables),
+            unresolved_count=len(unresolved),
+        )
 
     finally:
         database.close()

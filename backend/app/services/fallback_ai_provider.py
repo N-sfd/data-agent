@@ -1,6 +1,9 @@
+import asyncio
 import logging
+import time
 from typing import Any
 
+from app.core.observability import log_event
 from app.services.ai_provider import (
     AIProvider,
     AIProviderError,
@@ -13,9 +16,10 @@ logger = logging.getLogger(__name__)
 
 class FallbackAIProvider(AIProvider):
     """
-    Chains multiple AI providers together (e.g. Gemini -> Ollama).
-    If the primary provider encounters an error, rate limit, or timeout,
-    execution seamlessly falls back to the secondary provider.
+    Chains providers once each (e.g. Gemini → OpenAI → Ollama).
+
+    No sleeps, no retries of the same provider, and a hard per-attempt
+    timeout so auto mode cannot cascade into multi-minute hangs.
     """
 
     provider_id = "fallback"
@@ -23,10 +27,17 @@ class FallbackAIProvider(AIProvider):
     def __init__(
         self,
         providers: list[AIProvider],
+        *,
+        attempt_timeout_seconds: float = 45.0,
+        max_providers: int | None = None,
     ) -> None:
-        self.providers = [p for p in providers if p is not None]
-        if not self.providers:
+        usable = [provider for provider in providers if provider is not None]
+        if not usable:
             raise ValueError("FallbackAIProvider requires at least one provider.")
+        if max_providers is not None and max_providers > 0:
+            usable = usable[:max_providers]
+        self.providers = usable
+        self.attempt_timeout_seconds = max(1.0, float(attempt_timeout_seconds))
         parts = [
             getattr(item, "provider_id", item.__class__.__name__)
             for item in self.providers
@@ -42,12 +53,24 @@ class FallbackAIProvider(AIProvider):
         errors: list[str] = []
 
         for idx, provider in enumerate(self.providers):
-            provider_name = getattr(
-                provider, "__class__", type(provider)
-            ).__name__
+            provider_name = getattr(provider, "provider_id", provider.__class__.__name__)
+            started = time.perf_counter()
             try:
                 method = getattr(provider, method_name)
-                result = await method(*args, **kwargs)
+                result = await asyncio.wait_for(
+                    method(*args, **kwargs),
+                    timeout=self.attempt_timeout_seconds,
+                )
+                duration_ms = int((time.perf_counter() - started) * 1000)
+                log_event(
+                    "ai_provider_attempt",
+                    stage="ai",
+                    status="ok",
+                    duration_ms=duration_ms,
+                    provider=provider_name,
+                    provider_attempt=idx + 1,
+                    method=method_name,
+                )
                 if idx > 0:
                     logger.info(
                         "Fallback provider %s succeeded for %s after prior failures.",
@@ -55,13 +78,43 @@ class FallbackAIProvider(AIProvider):
                         method_name,
                     )
                 return result
+            except asyncio.TimeoutError:
+                duration_ms = int((time.perf_counter() - started) * 1000)
+                err_msg = (
+                    f"{provider_name}.{method_name} timed out after "
+                    f"{self.attempt_timeout_seconds:.0f}s"
+                )
+                log_event(
+                    "ai_provider_attempt",
+                    stage="ai",
+                    status="error",
+                    duration_ms=duration_ms,
+                    error_category="timeout",
+                    provider=provider_name,
+                    provider_attempt=idx + 1,
+                    method=method_name,
+                )
+                logger.warning(err_msg)
+                errors.append(err_msg)
             except (AIProviderError, Exception) as exc:
+                duration_ms = int((time.perf_counter() - started) * 1000)
                 err_msg = f"{provider_name}.{method_name} failed: {exc}"
+                log_event(
+                    "ai_provider_attempt",
+                    stage="ai",
+                    status="error",
+                    duration_ms=duration_ms,
+                    error_category="provider_error",
+                    provider=provider_name,
+                    provider_attempt=idx + 1,
+                    method=method_name,
+                )
                 logger.warning(err_msg)
                 errors.append(err_msg)
 
         raise AIProviderError(
-            f"All AI fallback providers failed for {method_name}: {'; '.join(errors)}"
+            f"All AI fallback providers failed for {method_name}: "
+            f"{'; '.join(errors)}"
         )
 
     async def extract(

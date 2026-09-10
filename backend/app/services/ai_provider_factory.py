@@ -65,13 +65,17 @@ def _build_ollama(settings: Settings) -> AIProvider | None:
         return None
 
 
-def _chain(providers: list[AIProvider]) -> AIProvider:
+def _chain(providers: list[AIProvider], settings: Settings) -> AIProvider:
     usable = [provider for provider in providers if provider is not None]
     if not usable:
         return DisabledAIProvider()
     if len(usable) == 1:
         return usable[0]
-    return FallbackAIProvider(usable)
+    return FallbackAIProvider(
+        usable,
+        attempt_timeout_seconds=settings.ai_provider_attempt_timeout_seconds,
+        max_providers=settings.ai_fallback_max_providers,
+    )
 
 
 def create_ai_provider(settings: Settings) -> AIProvider:
@@ -111,7 +115,8 @@ def create_ai_provider(settings: Settings) -> AIProvider:
                     _build_ollama(settings),
                 )
                 if provider is not None
-            ]
+            ],
+            settings,
         )
 
     logger.warning("Unknown ai_provider=%r; falling back to auto chain.", name)
@@ -124,7 +129,8 @@ def create_ai_provider(settings: Settings) -> AIProvider:
                 _build_ollama(settings),
             )
             if provider is not None
-        ]
+        ],
+        settings,
     )
 
 

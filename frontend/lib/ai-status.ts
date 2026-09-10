@@ -8,13 +8,15 @@ export interface AiStatus {
   model: string | null;
 }
 
-interface HealthResponse {
+interface ReadyResponse {
   ai?: Record<string, unknown>;
+  status?: string;
 }
 
 export async function getAiStatus(): Promise<AiStatus | null> {
   try {
-    const payload = await apiFetch<HealthResponse>("/health", {
+    // /ready carries provider config; /health stays a cheap liveness probe.
+    const payload = await apiFetch<ReadyResponse>("/ready", {
       cache: "no-store",
     });
 
@@ -29,8 +31,7 @@ export async function getAiStatus(): Promise<AiStatus | null> {
       fallback_enabled: Boolean(ai.fallback_enabled),
       mode: String(ai.mode ?? "development"),
       show_dev_warning: Boolean(ai.show_dev_warning),
-      model:
-        typeof ai.model === "string" ? ai.model : null,
+      model: typeof ai.model === "string" ? ai.model : null,
     };
   } catch {
     return null;
