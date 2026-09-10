@@ -13,6 +13,13 @@ from app.services.clin_block_detector import (
     RepeatedRecordBlock,
     detect_repeated_records,
 )
+from app.services.discovery_enrichment import (
+    assign_discovery_group,
+    canonical_display_name,
+    infer_value_type,
+    labels_from_evidence,
+    method_from_evidence,
+)
 from app.services.entity_classifier import classify_target_type
 from app.services.generic_kv_scanner import is_internal_form_name
 from app.services.structure_detection import (
@@ -59,6 +66,34 @@ def _sample_value_from_evidence(evidence: list[str]) -> str:
     return first.split(":", 1)[1].split("' on page", 1)[0].strip()
 
 
+def _enrich_document_target(target: DocumentTarget) -> DocumentTarget:
+    display = canonical_display_name(target.display_name or target.label)
+    target.display_name = display
+    target.label = display
+    target.group = target.group or assign_discovery_group(
+        label=display,
+        target_type=target.target_type,
+    )
+    target.value_type = target.value_type or infer_value_type(
+        label=display,
+        target_type=target.target_type,
+    )
+    target.is_custom = target.source == "custom"
+    target.is_internal = is_internal_form_name(target.key) or is_internal_form_name(
+        target.label
+    )
+    target.selectable = not target.is_internal
+    if not target.source_labels:
+        target.source_labels = labels_from_evidence(
+            target.source_examples, display
+        )
+    if not target.discovery_method:
+        target.discovery_method = method_from_evidence(target.source_examples)
+    if target.description is None and target.suggested_instruction:
+        target.description = target.suggested_instruction
+    return target
+
+
 def _map_detected_target(
     target: DetectedTarget,
     *,
@@ -70,10 +105,17 @@ def _map_detected_target(
         sample_value = _sample_value_from_evidence(target.evidence)
         target_type = classify_target_type(target.label, sample_value)
 
-    return DocumentTarget(
+    display = canonical_display_name(target.label)
+    method = target.discovery_method or method_from_evidence(target.evidence)
+    source_labels = target.source_labels or labels_from_evidence(
+        target.evidence, target.label
+    )
+
+    mapped = DocumentTarget(
         id=f"{document_id}:{target.key}",
         key=target.key,
-        label=target.label,
+        label=display,
+        display_name=display,
         target_type=target_type,
         page_numbers=target.pages,
         confidence=target.confidence,
@@ -81,7 +123,16 @@ def _map_detected_target(
         columns=target.columns,
         suggested_instruction=target.suggested_prompt,
         source="detected",
+        discovery_method=method,
+        source_labels=source_labels,
+        group=assign_discovery_group(label=display, target_type=target_type),
+        value_type=infer_value_type(label=display, target_type=target_type),
+        is_custom=False,
+        is_internal=False,
+        selectable=True,
+        description=target.suggested_prompt,
     )
+    return _enrich_document_target(mapped)
 
 
 def _map_clin_block(
@@ -89,10 +140,11 @@ def _map_clin_block(
     *,
     document_id: str,
 ) -> DocumentTarget:
-    return DocumentTarget(
+    mapped = DocumentTarget(
         id=f"{document_id}:{block.key}",
         key=block.key,
         label=block.label,
+        display_name=block.label,
         target_type="table",
         page_numbers=[block.page_number],
         confidence=0.9,
@@ -105,7 +157,13 @@ def _map_clin_block(
             f"Extract the {block.label} with all rows and columns."
         ),
         source="detected",
+        discovery_method="repeated_record_block",
+        source_labels=[block.label],
+        group="Tables",
+        value_type="table",
+        description=f"Extract the {block.label} with all rows and columns.",
     )
+    return _enrich_document_target(mapped)
 
 
 def _dedupe_by_key(targets: list[DocumentTarget]) -> list[DocumentTarget]:
@@ -128,6 +186,24 @@ def _dedupe_by_key(targets: list[DocumentTarget]) -> list[DocumentTarget]:
         if not existing.columns and target.columns:
             existing.columns = target.columns
 
+        # Keep every evidence path so extraction can use source_evidence.
+        for example in target.source_examples:
+            if example not in existing.source_examples:
+                existing.source_examples.append(example)
+        for label in target.source_labels:
+            if label not in existing.source_labels:
+                existing.source_labels.append(label)
+        if (
+            target.discovery_method
+            and existing.discovery_method
+            and target.discovery_method != existing.discovery_method
+        ):
+            existing.discovery_method = (
+                f"{existing.discovery_method}+{target.discovery_method}"
+            )
+        elif target.discovery_method and not existing.discovery_method:
+            existing.discovery_method = target.discovery_method
+
     return list(merged.values())
 
 
@@ -144,6 +220,13 @@ async def discover_document_schema(
     pages: list[DocumentPage],
     ai_provider: AIProvider,
 ) -> DiscoverSchemaResponse:
+    """Schema discovery pipeline:
+
+    page structures → candidate generation → evidence filter →
+    type classification → enrichment (group/value_type/method) →
+    dedupe → scored schema.
+    """
+
     detection = await detect_document_structures(
         document=document,
         pages=pages,
@@ -185,7 +268,11 @@ async def discover_document_schema(
         for block in detect_repeated_records(page=page):
             targets.append(_map_clin_block(block, document_id=document.id))
 
-    targets = _dedupe_by_key(targets)
+    targets = [
+        target
+        for target in _dedupe_by_key(targets)
+        if target.selectable and not target.is_internal
+    ]
     targets.sort(key=lambda item: (-item.confidence, item.key))
 
     return DiscoverSchemaResponse(

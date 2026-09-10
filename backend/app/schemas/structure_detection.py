@@ -22,6 +22,8 @@ class DetectedTarget(BaseModel):
     evidence: list[str] = Field(default_factory=list)
     suggested_prompt: str | None = None
     columns: list[str] = Field(default_factory=list)
+    discovery_method: str | None = None
+    source_labels: list[str] = Field(default_factory=list)
 
 
 class DetectedTable(BaseModel):

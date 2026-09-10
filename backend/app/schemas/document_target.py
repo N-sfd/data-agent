@@ -35,6 +35,16 @@ class DocumentTarget(BaseModel):
     occurrence_count: int = 1
     suggested_instruction: str | None = None
     source: TargetSource = "detected"
+    # Richer discovery metadata (additive — Select All still uses id/key).
+    display_name: str | None = None
+    group: str | None = None
+    value_type: str | None = None
+    discovery_method: str | None = None
+    source_labels: list[str] = Field(default_factory=list)
+    is_custom: bool = False
+    is_internal: bool = False
+    selectable: bool = True
+    description: str | None = None
 
 
 class DiscoverSchemaResponse(BaseModel):

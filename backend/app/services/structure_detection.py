@@ -739,6 +739,8 @@ def _target(
     confidence: float,
     evidence: list[str],
     columns: list[str] | None = None,
+    discovery_method: str | None = None,
+    source_labels: list[str] | None = None,
 ) -> DetectedTarget:
     prompt = SUGGESTED_PROMPTS.get(key)
     if prompt is None:
@@ -758,6 +760,8 @@ def _target(
         evidence=evidence,
         suggested_prompt=prompt,
         columns=columns or [],
+        discovery_method=discovery_method,
+        source_labels=source_labels or ([label] if label else []),
     )
 
 
@@ -872,6 +876,8 @@ async def detect_document_structures(
                         f"'{probe_label}: {first_value}' on page "
                         f"{first_page} (field_probe)"
                     ],
+                    discovery_method="field_probe",
+                    source_labels=[probe_label],
                 )
             )
 
@@ -909,6 +915,8 @@ async def detect_document_structures(
                         f"'{pair.raw_label}: {pair.value}' on page "
                         f"{page.page_number} ({method_note})"
                     ],
+                    discovery_method=pair.method,
+                    source_labels=[pair.raw_label],
                 )
             )
 

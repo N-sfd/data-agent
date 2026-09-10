@@ -67,7 +67,10 @@ export function groupTargets(
   const groups = new Map<string, DocumentTarget[]>();
 
   for (const target of targets) {
-    const key = displayGroup(target.target_type);
+    if (target.selectable === false || target.is_internal) {
+      continue;
+    }
+    const key = target.group?.trim() || displayGroup(target.target_type);
     const bucket = groups.get(key);
     if (bucket) {
       bucket.push(target);
@@ -76,10 +79,34 @@ export function groupTargets(
     }
   }
 
+  const preferred = [
+    "Solicitation Metadata",
+    "Identifiers",
+    "Dates",
+    "Pricing",
+    "Parties",
+    "Contacts",
+    "Addresses",
+    "Tables",
+    "Clauses",
+    "Signatures",
+    "Document Fields",
+    "Custom Fields",
+    ...GROUP_ORDER,
+  ];
+
   const ordered = new Map<string, DocumentTarget[]>();
-  for (const key of GROUP_ORDER) {
+  for (const key of preferred) {
     const bucket = groups.get(key);
     if (bucket && bucket.length > 0) {
+      ordered.set(
+        key,
+        [...bucket].sort((a, b) => b.confidence - a.confidence),
+      );
+    }
+  }
+  for (const [key, bucket] of groups) {
+    if (!ordered.has(key) && bucket.length > 0) {
       ordered.set(
         key,
         [...bucket].sort((a, b) => b.confidence - a.confidence),
@@ -95,12 +122,19 @@ export function filterTargets(
   query: string,
 ): DocumentTarget[] {
   const trimmed = query.trim().toLowerCase();
+  const visible = targets.filter(
+    (target) => target.selectable !== false && !target.is_internal,
+  );
   if (!trimmed) {
-    return targets;
+    return visible;
   }
-  return targets.filter(
+  return visible.filter(
     (target) =>
       target.label.toLowerCase().includes(trimmed) ||
-      target.key.toLowerCase().includes(trimmed),
+      target.key.toLowerCase().includes(trimmed) ||
+      (target.group ?? "").toLowerCase().includes(trimmed) ||
+      (target.source_labels ?? []).some((label) =>
+        label.toLowerCase().includes(trimmed),
+      ),
   );
 }

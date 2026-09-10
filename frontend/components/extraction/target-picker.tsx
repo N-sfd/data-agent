@@ -35,7 +35,11 @@ interface TargetPickerProps {
 function confidenceLabel(target: DocumentTarget): string {
   const pct = Math.round(target.confidence * 100);
   const page = target.page_numbers[0];
-  return page ? `${pct}% confidence · page ${page}` : `${pct}% confidence`;
+  const method = target.discovery_method
+    ? ` · ${target.discovery_method.split("+")[0]}`
+    : "";
+  const pagePart = page ? ` · page ${page}` : "";
+  return `${pct}% confidence${pagePart}${method}`;
 }
 
 export default function TargetPicker({

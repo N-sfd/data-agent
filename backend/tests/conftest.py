@@ -21,6 +21,7 @@ os.environ.setdefault(
 from app.main import app  # noqa: E402
 from app.database.base import Base  # noqa: E402
 from app.database.migrate import (  # noqa: E402
+    ensure_detected_target_columns,
     ensure_document_metadata_field_columns,
     ensure_document_page_columns,
     ensure_documents_columns,
@@ -112,6 +113,7 @@ def _initialize_database() -> None:
     ensure_document_metadata_field_columns(engine)
     ensure_extraction_model_columns(engine)
     ensure_target_correction_columns(engine)
+    ensure_detected_target_columns(engine)
 
 
 @pytest.fixture

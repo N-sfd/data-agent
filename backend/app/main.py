@@ -16,6 +16,7 @@ from app.api import (
 from app.core.config import get_settings
 from app.database.base import Base
 from app.database.migrate import (
+    ensure_detected_target_columns,
     ensure_document_metadata_field_columns,
     ensure_document_page_columns,
     ensure_documents_columns,
@@ -214,6 +215,7 @@ async def create_database_tables() -> None:
     ensure_document_metadata_field_columns(engine)
     ensure_extraction_model_columns(engine)
     ensure_target_correction_columns(engine)
+    ensure_detected_target_columns(engine)
 
     _recover_interrupted_jobs()
 

@@ -63,6 +63,14 @@ TARGET_CORRECTION_COLUMNS: dict[str, str | dict[str, str]] = {
 }
 
 
+DETECTED_TARGET_COLUMNS: dict[str, str | dict[str, str]] = {
+    "discovery_meta_json": {
+        "sqlite": "JSON NOT NULL DEFAULT '{}'",
+        "postgresql": "JSON NOT NULL DEFAULT '{}'::json",
+    },
+}
+
+
 DOCUMENT_COLUMNS: dict[str, str | dict[str, str]] = {
     "document_type": "VARCHAR(60)",
     "industry": "VARCHAR(60)",
@@ -143,3 +151,10 @@ def ensure_extraction_model_columns(engine: Engine) -> None:
 def ensure_target_correction_columns(engine: Engine) -> None:
     """Add missing target_corrections columns for an existing database."""
     _ensure_columns(engine, "target_corrections", TARGET_CORRECTION_COLUMNS)
+
+
+def ensure_detected_target_columns(engine: Engine) -> None:
+    """Add missing document_detected_targets columns for an existing database."""
+    _ensure_columns(
+        engine, "document_detected_targets", DETECTED_TARGET_COLUMNS
+    )

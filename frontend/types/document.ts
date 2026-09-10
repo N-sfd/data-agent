@@ -219,6 +219,15 @@ export interface DocumentTarget {
   occurrence_count: number;
   suggested_instruction: string | null;
   source: TargetSource;
+  display_name?: string | null;
+  group?: string | null;
+  value_type?: string | null;
+  discovery_method?: string | null;
+  source_labels?: string[];
+  is_custom?: boolean;
+  is_internal?: boolean;
+  selectable?: boolean;
+  description?: string | null;
 }
 
 export interface DiscoverSchemaResult {

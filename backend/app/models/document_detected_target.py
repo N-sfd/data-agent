@@ -106,6 +106,13 @@ class DocumentDetectedTarget(Base):
         default=True,
     )
 
+    # Additive discovery metadata (group, value_type, method, labels, …)
+    discovery_meta_json: Mapped[dict] = mapped_column(
+        JSON,
+        nullable=False,
+        default=dict,
+    )
+
     created_at: Mapped[datetime] = mapped_column(
         DateTime,
         nullable=False,
