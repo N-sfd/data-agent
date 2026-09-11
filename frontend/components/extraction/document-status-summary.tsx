@@ -47,6 +47,11 @@ export default function DocumentStatusSummary({
 
   if (extraction) {
     const checksPassed = document.pipeline_log?.length ?? 0;
+    const emptyWarning =
+      typeof document.ingestion_provenance?.empty_extraction_warning ===
+      "string"
+        ? document.ingestion_provenance.empty_extraction_warning
+        : null;
 
     return (
       <div className="rounded-xl bg-success/10 px-3 py-3">
@@ -60,6 +65,11 @@ export default function DocumentStatusSummary({
           {checksPassed > 0 &&
             ` · ${checksPassed} check${checksPassed === 1 ? "" : "s"}`}
         </p>
+        {emptyWarning && (
+          <p className="mt-2 text-xs text-amber-700 dark:text-amber-300">
+            {emptyWarning}
+          </p>
+        )}
 
         <button
           type="button"

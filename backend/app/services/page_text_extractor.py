@@ -106,6 +106,7 @@ def extract_page(
     page_index: int,
     settings: Settings,
     run_ocr: bool,
+    force_ocr: bool = False,
 ) -> PageExtractionData:
     page = document.load_page(page_index)
     page_number = page_index + 1
@@ -144,7 +145,7 @@ def extract_page(
     should_run_ocr = (
         run_ocr
         and settings.ocr_enabled
-        and detection.requires_ocr
+        and (force_ocr or detection.requires_ocr)
     )
 
     if should_run_ocr:
@@ -181,11 +182,13 @@ def extract_page(
                 extraction_method="ocr",
             )
 
-            if len(ocr_text) > len(native_text):
+            prefer_ocr = force_ocr or len(ocr_text) > len(native_text)
+
+            if prefer_ocr and ocr_text:
                 final_text = ocr_text
                 final_blocks = ocr_block_data
                 extraction_method = "ocr"
-                ocr_succeeded = bool(ocr_text)
+                ocr_succeeded = True
 
             elif ocr_text:
                 final_text = native_text
@@ -195,6 +198,41 @@ def extract_page(
 
         except Exception as exc:
             ocr_error = str(exc)
+
+        # Raster / scanned pages: if MuPDF OCR yielded nothing, try
+        # pytesseract directly against a rendered pixmap.
+        if (force_ocr or not final_text.strip()) and not (
+            ocr_text and ocr_text.strip()
+        ):
+            try:
+                from app.services.embedded_image_ocr import ocr_image_bytes
+
+                pixmap = page.get_pixmap(dpi=settings.ocr_dpi)
+                fallback = ocr_image_bytes(
+                    pixmap.tobytes("png"),
+                    language=settings.ocr_language,
+                )
+                if fallback:
+                    ocr_text = fallback
+                    final_text = fallback
+                    final_blocks = [
+                        TextBlockData(
+                            block_index=0,
+                            block_type="text",
+                            text=fallback,
+                            x0=0.0,
+                            y0=0.0,
+                            x1=float(page.rect.width),
+                            y1=float(page.rect.height),
+                            extraction_method="ocr",
+                        )
+                    ]
+                    extraction_method = "ocr"
+                    ocr_succeeded = True
+                    ocr_error = None
+            except Exception as exc:
+                if ocr_error is None:
+                    ocr_error = str(exc)
 
     return PageExtractionData(
         page_number=page_number,

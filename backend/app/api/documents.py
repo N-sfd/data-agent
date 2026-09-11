@@ -33,7 +33,9 @@ from app.services.dashboard_stats import (
     compute_document_confidence,
     compute_document_status,
 )
+from app.core.observability import bind_job_context, log_event
 from app.services.document_storage import (
+    DocumentStorageError,
     is_file_available,
     source_status_for,
     upload_object,
@@ -268,7 +270,7 @@ async def upload_document(
         maximum_size_bytes = settings.max_upload_mb * 1024 * 1024
         log.append("Generated document ID")
 
-        await save_upload_stream(
+        saved = await save_upload_stream(
             file=file,
             spec=spec,
             document_id=document_id,
@@ -296,7 +298,7 @@ async def upload_document(
                     original_filename=display_filename,
                     status="portfolio_pending",
                     content_type=spec.content_type,
-                    size_bytes=destination.stat().st_size,
+                    size_bytes=saved.size_bytes,
                     checksum_sha256=None,
                     page_count=1,
                     encrypted=False,
@@ -317,10 +319,10 @@ async def upload_document(
 
         metadata = _extract_metadata(spec, destination)
 
-        # Portfolio extraction may replace the stored PDF bytes in place.
-        file_bytes = destination.read_bytes()
-        size_bytes = len(file_bytes)
-        checksum = sha256(file_bytes).hexdigest()
+        # Prefer streaming checksum/size from save_upload_stream so medium+
+        # files are never fully buffered in RAM for fingerprinting.
+        size_bytes = saved.size_bytes
+        checksum = saved.checksum_sha256
         log.append("Calculated SHA-256 fingerprint")
 
         if (
@@ -376,14 +378,22 @@ async def upload_document(
             checksum=checksum,
             metadata=metadata,
         )
+        bind_job_context(document_id=str(document_id))
         upload_object(
-            settings, stored_filename, file_bytes, spec.content_type
+            settings,
+            stored_filename,
+            content_type=spec.content_type,
+            file_path=destination,
+            size_bytes=size_bytes,
         )
         log.append("Stored original document")
 
         size_tier, prefer_background = upload_processing_plan(size_bytes)
         provenance = seed_upload_provenance(
-            document, spec=spec, size_bytes=size_bytes
+            document,
+            spec=spec,
+            size_bytes=size_bytes,
+            processing_mode="background" if prefer_background else "sync",
         )
         database.commit()
 
@@ -395,6 +405,14 @@ async def upload_document(
                 background_tasks=background_tasks,
                 document_id=str(document_id),
             )
+            provenance = seed_upload_provenance(
+                document,
+                spec=spec,
+                size_bytes=size_bytes,
+                processing_mode="background",
+                processing_job_id=processing_job_id,
+            )
+            database.commit()
             log.append(
                 f"Queued background processing job #{processing_job_id} "
                 f"({size_tier} upload)"
@@ -415,7 +433,10 @@ async def upload_document(
                     author=None,
                 )
                 provenance = seed_upload_provenance(
-                    document, spec=spec, size_bytes=size_bytes
+                    document,
+                    spec=spec,
+                    size_bytes=size_bytes,
+                    processing_mode="sync",
                 )
                 provenance["page_count"] = page_count
                 document.ingestion_provenance = provenance
@@ -509,11 +530,49 @@ async def upload_document(
             detail=message,
         ) from exc
 
-    except Exception as exc:
-        if destination is not None:
+    except DocumentStorageError as exc:
+        size_for_log = None
+        if destination is not None and destination.exists():
+            size_for_log = destination.stat().st_size
             destination.unlink(missing_ok=True)
 
         database.rollback()
+        log_event(
+            "document_storage_failed",
+            stage="upload",
+            status="error",
+            error_category=exc.error_type,
+            document_id=str(document_id),
+            size_bytes=size_for_log,
+            content_type=getattr(file, "content_type", None),
+            storage_provider="supabase",
+            error_type=exc.error_type,
+            http_status=exc.http_status,
+        )
+
+        raise HTTPException(
+            status_code=500,
+            detail="The file could not be stored securely.",
+        ) from exc
+
+    except Exception as exc:
+        size_for_log = None
+        if destination is not None and destination.exists():
+            size_for_log = destination.stat().st_size
+            destination.unlink(missing_ok=True)
+
+        database.rollback()
+        log_event(
+            "document_storage_failed",
+            stage="upload",
+            status="error",
+            error_category=type(exc).__name__,
+            document_id=str(document_id),
+            size_bytes=size_for_log,
+            content_type=getattr(file, "content_type", None),
+            storage_provider="supabase",
+            error_type=type(exc).__name__,
+        )
 
         raise HTTPException(
             status_code=500,
@@ -539,7 +598,15 @@ async def resolve_duplicate(
         )
 
     destination, spec = staged
-    checksum = sha256(destination.read_bytes()).hexdigest()
+    size_bytes = destination.stat().st_size
+    hasher = sha256()
+    with destination.open("rb") as handle:
+        while True:
+            chunk = handle.read(1024 * 1024)
+            if not chunk:
+                break
+            hasher.update(chunk)
+    checksum = hasher.hexdigest()
     duplicate = _find_duplicate(database, checksum)
 
     if duplicate is None:
@@ -576,8 +643,7 @@ async def resolve_duplicate(
         metadata = _extract_metadata(spec, destination)
         log.append(f"Extracted {spec.kind.upper()} metadata")
 
-        file_bytes = destination.read_bytes()
-        size_bytes = len(file_bytes)
+        size_bytes = destination.stat().st_size
 
         display_filename = sanitize_display_filename(
             payload.original_filename, extension=spec.extension
@@ -594,7 +660,11 @@ async def resolve_duplicate(
             metadata=metadata,
         )
         upload_object(
-            settings, destination.name, file_bytes, spec.content_type
+            settings,
+            destination.name,
+            content_type=spec.content_type,
+            file_path=destination,
+            size_bytes=size_bytes,
         )
 
         log.append("Stored as a new document")
@@ -681,9 +751,15 @@ async def select_portfolio_file(
         metadata = _extract_metadata(spec, destination)
         log.append("Extracted PDF metadata")
 
-        file_bytes = destination.read_bytes()
-        size_bytes = len(file_bytes)
-        checksum = sha256(file_bytes).hexdigest()
+        size_bytes = destination.stat().st_size
+        hasher = sha256()
+        with destination.open("rb") as handle:
+            while True:
+                chunk = handle.read(1024 * 1024)
+                if not chunk:
+                    break
+                hasher.update(chunk)
+        checksum = hasher.hexdigest()
 
         duplicate = _find_duplicate(database, checksum)
 
@@ -721,7 +797,11 @@ async def select_portfolio_file(
             metadata=metadata,
         )
         upload_object(
-            settings, destination.name, file_bytes, spec.content_type
+            settings,
+            destination.name,
+            content_type=spec.content_type,
+            file_path=destination,
+            size_bytes=size_bytes,
         )
 
         log.append("Stored embedded document")
@@ -1165,4 +1245,13 @@ async def get_document(
         source_status=source_status_for(
             get_settings(), stored_filename=document.stored_filename
         ),
+        size_tier=(document.ingestion_provenance or {}).get("size_tier"),
+        prefer_background=(document.ingestion_provenance or {}).get(
+            "processing_mode"
+        )
+        == "background",
+        processing_job_id=(document.ingestion_provenance or {}).get(
+            "processing_job_id"
+        ),
+        ingestion_provenance=document.ingestion_provenance,
     )

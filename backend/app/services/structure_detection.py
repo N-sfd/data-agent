@@ -437,6 +437,8 @@ FIELD_PROBES: list[tuple[str, str, str]] = [
     ("effective_date", "Effective Date", "Effective Date"),
     ("invoice_number", "Invoice Number", "Invoice Number"),
     ("amount_due", "Amount Due", "Amount Due"),
+    ("amount", "Amount", "Amount"),
+    ("date", "Date", "Date"),
     ("po_number", "PO Number", "PO Number"),
     ("solicitation_number", "Solicitation No.", "SOLICITATION"),
     ("dodaac", "DODAAC", "DODAAC"),

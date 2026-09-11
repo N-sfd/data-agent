@@ -36,6 +36,8 @@ def seed_upload_provenance(
     *,
     spec: UploadTypeSpec,
     size_bytes: int,
+    processing_mode: str = "sync",
+    processing_job_id: int | None = None,
 ) -> dict:
     tier = classify_upload_size(size_bytes)
     provenance = empty_provenance(
@@ -43,6 +45,8 @@ def seed_upload_provenance(
         size_tier=tier,
     )
     provenance["processor"] = processor_label_for_extension(spec.extension)
+    provenance["processing_mode"] = processing_mode
+    provenance["processing_job_id"] = processing_job_id
     document.ingestion_provenance = provenance
     return provenance
 

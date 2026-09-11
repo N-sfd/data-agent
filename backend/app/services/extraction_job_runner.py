@@ -20,6 +20,7 @@ from app.services.document_storage import (
     DocumentStorageError,
     ensure_local_copy,
 )
+from app.services.ingestion_provenance import merge_provenance
 from app.services.schema_discovery import discover_document_schema
 from app.services.target_extraction_service import extract_by_targets
 from app.services.target_result_store import persist_target_extraction_results
@@ -32,9 +33,29 @@ settings = get_settings()
 # single job can accept an unbounded target_id list from the frontend.
 EXTRACTION_BATCH_SIZE = 50
 
+EMPTY_STRUCTURES_WARNING = (
+    "Processing completed, but no extractable structures were detected."
+)
+
 
 def _chunk(items: list[str], size: int) -> list[list[str]]:
     return [items[i : i + size] for i in range(0, len(items), size)]
+
+
+def _append_stage(job: ExtractionJob, stage: str) -> None:
+    payload = dict(job.result_json or {})
+    history = list(payload.get("stage_history") or [])
+    history.append(
+        {
+            "stage": stage,
+            "at": datetime.now(timezone.utc).isoformat(),
+        }
+    )
+    payload["stage_history"] = history
+    if payload.get("warnings") is None:
+        payload["warnings"] = []
+    job.result_json = payload
+    job.stage = stage
 
 
 def _fail_job(job: ExtractionJob, database, exc: Exception) -> None:
@@ -77,9 +98,19 @@ async def run_processing_job(job_id: int) -> None:
         )
 
         job.status = "processing"
-        job.stage = "reading_document"
+        _append_stage(job, "reading_document")
         job.started_at = datetime.now(timezone.utc)
         job.progress = 5
+        merge_provenance(
+            document,
+            {
+                "processing_mode": "background",
+                "processing_job_id": job.id,
+                "size_tier": (document.ingestion_provenance or {}).get(
+                    "size_tier"
+                ),
+            },
+        )
         database.commit()
 
         try:
@@ -92,7 +123,7 @@ async def run_processing_job(job_id: int) -> None:
             _fail_job(job, database, exc)
             return
 
-        job.stage = "rendering_ocr"
+        _append_stage(job, "rendering_ocr")
         job.progress = 20
         database.commit()
 
@@ -115,11 +146,11 @@ async def run_processing_job(job_id: int) -> None:
         # Refresh after threadpool mutation.
         database.refresh(document)
 
-        job.stage = "indexing"
+        _append_stage(job, "indexing")
         job.progress = 60
         database.commit()
 
-        job.stage = "discovering_fields"
+        _append_stage(job, "discovering_fields")
         job.progress = 75
         database.commit()
 
@@ -131,12 +162,15 @@ async def run_processing_job(job_id: int) -> None:
             )
         )
 
+        page_text_chars = sum(len(page.final_text or "") for page in pages)
+
         ai_provider = create_ai_provider(settings)
         log_event(
             "schema_discovery_start",
             stage="discovering_fields",
             provider=describe_ai_provider(ai_provider),
             page_count=len(pages),
+            page_text_chars=page_text_chars,
         )
 
         try:
@@ -150,8 +184,40 @@ async def run_processing_job(job_id: int) -> None:
             _fail_job(job, database, exc)
             return
 
+        target_count = len(schema_result.targets)
+        empty_warning = None
+        if page_text_chars == 0 or target_count == 0:
+            empty_warning = EMPTY_STRUCTURES_WARNING
+
+        merge_provenance(
+            document,
+            {
+                "page_text_chars": page_text_chars,
+                "targets_discovered": target_count,
+                "empty_extraction_warning": empty_warning,
+                "processing_mode": "background",
+                "processing_job_id": job.id,
+            },
+        )
+
+        payload = dict(job.result_json or {})
+        warnings = list(payload.get("warnings") or [])
+        if empty_warning:
+            warnings.append(empty_warning)
+            log_event(
+                "empty_extraction_warning",
+                stage="complete",
+                status="warning",
+                page_text_chars=page_text_chars,
+                target_count=target_count,
+            )
+        payload["warnings"] = warnings
+        payload["page_text_chars"] = page_text_chars
+        payload["targets_discovered"] = target_count
+        job.result_json = payload
+
         job.status = "complete"
-        job.stage = "complete"
+        _append_stage(job, "complete")
         job.progress = 100
         job.completed_at = datetime.now(timezone.utc)
         database.commit()
@@ -160,7 +226,9 @@ async def run_processing_job(job_id: int) -> None:
             stage="complete",
             job_type="processing",
             duration_ms=int((time.perf_counter() - started) * 1000),
-            target_count=len(schema_result.targets),
+            target_count=target_count,
+            page_text_chars=page_text_chars,
+            pages_processed=result.get("pages_processed"),
         )
 
     finally:
@@ -191,7 +259,7 @@ async def run_extraction_job(
         bind_job_context(document_id=document.id, job_id=job.id)
 
         job.status = "processing"
-        job.stage = "extracting_data"
+        _append_stage(job, "extracting_data")
         job.started_at = datetime.now(timezone.utc)
         database.commit()
 
@@ -237,15 +305,17 @@ async def run_extraction_job(
             job.progress = round((index + 1) / len(batches) * 80)
             database.commit()
 
-        job.stage = "validating_results"
+        _append_stage(job, "validating_results")
         database.commit()
 
+        history = list((job.result_json or {}).get("stage_history") or [])
         job.result_json = {
             "document_id": document.id,
             "scalars": scalars,
             "tables": tables,
             "unresolved_targets": unresolved,
             "warnings": warnings,
+            "stage_history": history,
         }
 
         persist_target_extraction_results(
@@ -259,7 +329,7 @@ async def run_extraction_job(
         )
 
         job.status = "complete"
-        job.stage = "complete"
+        _append_stage(job, "complete")
         job.progress = 100
         job.completed_at = datetime.now(timezone.utc)
         database.commit()

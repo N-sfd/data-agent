@@ -281,8 +281,9 @@ export default function TargetPicker({
 
         {!hasAnyDetected && (
           <p className="px-2 py-6 text-center text-sm text-text-secondary">
-            No structures were detected in this document yet. Use a custom
-            instruction below, or wait for schema discovery to finish.
+            Processing completed, but no extractable structures were detected.
+            Use a custom instruction below, or wait for schema discovery to
+            finish.
           </p>
         )}
 

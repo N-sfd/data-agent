@@ -287,6 +287,24 @@ async def discover_document_schema(
         )
         targets.sort(key=lambda item: (-item.confidence, item.key))
 
+    page_text_chars = sum(len(page.final_text or "") for page in pages)
+    empty_warning = None
+    if page_text_chars == 0 or not targets:
+        empty_warning = (
+            "Processing completed, but no extractable structures were detected."
+        )
+
+    from app.services.ingestion_provenance import merge_provenance
+
+    merge_provenance(
+        document,
+        {
+            "page_text_chars": page_text_chars,
+            "targets_discovered": len(targets),
+            "empty_extraction_warning": empty_warning,
+        },
+    )
+
     response = DiscoverSchemaResponse(
         document_id=document.id,
         document_family=detection.document_family,

@@ -305,6 +305,7 @@ def process_fitz_pages(
                     page_index=page_number - 1,
                     settings=settings,
                     run_ocr=run_ocr,
+                    force_ocr=is_raster_image,
                 )
 
                 if is_raster_image:

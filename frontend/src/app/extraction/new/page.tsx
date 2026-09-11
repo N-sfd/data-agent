@@ -463,6 +463,33 @@ function NewExtractionPageContent() {
 
       setPages(extractedPages);
 
+      if (
+        uploadedDocument.prefer_background ||
+        uploadedDocument.processing_job_id
+      ) {
+        const ocrPages = extractedPages.filter((page) => page.ocr_succeeded);
+        const nativePages = extractedPages.filter(
+          (page) => page.extraction_method === "native",
+        );
+        setExtraction({
+          document_id: uploadedDocument.document_id,
+          status: "completed",
+          total_document_pages: extractedPages.length,
+          pages_requested: extractedPages.length,
+          pages_processed: extractedPages.length,
+          native_pages: nativePages.length,
+          ocr_required_pages: extractedPages.filter((page) => page.requires_ocr)
+            .length,
+          ocr_completed_pages: ocrPages.length,
+          failed_pages: 0,
+          page_numbers_processed: extractedPages.map(
+            (page) => page.page_number,
+          ),
+          warnings: [],
+          completed_at: new Date().toISOString(),
+        });
+      }
+
       try {
         const detection = await detectStructures(
           uploadedDocument.document_id,
@@ -490,6 +517,23 @@ function NewExtractionPageContent() {
       } else {
         await runSchemaDiscovery(uploadedDocument.document_id);
       }
+
+      try {
+        const refreshed = await getDocument(uploadedDocument.document_id);
+        setDocument((current) =>
+          current
+            ? {
+                ...current,
+                ...refreshed,
+                message: current.message,
+                pipeline_log: current.pipeline_log,
+              }
+            : refreshed,
+        );
+      } catch {
+        // Provenance refresh is best-effort.
+      }
+
       setPipelineStage("complete");
     } catch (error) {
       setWorkflowError(

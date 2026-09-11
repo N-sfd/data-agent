@@ -109,13 +109,29 @@ def parse_xlsx_sheets(file_path: str | Path) -> list[dict]:
 
 def parse_pptx_slides(file_path: str | Path) -> list[dict]:
     from pptx import Presentation
+    from pptx.enum.shapes import MSO_SHAPE_TYPE
+
+    from app.services.embedded_image_ocr import ocr_image_bytes
 
     presentation = Presentation(str(file_path))
     slides: list[dict] = []
 
     for index, slide in enumerate(presentation.slides, start=1):
         paragraphs: list[str] = []
+        ocr_snippets: list[str] = []
         for shape in slide.shapes:
+            if getattr(shape, "shape_type", None) == MSO_SHAPE_TYPE.PICTURE:
+                try:
+                    blob = shape.image.blob
+                except Exception:
+                    blob = None
+                if blob:
+                    text = ocr_image_bytes(blob)
+                    if text:
+                        ocr_snippets.append(text)
+                        paragraphs.append(text)
+                continue
+
             if not getattr(shape, "has_text_frame", False):
                 continue
             for paragraph in shape.text_frame.paragraphs:
@@ -124,12 +140,11 @@ def parse_pptx_slides(file_path: str | Path) -> list[dict]:
                     paragraphs.append(line)
 
             # Fallback when runs are empty but text exists.
-            if not paragraphs and shape.text_frame.text.strip():
-                paragraphs.extend(
-                    line.strip()
-                    for line in shape.text_frame.text.splitlines()
-                    if line.strip()
-                )
+            if shape.text_frame.text.strip():
+                for line in shape.text_frame.text.splitlines():
+                    stripped = line.strip()
+                    if stripped and stripped not in paragraphs:
+                        paragraphs.append(stripped)
 
         text = "\n".join(paragraphs)
         slides.append(
@@ -138,6 +153,8 @@ def parse_pptx_slides(file_path: str | Path) -> list[dict]:
                 "paragraphs": paragraphs,
                 "tables": [],
                 "text": text,
+                "ocr_used": bool(ocr_snippets),
+                "ocr_snippets": ocr_snippets,
             }
         )
 

@@ -17,6 +17,11 @@ def empty_provenance(*, source_format: str, size_tier: str) -> dict[str, Any]:
         "ocr_pages": [],
         "page_count": 0,
         "size_tier": size_tier,
+        "processing_mode": "sync",
+        "processing_job_id": None,
+        "page_text_chars": 0,
+        "targets_discovered": None,
+        "empty_extraction_warning": None,
     }
 
 

@@ -588,6 +588,7 @@ export async function getExtractionJob(
 }
 
 const JOB_POLL_INTERVAL_MS = 1200;
+const MIN_STAGE_DWELL_MS = 450;
 
 export async function startProcessingJob(
   documentId: string,
@@ -610,16 +611,38 @@ export async function processDocumentViaJob(
     existingJobId != null
       ? await getExtractionJob(existingJobId, onRetry)
       : await startProcessingJob(documentId, onRetry);
+
+  let lastStage = job.stage || job.status;
+  let lastStageAt = Date.now();
   onStageChange?.(job);
 
   while (job.status === "queued" || job.status === "processing") {
     await new Promise((resolve) => setTimeout(resolve, JOB_POLL_INTERVAL_MS));
     job = await getExtractionJob(job.id, onRetry);
+    const nextStage = job.stage || job.status;
+    if (nextStage !== lastStage) {
+      const elapsed = Date.now() - lastStageAt;
+      if (elapsed < MIN_STAGE_DWELL_MS) {
+        await new Promise((resolve) =>
+          setTimeout(resolve, MIN_STAGE_DWELL_MS - elapsed),
+        );
+      }
+      lastStage = nextStage;
+      lastStageAt = Date.now();
+    }
     onStageChange?.(job);
   }
 
   if (job.status === "failed") {
     throw new Error(job.error_message ?? "Document processing failed.");
+  }
+
+  // Hold the final processing stage briefly so Completeness is visible.
+  const settle = Date.now() - lastStageAt;
+  if (settle < MIN_STAGE_DWELL_MS) {
+    await new Promise((resolve) =>
+      setTimeout(resolve, MIN_STAGE_DWELL_MS - settle),
+    );
   }
 
   return job;
