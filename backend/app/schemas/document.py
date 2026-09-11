@@ -38,6 +38,10 @@ class UploadedDocumentResponse(BaseModel):
     promoted_by: str | None = None
     promoted_at: datetime | None = None
     source_status: Literal["available", "missing"] = "available"
+    size_tier: str = "small"
+    prefer_background: bool = False
+    processing_job_id: int | None = None
+    ingestion_provenance: dict | None = None
 
 
 class ResolveDuplicateRequest(BaseModel):

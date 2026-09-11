@@ -37,6 +37,7 @@ import {
   getExtractionProgress,
   getStructuredOutput,
   getTargets,
+  processDocumentViaJob,
   renameCustomTarget,
   universalExtract,
 } from "@/lib/documents";
@@ -95,6 +96,7 @@ function NewExtractionPageContent() {
     useState<ExtractionProgress | null>(null);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const [waking, setWaking] = useState(false);
+  const [pipelineStage, setPipelineStage] = useState<string | null>(null);
   const [targetExtractionJob, setTargetExtractionJob] =
     useState<ExtractionJob | null>(null);
 
@@ -410,18 +412,50 @@ function NewExtractionPageContent() {
     setProgress(null);
     setElapsedSeconds(0);
     setWaking(false);
+    setPipelineStage("uploaded");
     setSourceRequest(null);
     setMobileSourceOpen(false);
     setExtracting(true);
 
     try {
-      const extractionResult = await extractDocumentPages(
-        uploadedDocument.document_id,
-        () => setWaking(true),
-      );
+      if (
+        uploadedDocument.prefer_background ||
+        uploadedDocument.processing_job_id
+      ) {
+        setPipelineStage("queued");
+        await processDocumentViaJob(
+          uploadedDocument.document_id,
+          uploadedDocument.processing_job_id,
+          (job) => {
+            setPipelineStage(job.stage || job.status);
+            if (typeof job.progress === "number") {
+              setProgress({
+                document_id: uploadedDocument.document_id,
+                status: job.status,
+                page_current: 0,
+                page_total: uploadedDocument.page_count || 0,
+                percent: job.progress,
+                native_pages: 0,
+                ocr_pages: 0,
+                ocr_completed_pages: 0,
+              });
+            }
+          },
+          () => setWaking(true),
+        );
+        setWaking(false);
+        setPipelineStage("complete");
+      } else {
+        setPipelineStage("reading_document");
+        const extractionResult = await extractDocumentPages(
+          uploadedDocument.document_id,
+          () => setWaking(true),
+        );
 
-      setWaking(false);
-      setExtraction(extractionResult);
+        setWaking(false);
+        setExtraction(extractionResult);
+        setPipelineStage("indexing");
+      }
 
       const extractedPages = await getDocumentPages(
         uploadedDocument.document_id,
@@ -441,7 +475,22 @@ function NewExtractionPageContent() {
         // just skips the detected-content summary.
       }
 
-      await runSchemaDiscovery(uploadedDocument.document_id);
+      setPipelineStage("discovering_fields");
+      if (
+        uploadedDocument.prefer_background ||
+        uploadedDocument.processing_job_id
+      ) {
+        // Background job already discovered schema — hydrate UI.
+        try {
+          const targets = await getTargets(uploadedDocument.document_id);
+          setSchemaDiscovery(targets);
+        } catch {
+          await runSchemaDiscovery(uploadedDocument.document_id);
+        }
+      } else {
+        await runSchemaDiscovery(uploadedDocument.document_id);
+      }
+      setPipelineStage("complete");
     } catch (error) {
       setWorkflowError(
         error instanceof Error
@@ -681,6 +730,7 @@ function NewExtractionPageContent() {
                     progress={progress}
                     elapsedSeconds={elapsedSeconds}
                     waking={waking}
+                    pipelineStage={pipelineStage}
                     onOpenProcessingDetails={() => setProcessingDrawerOpen(true)}
                     onReplaceDocument={() => {
                       setDocument(null);
@@ -1025,6 +1075,7 @@ function NewExtractionPageContent() {
           progress={progress}
           elapsedSeconds={elapsedSeconds}
           waking={waking}
+          pipelineStage={pipelineStage}
         />
       )}
     </>

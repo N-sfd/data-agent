@@ -212,3 +212,9 @@ class Document(Base):
         String(36),
         nullable=True,
     )
+
+    # Universal Document Ingestion RC — adapter / OCR / conversion trail.
+    ingestion_provenance: Mapped[dict | None] = mapped_column(
+        JSON,
+        nullable=True,
+    )

@@ -26,6 +26,10 @@ export interface UploadedDocument {
   promoted_by?: string | null;
   promoted_at?: string | null;
   source_status?: "available" | "missing";
+  size_tier?: string;
+  prefer_background?: boolean;
+  processing_job_id?: number | null;
+  ingestion_provenance?: Record<string, unknown> | null;
 }
 
 export type DuplicateResolution = "use_existing" | "upload_anyway";

@@ -15,6 +15,7 @@ interface ExtractionStatusPanelProps {
   progress?: ExtractionProgress | null;
   elapsedSeconds?: number;
   waking?: boolean;
+  pipelineStage?: string | null;
 }
 
 const WORKFLOW_STEPS = [
@@ -33,6 +34,7 @@ export default function ExtractionStatusPanel({
   progress = null,
   elapsedSeconds = 0,
   waking = false,
+  pipelineStage = null,
 }: ExtractionStatusPanelProps) {
   const currentStep = !document
     ? 0
@@ -85,6 +87,7 @@ export default function ExtractionStatusPanel({
           progress={progress}
           elapsedSeconds={elapsedSeconds}
           waking={waking}
+          pipelineStage={pipelineStage}
         />
       )}
 

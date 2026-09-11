@@ -315,8 +315,53 @@ def resolve_upload_type(extension: str) -> UploadTypeSpec:
     return spec
 
 
+def detect_kind_from_bytes(first_chunk: bytes) -> str | None:
+    """Best-effort content sniff — used when extension/signature disagree."""
+
+    if first_chunk.startswith(b"%PDF-"):
+        return "pdf"
+    if first_chunk.startswith(b"\x89PNG\r\n\x1a\n"):
+        return "png"
+    if first_chunk.startswith(b"\xff\xd8\xff"):
+        return "jpeg"
+    if first_chunk.startswith(b"BM"):
+        return "bmp"
+    if first_chunk.startswith(b"II*\x00") or first_chunk.startswith(b"MM\x00*"):
+        return "tiff"
+    if (
+        first_chunk.startswith(b"RIFF")
+        and len(first_chunk) >= 12
+        and first_chunk[8:12] == b"WEBP"
+    ):
+        return "webp"
+    if first_chunk.startswith(b"{\\rtf"):
+        return "rtf"
+    if first_chunk.startswith(b"\xd0\xcf\x11\xe0"):
+        return "legacy_office"
+    if first_chunk.startswith(b"PK\x03\x04"):
+        return "ooxml_zip"
+    return None
+
+
 def validate_signature(spec: UploadTypeSpec, first_chunk: bytes) -> None:
     if spec.signature is None:
+        # Plain-text family: still reject strong binary signatures that
+        # clearly belong to another format (signature wins over .txt/.csv).
+        sniffed = detect_kind_from_bytes(first_chunk)
+        if sniffed in {
+            "pdf",
+            "png",
+            "jpeg",
+            "bmp",
+            "tiff",
+            "webp",
+            "legacy_office",
+            "ooxml_zip",
+        }:
+            raise SecurityValidationError(
+                "File content does not match the declared extension "
+                f"({spec.extension}). Detected content looks like {sniffed}."
+            )
         return
 
     if spec.requires_riff_webp:
@@ -325,16 +370,30 @@ def validate_signature(spec: UploadTypeSpec, first_chunk: bytes) -> None:
             and len(first_chunk) >= 12
             and first_chunk[8:12] == b"WEBP"
         ):
+            sniffed = detect_kind_from_bytes(first_chunk)
+            detail = (
+                f" Detected content looks like {sniffed}."
+                if sniffed
+                else ""
+            )
             raise SecurityValidationError(
                 "The file does not contain a valid WEBP signature."
+                + detail
             )
         return
 
     prefixes = (spec.signature,) + spec.alt_signatures
     if not any(first_chunk.startswith(prefix) for prefix in prefixes):
+        sniffed = detect_kind_from_bytes(first_chunk)
+        detail = (
+            f" Detected content looks like {sniffed}."
+            if sniffed and sniffed != spec.kind
+            else ""
+        )
         raise SecurityValidationError(
             "The file does not contain a valid "
             f"{spec.kind.upper()} signature."
+            + detail
         )
 
 

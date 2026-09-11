@@ -14,6 +14,7 @@ interface DocumentStatusSummaryProps {
   progress: ExtractionProgress | null;
   elapsedSeconds: number;
   waking: boolean;
+  pipelineStage?: string | null;
   onOpenDetails: () => void;
 }
 
@@ -30,6 +31,7 @@ export default function DocumentStatusSummary({
   progress,
   elapsedSeconds,
   waking,
+  pipelineStage = null,
   onOpenDetails,
 }: DocumentStatusSummaryProps) {
   if (extracting) {
@@ -38,6 +40,7 @@ export default function DocumentStatusSummary({
         progress={progress}
         elapsedSeconds={elapsedSeconds}
         waking={waking}
+        pipelineStage={pipelineStage}
       />
     );
   }

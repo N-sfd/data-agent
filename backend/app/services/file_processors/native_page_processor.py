@@ -67,6 +67,17 @@ class NativePageProcessor(FileProcessor):
                 spec,
             )
             document_record.page_count = page_count
+            from app.services.upload_processing import (
+                finalize_processor_provenance,
+            )
+
+            finalize_processor_provenance(
+                document_record,
+                extension=file_path.suffix,
+                page_count=page_count,
+                ocr_pages=[],
+                conversion_used=False,
+            )
             database.commit()
 
         return summarize_stored_pages(

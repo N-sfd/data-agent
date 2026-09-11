@@ -8,6 +8,11 @@ import tempfile
 from pathlib import Path
 
 
+LEGACY_OFFICE_UNAVAILABLE = (
+    "Legacy Office conversion is not available on this deployment."
+)
+
+
 class LibreOfficeConversionError(Exception):
     pass
 
@@ -30,10 +35,7 @@ def _soffice_bin() -> str:
         found = shutil.which(name)
         if found:
             return found
-    raise LibreOfficeConversionError(
-        "LibreOffice is not installed. Legacy .doc/.xls/.ppt files "
-        "require LibreOffice headless conversion."
-    )
+    raise LibreOfficeConversionError(LEGACY_OFFICE_UNAVAILABLE)
 
 
 def convert_legacy_office(source: Path) -> Path:

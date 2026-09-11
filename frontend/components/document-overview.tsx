@@ -22,6 +22,7 @@ interface DocumentOverviewProps {
   progress: ExtractionProgress | null;
   elapsedSeconds: number;
   waking: boolean;
+  pipelineStage?: string | null;
   onOpenProcessingDetails: () => void;
   onViewResults?: () => void;
   onReplaceDocument?: () => void;
@@ -36,6 +37,7 @@ export default function DocumentOverview({
   progress,
   elapsedSeconds,
   waking,
+  pipelineStage = null,
   onOpenProcessingDetails,
   onViewResults,
   onReplaceDocument,
@@ -111,6 +113,7 @@ export default function DocumentOverview({
           progress={progress}
           elapsedSeconds={elapsedSeconds}
           waking={waking}
+          pipelineStage={pipelineStage}
           onOpenDetails={onOpenProcessingDetails}
         />
       </div>

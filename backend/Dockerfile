@@ -10,7 +10,11 @@ ARG GIT_SHA=unknown
 ENV GIT_SHA=$GIT_SHA
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends tesseract-ocr \
+    && apt-get install -y --no-install-recommends \
+        tesseract-ocr \
+        libreoffice-writer-nogui \
+        libreoffice-calc-nogui \
+        libreoffice-impress-nogui \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .

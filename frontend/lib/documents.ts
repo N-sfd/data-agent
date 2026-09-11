@@ -589,6 +589,42 @@ export async function getExtractionJob(
 
 const JOB_POLL_INTERVAL_MS = 1200;
 
+export async function startProcessingJob(
+  documentId: string,
+  onRetry?: (attempt: number, total: number) => void,
+): Promise<ExtractionJob> {
+  return apiFetch(
+    `/api/documents/${documentId}/jobs/process`,
+    { method: "POST" },
+    onRetry,
+  );
+}
+
+export async function processDocumentViaJob(
+  documentId: string,
+  existingJobId?: number | null,
+  onStageChange?: (job: ExtractionJob) => void,
+  onRetry?: (attempt: number, total: number) => void,
+): Promise<ExtractionJob> {
+  let job =
+    existingJobId != null
+      ? await getExtractionJob(existingJobId, onRetry)
+      : await startProcessingJob(documentId, onRetry);
+  onStageChange?.(job);
+
+  while (job.status === "queued" || job.status === "processing") {
+    await new Promise((resolve) => setTimeout(resolve, JOB_POLL_INTERVAL_MS));
+    job = await getExtractionJob(job.id, onRetry);
+    onStageChange?.(job);
+  }
+
+  if (job.status === "failed") {
+    throw new Error(job.error_message ?? "Document processing failed.");
+  }
+
+  return job;
+}
+
 /**
  * Runs target extraction as a background job instead of the client-side
  * chunked requests above, so the frontend never has to know about (or

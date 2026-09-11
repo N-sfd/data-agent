@@ -449,6 +449,19 @@ async def readiness_check(response: Response) -> dict[str, object]:
             ),
         }
 
+    from app.services.libreoffice_convert import libreoffice_available
+
+    lo_ok = libreoffice_available()
+    checks["legacy_office_conversion"] = {
+        "status": "ok" if lo_ok else "warn",
+        "available": lo_ok,
+        "detail": (
+            None
+            if lo_ok
+            else "soffice not found; .doc/.xls/.ppt conversion unavailable"
+        ),
+    }
+
     if not ready:
         response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
 
@@ -460,6 +473,9 @@ async def readiness_check(response: Response) -> dict[str, object]:
         "oracle_dry_run": settings.oracle_dry_run,
         "rbac_enforced": settings.effective_rbac_enforced,
         "entra_configured": settings.entra_configured,
+        "legacy_office_conversion": {
+            "available": lo_ok,
+        },
         "checks": checks,
         # Flat ai/convera mirrors keep existing frontend clients working
         # when pointed at /ready instead of the old fat /health payload.

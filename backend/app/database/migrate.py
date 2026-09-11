@@ -108,6 +108,7 @@ DOCUMENT_COLUMNS: dict[str, str | dict[str, str]] = {
     "promoted_at": {"sqlite": "DATETIME", "postgresql": "TIMESTAMP WITH TIME ZONE"},
     "organization_id": "VARCHAR(36)",
     "owner_id": "VARCHAR(36)",
+    "ingestion_provenance": "JSON",
 }
 
 

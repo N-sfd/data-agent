@@ -4,7 +4,7 @@ from pathlib import Path
 from uuid import UUID, uuid4
 
 import fitz
-from fastapi import APIRouter, Depends, File, HTTPException, Response, UploadFile
+from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, Response, UploadFile
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
@@ -54,6 +54,12 @@ from app.services.pdf_validation import (
     validate_pdf_structure,
 )
 from app.services.native_ingest import ingest_native_document
+from app.services.upload_processing import (
+    assert_legacy_office_supported,
+    enqueue_processing_job,
+    seed_upload_provenance,
+    upload_processing_plan,
+)
 from app.services.security_validation import (
     NATIVE_PAGE_KINDS,
     SecurityValidationError,
@@ -244,6 +250,7 @@ def _ingest_native_pages(
 )
 async def upload_document(
     response: Response,
+    background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     database: Session = Depends(get_database),
 ) -> UploadedDocumentResponse:
@@ -253,6 +260,7 @@ async def upload_document(
 
     try:
         display_filename, spec = validate_upload_metadata(file)
+        assert_legacy_office_supported(spec)
         log.append("Validated file type and extension")
 
         stored_filename = f"{document_id}{spec.extension}"
@@ -373,45 +381,74 @@ async def upload_document(
         )
         log.append("Stored original document")
 
-        if spec.kind in NATIVE_PAGE_KINDS:
-            page_count = _ingest_native_pages(
-                database, document_id, destination, spec
-            )
-            metadata = PDFMetadata(
-                page_count=page_count,
-                encrypted=False,
-                title=None,
-                author=None,
-            )
-            log.append("Extracted document text")
+        size_tier, prefer_background = upload_processing_plan(size_bytes)
+        provenance = seed_upload_provenance(
+            document, spec=spec, size_bytes=size_bytes
+        )
+        database.commit()
 
-        if metadata.extracted_from_portfolio:
-            message = (
-                "PDF Portfolio detected. Extracted embedded document "
-                f"'{metadata.embedded_filename}' "
-                f"({metadata.page_count} pages) for analysis."
+        processing_job_id: int | None = None
+
+        if prefer_background:
+            processing_job_id = enqueue_processing_job(
+                database=database,
+                background_tasks=background_tasks,
+                document_id=str(document_id),
             )
-        elif spec.kind in NATIVE_PAGE_KINDS:
-            message = (
-                "The document was uploaded and its text extracted. "
-                "Specify what you want to extract or ask a question."
+            log.append(
+                f"Queued background processing job #{processing_job_id} "
+                f"({size_tier} upload)"
             )
-        elif spec.kind == "image":
             message = (
-                "The image was uploaded securely. Extract pages to run "
-                "OCR before asking questions about it."
-            )
-        elif spec.kind == "legacy_office":
-            message = (
-                "Legacy Office file uploaded. Extract pages to convert "
-                "via LibreOffice and run the intelligence pipeline."
+                "Document uploaded and queued for background processing. "
+                "Large files are processed asynchronously."
             )
         else:
-            message = (
-                "The PDF was uploaded securely. Specify the pages, "
-                "financial section, table, account, or reporting period "
-                "you want to extract."
-            )
+            if spec.kind in NATIVE_PAGE_KINDS:
+                page_count = _ingest_native_pages(
+                    database, document_id, destination, spec
+                )
+                metadata = PDFMetadata(
+                    page_count=page_count,
+                    encrypted=False,
+                    title=None,
+                    author=None,
+                )
+                provenance = seed_upload_provenance(
+                    document, spec=spec, size_bytes=size_bytes
+                )
+                provenance["page_count"] = page_count
+                document.ingestion_provenance = provenance
+                database.commit()
+                log.append("Extracted document text")
+
+            if metadata.extracted_from_portfolio:
+                message = (
+                    "PDF Portfolio detected. Extracted embedded document "
+                    f"'{metadata.embedded_filename}' "
+                    f"({metadata.page_count} pages) for analysis."
+                )
+            elif spec.kind in NATIVE_PAGE_KINDS:
+                message = (
+                    "The document was uploaded and its text extracted. "
+                    "Specify what you want to extract or ask a question."
+                )
+            elif spec.kind == "image":
+                message = (
+                    "The image was uploaded securely. Extract pages to run "
+                    "OCR before asking questions about it."
+                )
+            elif spec.kind == "legacy_office":
+                message = (
+                    "Legacy Office file uploaded. Extract pages to convert "
+                    "via LibreOffice and run the intelligence pipeline."
+                )
+            else:
+                message = (
+                    "The PDF was uploaded securely. Specify the pages, "
+                    "financial section, table, account, or reporting period "
+                    "you want to extract."
+                )
 
         return UploadedDocumentResponse(
             document_id=document_id,
@@ -425,6 +462,10 @@ async def upload_document(
             uploaded_at=uploaded_at,
             message=message,
             pipeline_log=log,
+            size_tier=size_tier,
+            prefer_background=prefer_background,
+            processing_job_id=processing_job_id,
+            ingestion_provenance=document.ingestion_provenance,
         )
 
     except HTTPException:

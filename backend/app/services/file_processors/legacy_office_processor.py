@@ -13,8 +13,10 @@ from app.services.file_processors.native_page_processor import (
     NativePageProcessor,
 )
 from app.services.libreoffice_convert import (
+    LEGACY_OFFICE_UNAVAILABLE,
     LibreOfficeConversionError,
     convert_legacy_office,
+    libreoffice_available,
 )
 
 
@@ -43,10 +45,15 @@ class LegacyOfficeProcessor(FileProcessor):
             )
 
         try:
+            if not libreoffice_available():
+                raise LibreOfficeConversionError(LEGACY_OFFICE_UNAVAILABLE)
             converted = convert_legacy_office(file_path)
         except LibreOfficeConversionError as exc:
+            message = str(exc).strip() or LEGACY_OFFICE_UNAVAILABLE
+            if "not available" not in message.lower() and "LibreOffice" in message:
+                message = LEGACY_OFFICE_UNAVAILABLE
             raise DocumentExtractionError(
-                str(exc),
+                message,
                 code=PAGE_EXTRACTION_FAILED,
             ) from exc
 
@@ -87,6 +94,18 @@ class LegacyOfficeProcessor(FileProcessor):
                         resolve_upload_type(".docx"),
                     )
                     document_record.page_count = page_count
+                    from app.services.upload_processing import (
+                        finalize_processor_provenance,
+                    )
+
+                    finalize_processor_provenance(
+                        document_record,
+                        extension=file_path.suffix,
+                        page_count=page_count,
+                        ocr_pages=[],
+                        conversion_used=True,
+                        converted_format="docx",
+                    )
                     database.commit()
 
                 return processor.process(

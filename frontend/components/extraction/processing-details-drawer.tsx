@@ -21,6 +21,7 @@ interface ProcessingDetailsDrawerProps {
   progress: ExtractionProgress | null;
   elapsedSeconds: number;
   waking: boolean;
+  pipelineStage?: string | null;
 }
 
 // Everything that used to sit permanently in the right column — the
@@ -37,6 +38,7 @@ export default function ProcessingDetailsDrawer({
   progress,
   elapsedSeconds,
   waking,
+  pipelineStage = null,
 }: ProcessingDetailsDrawerProps) {
   if (!open) {
     return null;
@@ -70,6 +72,7 @@ export default function ProcessingDetailsDrawer({
             progress={progress}
             elapsedSeconds={elapsedSeconds}
             waking={waking}
+            pipelineStage={pipelineStage}
           />
 
           <IngestionChecklist steps={document.pipeline_log ?? []} />

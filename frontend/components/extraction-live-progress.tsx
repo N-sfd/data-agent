@@ -6,7 +6,32 @@ interface ExtractionLiveProgressProps {
   progress: ExtractionProgress | null;
   elapsedSeconds: number;
   waking: boolean;
+  pipelineStage?: string | null;
 }
+
+const PIPELINE_STAGE_LABELS: Record<string, string> = {
+  uploaded: "Uploaded",
+  queued: "Queued",
+  reading_document: "Reading document",
+  processing_document: "Reading document",
+  rendering_ocr: "Rendering/OCR",
+  running_ocr: "Rendering/OCR",
+  indexing: "Indexing",
+  discovering_fields: "Discovering schema",
+  extracting_data: "Extracting",
+  complete: "Complete",
+};
+
+const PIPELINE_ORDER = [
+  "Uploaded",
+  "Queued",
+  "Reading document",
+  "Rendering/OCR",
+  "Indexing",
+  "Discovering schema",
+  "Extracting",
+  "Complete",
+];
 
 const ROTATING_MESSAGES = [
   "Reading page text...",
@@ -36,12 +61,17 @@ export default function ExtractionLiveProgress({
   progress,
   elapsedSeconds,
   waking,
+  pipelineStage = null,
 }: ExtractionLiveProgressProps) {
   const [messageIndex, setMessageIndex] = useState(0);
   const [activity, setActivity] = useState<ActivityEntry[]>([]);
   const [lastChangedAt, setLastChangedAt] = useState(elapsedSeconds);
   const [prevProgress, setPrevProgress] =
     useState<ExtractionProgress | null>(null);
+
+  const stageLabel = pipelineStage
+    ? PIPELINE_STAGE_LABELS[pipelineStage] ?? pipelineStage
+    : null;
 
   useEffect(() => {
     const interval = setInterval(() => {
@@ -95,8 +125,33 @@ export default function ExtractionLiveProgress({
     <div className="mt-5 space-y-5">
       <div>
         <p className="text-sm font-medium text-foreground">
-          Extracting document
+          {stageLabel ?? "Extracting document"}
         </p>
+
+        {stageLabel && (
+          <ol className="mt-2 flex flex-wrap gap-2 text-[11px] text-text-muted">
+            {PIPELINE_ORDER.map((label) => {
+              const active = label === stageLabel;
+              const done =
+                PIPELINE_ORDER.indexOf(label) <
+                PIPELINE_ORDER.indexOf(stageLabel);
+              return (
+                <li
+                  key={label}
+                  className={
+                    active
+                      ? "font-medium text-foreground"
+                      : done
+                        ? "text-text-secondary"
+                        : undefined
+                  }
+                >
+                  {label}
+                </li>
+              );
+            })}
+          </ol>
+        )}
 
         {hasPageTotal ? (
           <p className="mt-1 text-sm text-text-secondary">

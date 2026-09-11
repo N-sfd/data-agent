@@ -72,12 +72,12 @@ async def run_processing_job(job_id: int) -> None:
         bind_job_context(document_id=document.id, job_id=job.id)
         log_event(
             "job_started",
-            stage="processing_document",
+            stage="reading_document",
             job_type="processing",
         )
 
         job.status = "processing"
-        job.stage = "processing_document"
+        job.stage = "reading_document"
         job.started_at = datetime.now(timezone.utc)
         job.progress = 5
         database.commit()
@@ -91,6 +91,10 @@ async def run_processing_job(job_id: int) -> None:
         except DocumentStorageError as exc:
             _fail_job(job, database, exc)
             return
+
+        job.stage = "rendering_ocr"
+        job.progress = 20
+        database.commit()
 
         try:
             result = await run_in_threadpool(
@@ -108,12 +112,15 @@ async def run_processing_job(job_id: int) -> None:
             _fail_job(job, database, exc)
             return
 
-        if result.get("ocr_required_page_count", 0) > 0:
-            job.stage = "running_ocr"
+        # Refresh after threadpool mutation.
+        database.refresh(document)
+
+        job.stage = "indexing"
         job.progress = 60
         database.commit()
 
         job.stage = "discovering_fields"
+        job.progress = 75
         database.commit()
 
         pages = list(

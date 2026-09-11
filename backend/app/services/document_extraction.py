@@ -465,6 +465,24 @@ def process_fitz_pages(
 
         database.commit()
 
+        from app.services.upload_processing import finalize_processor_provenance
+
+        ocr_pages = [
+            page.page_number
+            for page in all_stored_pages
+            if page.ocr_succeeded or (
+                page.requires_ocr and page.extraction_method == "ocr"
+            )
+        ]
+        finalize_processor_provenance(
+            document_record,
+            extension=file_path.suffix,
+            page_count=len(all_stored_pages),
+            ocr_pages=ocr_pages,
+            conversion_used=False,
+        )
+        database.commit()
+
         return {
             "document_id": document_record.id,
             "status": document_record.processing_status,
