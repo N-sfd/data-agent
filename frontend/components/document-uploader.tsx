@@ -119,8 +119,7 @@ export default function DocumentUploader({
 
     if (!ACCEPTED_EXTENSIONS.includes(extension)) {
       setError(
-        "Please select a supported business document "
-        "(PDF, Office, text, or image).",
+        "Please select a supported business document (PDF, Office, text, or image).",
       );
       return;
     }
