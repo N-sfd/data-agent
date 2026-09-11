@@ -54,9 +54,9 @@ def test_reject_non_pdf_extension() -> None:
         "/api/documents/upload",
         files={
             "file": (
-                "financial-report.txt",
-                b"not a pdf",
-                "text/plain",
+                "financial-report.exe",
+                b"MZ not a document",
+                "application/octet-stream",
             )
         },
     )

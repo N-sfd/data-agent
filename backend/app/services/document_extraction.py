@@ -13,7 +13,6 @@ from app.models.page_text_block import PageTextBlock
 from app.services.document_provider import (
     ConveraError,
     extract_document,
-    should_use_convera_documents,
 )
 from app.services.generic_table_extractor import (
     extract_page_tables,
@@ -25,10 +24,12 @@ from app.services.pdf_form_extractor import (
 
 
 class DocumentExtractionError(Exception):
-    pass
+    def __init__(self, message: str, *, code: str | None = None):
+        super().__init__(message)
+        self.code = code
 
 
-def _summarize_stored_pages(
+def summarize_stored_pages(
     *,
     database: Session,
     document_record: Document,
@@ -94,7 +95,7 @@ def resolve_page_range(
     return first_page, last_page
 
 
-def _process_pdf_via_convera(
+def process_pdf_via_convera(
     *,
     database: Session,
     document_record: Document,
@@ -174,7 +175,7 @@ def _process_pdf_via_convera(
 
     database.commit()
 
-    return _summarize_stored_pages(
+    return summarize_stored_pages(
         database=database,
         document_record=document_record,
         started_at=started_at,
@@ -192,6 +193,8 @@ def process_document_pages(
     page_end: int | None,
     force_reprocess: bool,
 ) -> dict:
+    """Dispatch to the DocumentAdapter for this file type."""
+
     started_at = time.monotonic()
 
     if not file_path.exists():
@@ -199,36 +202,42 @@ def process_document_pages(
             "The stored document file could not be found."
         )
 
-    if file_path.suffix.lower() == ".docx":
-        # DOCX text is extracted synchronously at upload time (it's
-        # already digital, no OCR/page-image pipeline applies) — just
-        # report back what's already stored.
-        return _summarize_stored_pages(
-            database=database,
-            document_record=document_record,
-            started_at=started_at,
-        )
+    # Local import avoids circular import with file_processors package.
+    from app.services.file_processors import get_processor
 
-    if (
-        should_use_convera_documents(settings)
-        and file_path.suffix.lower() == ".pdf"
-    ):
-        return _process_pdf_via_convera(
-            database=database,
-            document_record=document_record,
-            file_path=file_path,
-            settings=settings,
-            started_at=started_at,
-        )
+    processor = get_processor(file_path)
+    return processor.process(
+        database=database,
+        document_record=document_record,
+        file_path=file_path,
+        settings=settings,
+        run_ocr=run_ocr,
+        page_start=page_start,
+        page_end=page_end,
+        force_reprocess=force_reprocess,
+        started_at=started_at,
+    )
 
-    # Raster images open as a 1-page fitz document (so the text/OCR path
-    # below works unchanged), but they have no real PDF structure, so
-    # the PDF-specific form-field and table extractors can't run on them.
-    is_raster_image = file_path.suffix.lower() in {
-        ".png",
-        ".jpg",
-        ".jpeg",
-    }
+
+def process_fitz_pages(
+    *,
+    database: Session,
+    document_record: Document,
+    file_path: Path,
+    settings: Settings,
+    run_ocr: bool,
+    page_start: int | None,
+    page_end: int | None,
+    force_reprocess: bool,
+    started_at: float,
+    is_raster_image: bool,
+) -> dict:
+    """PyMuPDF native text + quality-gated OCR into DocumentPage rows."""
+
+    from app.services.security_validation import RASTER_EXTENSIONS
+
+    if file_path.suffix.lower() in RASTER_EXTENSIONS:
+        is_raster_image = True
 
     pdf: fitz.Document | None = None
 

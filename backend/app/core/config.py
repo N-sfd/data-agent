@@ -111,6 +111,8 @@ class Settings(BaseSettings):
     ocr_min_word_count: int = 8
     ocr_min_text_coverage: float = 0.002
     ocr_max_image_ratio: float = 0.70
+    # Fraction of replacement/control glyphs that marks a useless text layer.
+    ocr_max_bad_glyph_ratio: float = 0.15
 
     tessdata_prefix: str | None = None
 

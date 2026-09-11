@@ -82,6 +82,26 @@ def calculate_image_coverage(page: fitz.Page) -> tuple[int, float]:
     )
 
 
+def suspicious_glyph_ratio(text: str) -> float:
+    """Share of characters that look like broken OCR / ToUnicode garbage."""
+
+    if not text:
+        return 0.0
+
+    bad = 0
+    for char in text:
+        code = ord(char)
+        if char in {"\ufffd", "\u0000"}:
+            bad += 1
+        elif code < 32 and char not in {"\n", "\r", "\t"}:
+            bad += 1
+        # Private Use Area often appears in broken embedded fonts.
+        elif 0xE000 <= code <= 0xF8FF:
+            bad += 1
+
+    return bad / max(len(text), 1)
+
+
 def detect_ocr_requirement(
     page: fitz.Page,
     native_text: str,
@@ -110,6 +130,8 @@ def detect_ocr_requirement(
         page
     )
 
+    glyph_ratio = suspicious_glyph_ratio(stripped_text)
+
     reasons: list[str] = []
 
     if character_count < settings.ocr_min_character_count:
@@ -125,6 +147,11 @@ def detect_ocr_requirement(
     if text_coverage_ratio < settings.ocr_min_text_coverage:
         reasons.append(
             "Extracted text covers very little of the page."
+        )
+
+    if glyph_ratio > settings.ocr_max_bad_glyph_ratio:
+        reasons.append(
+            "Native text contains a high ratio of suspicious glyphs."
         )
 
     if (

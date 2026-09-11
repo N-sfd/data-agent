@@ -14,8 +14,6 @@ from app.models.document import Document
 from app.models.document_metadata_field import DocumentMetadataField
 from app.models.document_page import DocumentPage
 from app.models.metadata_field_audit_log import MetadataFieldAuditLog
-from app.models.page_text_block import PageTextBlock
-from app.parsers.docx_parser import parse_docx
 from app.schemas.contract_analysis import (
     GlobalAuditEntry,
     GlobalAuditLogResponse,
@@ -55,11 +53,15 @@ from app.services.pdf_validation import (
     list_embedded_pdfs,
     validate_pdf_structure,
 )
+from app.services.native_ingest import ingest_native_document
 from app.services.security_validation import (
+    NATIVE_PAGE_KINDS,
     SecurityValidationError,
     UPLOAD_TYPES,
     UploadTypeSpec,
     validate_docx_structure,
+    validate_pptx_structure,
+    validate_xlsx_structure,
 )
 
 router = APIRouter()
@@ -124,7 +126,6 @@ def _extract_metadata(
 
     if spec.kind == "docx":
         validate_docx_structure(file_path)
-
         return PDFMetadata(
             page_count=1,
             encrypted=False,
@@ -132,8 +133,48 @@ def _extract_metadata(
             author=None,
         )
 
-    # image (png/jpg/jpeg): treated as a single always-scanned page,
-    # handled by the existing OCR pipeline once /extract-pages runs.
+    if spec.kind == "xlsx":
+        validate_xlsx_structure(file_path)
+        from app.parsers.office_text_parsers import parse_xlsx_sheets
+
+        sheet_count = max(len(parse_xlsx_sheets(file_path)), 1)
+        return PDFMetadata(
+            page_count=sheet_count,
+            encrypted=False,
+            title=None,
+            author=None,
+        )
+
+    if spec.kind == "pptx":
+        validate_pptx_structure(file_path)
+        from app.parsers.office_text_parsers import parse_pptx_slides
+
+        slide_count = max(len(parse_pptx_slides(file_path)), 1)
+        return PDFMetadata(
+            page_count=slide_count,
+            encrypted=False,
+            title=None,
+            author=None,
+        )
+
+    if spec.kind in {"text", "csv", "html", "rtf"}:
+        return PDFMetadata(
+            page_count=1,
+            encrypted=False,
+            title=None,
+            author=None,
+        )
+
+    if spec.kind == "legacy_office":
+        # Page count resolved after LibreOffice conversion during extract.
+        return PDFMetadata(
+            page_count=1,
+            encrypted=False,
+            title=None,
+            author=None,
+        )
+
+    # Raster images (png/jpg/tiff/bmp/webp): single page via OCR path.
     return PDFMetadata(
         page_count=1,
         encrypted=False,
@@ -174,79 +215,26 @@ def _create_document_record(
     return document, uploaded_at
 
 
-def _ingest_docx_page(
+def _ingest_native_pages(
     database: Session,
     document_id: UUID,
-    docx_path: Path,
-) -> None:
-    """
-    DOCX text is already digital, so there's no OCR/page-image pipeline
-    to run. Store the whole document as a single synthetic page now,
-    rather than deferring to /extract-pages (which is PDF-only).
-    """
+    file_path: Path,
+    spec: UploadTypeSpec,
+) -> int:
+    """Native text/table ingest into the common DocumentPage model."""
 
-    parsed = parse_docx(str(docx_path))
-
-    text_parts = list(parsed["paragraphs"])
-
-    for table in parsed["tables"]:
-        for row in table:
-            text_parts.append(" | ".join(row))
-
-    final_text = "\n".join(text_parts)
-
-    page_record = DocumentPage(
-        document_id=str(document_id),
-        page_number=1,
-        page_label=None,
-        native_text=final_text,
-        ocr_text=None,
-        final_text=final_text,
-        has_tables=bool(parsed["tables"]),
-        has_form_fields=False,
-        is_scanned=False,
-        text_length=len(final_text),
-        extraction_method="native",
-        requires_ocr=False,
-        ocr_attempted=False,
-        ocr_succeeded=False,
-        character_count=len(final_text),
-        word_count=len(final_text.split()),
-        text_block_count=len(parsed["paragraphs"]),
-        image_count=0,
-        text_coverage_ratio=1.0,
-        image_coverage_ratio=0.0,
-        page_width=0.0,
-        page_height=0.0,
-        extraction_status="completed",
-        extracted_at=datetime.now(timezone.utc),
+    page_count = ingest_native_document(
+        database, document_id, file_path, spec
     )
 
-    database.add(page_record)
-    database.flush()
-
-    for index, paragraph in enumerate(parsed["paragraphs"]):
-        database.add(
-            PageTextBlock(
-                document_page_id=page_record.id,
-                block_index=index,
-                block_type="text",
-                text=paragraph,
-                x0=0.0,
-                y0=0.0,
-                x1=0.0,
-                y1=0.0,
-                extraction_method="native",
-            )
-        )
-
     document = database.get(Document, str(document_id))
-
     if document is not None:
         document.processing_status = "completed"
-        document.processed_page_count = 1
+        document.processed_page_count = page_count
+        document.page_count = page_count
 
     database.commit()
+    return page_count
 
 
 @router.post(
@@ -385,8 +373,16 @@ async def upload_document(
         )
         log.append("Stored original document")
 
-        if spec.kind == "docx":
-            _ingest_docx_page(database, document_id, destination)
+        if spec.kind in NATIVE_PAGE_KINDS:
+            page_count = _ingest_native_pages(
+                database, document_id, destination, spec
+            )
+            metadata = PDFMetadata(
+                page_count=page_count,
+                encrypted=False,
+                title=None,
+                author=None,
+            )
             log.append("Extracted document text")
 
         if metadata.extracted_from_portfolio:
@@ -395,15 +391,20 @@ async def upload_document(
                 f"'{metadata.embedded_filename}' "
                 f"({metadata.page_count} pages) for analysis."
             )
-        elif spec.kind == "docx":
+        elif spec.kind in NATIVE_PAGE_KINDS:
             message = (
-                "The DOCX was uploaded and its text extracted. Specify "
-                "what you want to extract or ask a question about it."
+                "The document was uploaded and its text extracted. "
+                "Specify what you want to extract or ask a question."
             )
         elif spec.kind == "image":
             message = (
                 "The image was uploaded securely. Extract pages to run "
                 "OCR before asking questions about it."
+            )
+        elif spec.kind == "legacy_office":
+            message = (
+                "Legacy Office file uploaded. Extract pages to convert "
+                "via LibreOffice and run the intelligence pipeline."
             )
         else:
             message = (
@@ -557,8 +558,16 @@ async def resolve_duplicate(
 
         log.append("Stored as a new document")
 
-        if spec.kind == "docx":
-            _ingest_docx_page(database, document_id, destination)
+        if spec.kind in NATIVE_PAGE_KINDS:
+            page_count = _ingest_native_pages(
+                database, document_id, destination, spec
+            )
+            metadata = PDFMetadata(
+                page_count=page_count,
+                encrypted=False,
+                title=None,
+                author=None,
+            )
             log.append("Extracted document text")
 
         return UploadedDocumentResponse(

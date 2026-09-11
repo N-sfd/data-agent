@@ -25,9 +25,23 @@ import type {
 const ACCEPTED_EXTENSIONS = [
   ".pdf",
   ".docx",
+  ".doc",
+  ".xlsx",
+  ".xls",
+  ".pptx",
+  ".ppt",
+  ".txt",
+  ".csv",
+  ".rtf",
+  ".html",
+  ".htm",
   ".png",
   ".jpg",
   ".jpeg",
+  ".tif",
+  ".tiff",
+  ".bmp",
+  ".webp",
 ];
 
 /**
@@ -105,7 +119,8 @@ export default function DocumentUploader({
 
     if (!ACCEPTED_EXTENSIONS.includes(extension)) {
       setError(
-        "Please select a PDF, DOCX, PNG, or JPG document.",
+        "Please select a supported business document "
+        "(PDF, Office, text, or image).",
       );
       return;
     }
@@ -125,8 +140,23 @@ export default function DocumentUploader({
       "application/pdf": [".pdf"],
       "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
         [".docx"],
+      "application/msword": [".doc"],
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet":
+        [".xlsx"],
+      "application/vnd.ms-excel": [".xls"],
+      "application/vnd.openxmlformats-officedocument.presentationml.presentation":
+        [".pptx"],
+      "application/vnd.ms-powerpoint": [".ppt"],
+      "text/plain": [".txt"],
+      "text/csv": [".csv"],
+      "application/rtf": [".rtf"],
+      "text/rtf": [".rtf"],
+      "text/html": [".html", ".htm"],
       "image/png": [".png"],
       "image/jpeg": [".jpg", ".jpeg"],
+      "image/tiff": [".tif", ".tiff"],
+      "image/bmp": [".bmp"],
+      "image/webp": [".webp"],
     },
     multiple: false,
     maxFiles: 1,
@@ -328,7 +358,8 @@ export default function DocumentUploader({
           </span>
 
           <p className="mt-5 text-xs text-text-muted">
-            <span className="font-medium text-text-secondary">PDF</span> (Full Source Verification) · DOCX, PNG, JPG (Text Extraction)
+            <span className="font-medium text-text-secondary">PDF</span>{" "}
+            (full source) · Office / text (native extract) · Images (OCR)
           </p>
         </div>
       ) : (

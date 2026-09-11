@@ -4,14 +4,41 @@ from app.core.errors import UNSUPPORTED_FILE_TYPE
 from app.services.document_extraction import DocumentExtractionError
 from app.services.file_processors.docx_processor import DocxProcessor
 from app.services.file_processors.image_processor import ImageProcessor
+from app.services.file_processors.legacy_office_processor import (
+    LegacyOfficeProcessor,
+)
+from app.services.file_processors.native_page_processor import (
+    NativePageProcessor,
+)
 from app.services.file_processors.pdf_processor import PdfProcessor
+from app.services.security_validation import SUPPORTED_TYPE_LABEL
+
+_PDF = PdfProcessor()
+_DOCX = DocxProcessor()
+_IMAGE = ImageProcessor()
+_NATIVE = NativePageProcessor()
+_LEGACY = LegacyOfficeProcessor()
 
 _PROCESSORS = {
-    ".pdf": PdfProcessor(),
-    ".docx": DocxProcessor(),
-    ".png": ImageProcessor(),
-    ".jpg": ImageProcessor(),
-    ".jpeg": ImageProcessor(),
+    ".pdf": _PDF,
+    ".docx": _DOCX,
+    ".xlsx": _NATIVE,
+    ".pptx": _NATIVE,
+    ".txt": _NATIVE,
+    ".csv": _NATIVE,
+    ".html": _NATIVE,
+    ".htm": _NATIVE,
+    ".rtf": _NATIVE,
+    ".png": _IMAGE,
+    ".jpg": _IMAGE,
+    ".jpeg": _IMAGE,
+    ".tif": _IMAGE,
+    ".tiff": _IMAGE,
+    ".bmp": _IMAGE,
+    ".webp": _IMAGE,
+    ".doc": _LEGACY,
+    ".xls": _LEGACY,
+    ".ppt": _LEGACY,
 }
 
 
@@ -21,7 +48,7 @@ def get_processor(file_path: Path):
     if processor is None:
         raise DocumentExtractionError(
             "This file type is not supported. "
-            "Upload a PDF, DOCX, PNG, or JPG.",
+            f"Upload one of: {SUPPORTED_TYPE_LABEL}.",
             code=UNSUPPORTED_FILE_TYPE,
         )
 

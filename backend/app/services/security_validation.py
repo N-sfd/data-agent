@@ -1,3 +1,12 @@
+"""Upload allowlist: extension → MIME → magic-byte checks.
+
+Native extraction is preferred; OCR applies later for weak/image content.
+Legacy binary Office (.doc/.xls/.ppt) is accepted and converted via
+LibreOffice when available.
+"""
+
+from __future__ import annotations
+
 import zipfile
 from dataclasses import dataclass
 from pathlib import Path
@@ -17,7 +26,39 @@ class UploadTypeSpec:
     extension: str
     content_type: str
     allowed_content_types: frozenset[str]
-    signature: bytes
+    # None = no magic-byte gate (plain text family).
+    signature: bytes | None = None
+    # Alternate magic prefixes (e.g. TIFF endianness).
+    alt_signatures: tuple[bytes, ...] = ()
+    # For formats where the header is not a pure prefix (WEBP).
+    requires_riff_webp: bool = False
+    # OOXML package must contain this zip member.
+    ooxml_member: str | None = None
+
+
+def _ooxml(
+    *,
+    kind: str,
+    extension: str,
+    content_type: str,
+    member: str,
+    extra_types: frozenset[str] = frozenset(),
+) -> UploadTypeSpec:
+    return UploadTypeSpec(
+        kind=kind,
+        extension=extension,
+        content_type=content_type,
+        allowed_content_types=frozenset(
+            {
+                content_type,
+                "application/octet-stream",
+                "application/zip",
+            }
+            | set(extra_types)
+        ),
+        signature=b"PK\x03\x04",
+        ooxml_member=member,
+    )
 
 
 UPLOAD_TYPES: dict[str, UploadTypeSpec] = {
@@ -34,22 +75,138 @@ UPLOAD_TYPES: dict[str, UploadTypeSpec] = {
         ),
         signature=b"%PDF-",
     ),
-    ".docx": UploadTypeSpec(
+    ".docx": _ooxml(
         kind="docx",
         extension=".docx",
         content_type=(
             "application/vnd.openxmlformats-officedocument"
             ".wordprocessingml.document"
         ),
-        allowed_content_types=frozenset(
+        member="word/document.xml",
+    ),
+    ".xlsx": _ooxml(
+        kind="xlsx",
+        extension=".xlsx",
+        content_type=(
+            "application/vnd.openxmlformats-officedocument"
+            ".spreadsheetml.sheet"
+        ),
+        member="xl/workbook.xml",
+        extra_types=frozenset(
             {
-                "application/vnd.openxmlformats-officedocument."
-                "wordprocessingml.document",
-                "application/octet-stream",
-                "application/zip",
+                "application/vnd.ms-excel",
             }
         ),
-        signature=b"PK\x03\x04",
+    ),
+    ".pptx": _ooxml(
+        kind="pptx",
+        extension=".pptx",
+        content_type=(
+            "application/vnd.openxmlformats-officedocument"
+            ".presentationml.presentation"
+        ),
+        member="ppt/presentation.xml",
+    ),
+    ".doc": UploadTypeSpec(
+        kind="legacy_office",
+        extension=".doc",
+        content_type="application/msword",
+        allowed_content_types=frozenset(
+            {
+                "application/msword",
+                "application/octet-stream",
+            }
+        ),
+        signature=b"\xd0\xcf\x11\xe0",
+    ),
+    ".xls": UploadTypeSpec(
+        kind="legacy_office",
+        extension=".xls",
+        content_type="application/vnd.ms-excel",
+        allowed_content_types=frozenset(
+            {
+                "application/vnd.ms-excel",
+                "application/octet-stream",
+            }
+        ),
+        signature=b"\xd0\xcf\x11\xe0",
+    ),
+    ".ppt": UploadTypeSpec(
+        kind="legacy_office",
+        extension=".ppt",
+        content_type="application/vnd.ms-powerpoint",
+        allowed_content_types=frozenset(
+            {
+                "application/vnd.ms-powerpoint",
+                "application/octet-stream",
+            }
+        ),
+        signature=b"\xd0\xcf\x11\xe0",
+    ),
+    ".txt": UploadTypeSpec(
+        kind="text",
+        extension=".txt",
+        content_type="text/plain",
+        allowed_content_types=frozenset(
+            {"text/plain", "application/octet-stream"}
+        ),
+        signature=None,
+    ),
+    ".csv": UploadTypeSpec(
+        kind="csv",
+        extension=".csv",
+        content_type="text/csv",
+        allowed_content_types=frozenset(
+            {
+                "text/csv",
+                "application/csv",
+                "text/plain",
+                "application/octet-stream",
+            }
+        ),
+        signature=None,
+    ),
+    ".html": UploadTypeSpec(
+        kind="html",
+        extension=".html",
+        content_type="text/html",
+        allowed_content_types=frozenset(
+            {
+                "text/html",
+                "application/xhtml+xml",
+                "text/plain",
+                "application/octet-stream",
+            }
+        ),
+        signature=None,
+    ),
+    ".htm": UploadTypeSpec(
+        kind="html",
+        extension=".htm",
+        content_type="text/html",
+        allowed_content_types=frozenset(
+            {
+                "text/html",
+                "application/xhtml+xml",
+                "text/plain",
+                "application/octet-stream",
+            }
+        ),
+        signature=None,
+    ),
+    ".rtf": UploadTypeSpec(
+        kind="rtf",
+        extension=".rtf",
+        content_type="application/rtf",
+        allowed_content_types=frozenset(
+            {
+                "application/rtf",
+                "text/rtf",
+                "text/plain",
+                "application/octet-stream",
+            }
+        ),
+        signature=b"{\\rtf",
     ),
     ".png": UploadTypeSpec(
         kind="image",
@@ -78,7 +235,72 @@ UPLOAD_TYPES: dict[str, UploadTypeSpec] = {
         ),
         signature=b"\xff\xd8\xff",
     ),
+    ".tif": UploadTypeSpec(
+        kind="image",
+        extension=".tif",
+        content_type="image/tiff",
+        allowed_content_types=frozenset(
+            {"image/tiff", "image/tif", "application/octet-stream"}
+        ),
+        signature=b"II*\x00",
+        alt_signatures=(b"MM\x00*",),
+    ),
+    ".tiff": UploadTypeSpec(
+        kind="image",
+        extension=".tiff",
+        content_type="image/tiff",
+        allowed_content_types=frozenset(
+            {"image/tiff", "image/tif", "application/octet-stream"}
+        ),
+        signature=b"II*\x00",
+        alt_signatures=(b"MM\x00*",),
+    ),
+    ".bmp": UploadTypeSpec(
+        kind="image",
+        extension=".bmp",
+        content_type="image/bmp",
+        allowed_content_types=frozenset(
+            {
+                "image/bmp",
+                "image/x-ms-bmp",
+                "application/octet-stream",
+            }
+        ),
+        signature=b"BM",
+    ),
+    ".webp": UploadTypeSpec(
+        kind="image",
+        extension=".webp",
+        content_type="image/webp",
+        allowed_content_types=frozenset(
+            {"image/webp", "application/octet-stream"}
+        ),
+        signature=b"RIFF",
+        requires_riff_webp=True,
+    ),
 }
+
+SUPPORTED_TYPE_LABEL = (
+    "PDF, DOCX, DOC, XLSX, XLS, PPTX, PPT, TXT, CSV, RTF, HTML, "
+    "PNG, JPG, TIFF, BMP, WEBP"
+)
+
+# Kinds whose text/tables are ingested at upload into DocumentPage rows.
+NATIVE_PAGE_KINDS = frozenset(
+    {"docx", "xlsx", "pptx", "text", "csv", "html", "rtf"}
+)
+
+RASTER_EXTENSIONS = frozenset(
+    {
+        ".png",
+        ".jpg",
+        ".jpeg",
+        ".tif",
+        ".tiff",
+        ".bmp",
+        ".webp",
+    }
+)
 
 
 def resolve_upload_type(extension: str) -> UploadTypeSpec:
@@ -87,25 +309,36 @@ def resolve_upload_type(extension: str) -> UploadTypeSpec:
     if spec is None:
         raise SecurityValidationError(
             "Unsupported file type. Supported types: "
-            "PDF, DOCX, PNG, JPG."
+            f"{SUPPORTED_TYPE_LABEL}."
         )
 
     return spec
 
 
-def validate_signature(
-    spec: UploadTypeSpec, first_chunk: bytes
-) -> None:
-    if not first_chunk.startswith(spec.signature):
+def validate_signature(spec: UploadTypeSpec, first_chunk: bytes) -> None:
+    if spec.signature is None:
+        return
+
+    if spec.requires_riff_webp:
+        if not (
+            first_chunk.startswith(b"RIFF")
+            and len(first_chunk) >= 12
+            and first_chunk[8:12] == b"WEBP"
+        ):
+            raise SecurityValidationError(
+                "The file does not contain a valid WEBP signature."
+            )
+        return
+
+    prefixes = (spec.signature,) + spec.alt_signatures
+    if not any(first_chunk.startswith(prefix) for prefix in prefixes):
         raise SecurityValidationError(
             "The file does not contain a valid "
             f"{spec.kind.upper()} signature."
         )
 
 
-def validate_content_type(
-    spec: UploadTypeSpec, content_type: str
-) -> None:
+def validate_content_type(spec: UploadTypeSpec, content_type: str) -> None:
     if content_type.lower() not in spec.allowed_content_types:
         raise SecurityValidationError(
             "The uploaded file has an unsupported content "
@@ -113,17 +346,28 @@ def validate_content_type(
         )
 
 
-def validate_docx_structure(file_path: Path) -> None:
-    """Confirm a .docx is a real OOXML word document, not just any zip."""
-
+def validate_ooxml_structure(file_path: Path, member: str, label: str) -> None:
     try:
         with zipfile.ZipFile(file_path) as archive:
-            if "word/document.xml" not in archive.namelist():
+            if member not in archive.namelist():
                 raise SecurityValidationError(
-                    "The file is a zip archive but not a "
-                    "valid DOCX document."
+                    f"The file is a zip archive but not a valid {label}."
                 )
     except zipfile.BadZipFile as exc:
         raise SecurityValidationError(
-            "The file does not contain a valid DOCX archive."
+            f"The file does not contain a valid {label} archive."
         ) from exc
+
+
+def validate_docx_structure(file_path: Path) -> None:
+    validate_ooxml_structure(file_path, "word/document.xml", "DOCX")
+
+
+def validate_xlsx_structure(file_path: Path) -> None:
+    validate_ooxml_structure(file_path, "xl/workbook.xml", "XLSX")
+
+
+def validate_pptx_structure(file_path: Path) -> None:
+    validate_ooxml_structure(
+        file_path, "ppt/presentation.xml", "PPTX"
+    )
