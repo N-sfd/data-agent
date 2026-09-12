@@ -1,9 +1,3 @@
-databases:
-  - name: data-agent-db
-    plan: free
-    databaseName: data_agent
-    user: data_agent
-
 services:
   - type: web
     name: data-agent-backend
@@ -17,10 +11,13 @@ services:
         value: production
       - key: DEBUG
         value: "false"
+      # Document metadata lives in Supabase Postgres, not a Render-managed
+      # database — set this manually in the dashboard to the SAME
+      # connection string the existing service uses. Do not let Render
+      # provision a fresh `data-agent-db`: that starts empty and orphans
+      # every existing document.
       - key: DATABASE_URL
-        fromDatabase:
-          name: data-agent-db
-          property: connectionString
+        sync: false
       - key: FRONTEND_URL
         sync: false
       - key: UPLOAD_DIRECTORY
