@@ -462,6 +462,42 @@ async def readiness_check(response: Response) -> dict[str, object]:
         ),
     }
 
+    # Temporary diagnostics for the TESSDATA_PREFIX/OCR investigation —
+    # no document content, just binary/env presence.
+    import os
+    import shutil
+
+    tessdata_env = os.environ.get("TESSDATA_PREFIX")
+    tessdata_dir_listing: list[str] | str | None = None
+    if tessdata_env:
+        try:
+            tessdata_dir_listing = sorted(os.listdir(tessdata_env))[:20]
+        except OSError as exc:
+            tessdata_dir_listing = f"error: {exc}"
+
+    marker_path = "/etc/tessdata_prefix"
+    marker_contents = None
+    if os.path.exists(marker_path):
+        try:
+            with open(marker_path, "r", encoding="utf-8") as handle:
+                marker_contents = handle.read().strip()
+        except OSError as exc:
+            marker_contents = f"error: {exc}"
+
+    checks["ocr_diagnostics"] = {
+        "tesseract_binary": shutil.which("tesseract"),
+        "soffice_binary": shutil.which("soffice"),
+        "tessdata_prefix_env": tessdata_env,
+        "tessdata_prefix_settings": (
+            str(settings.tessdata_prefix)
+            if settings.tessdata_prefix
+            else None
+        ),
+        "tessdata_dir_listing": tessdata_dir_listing,
+        "build_marker_file": marker_path,
+        "build_marker_contents": marker_contents,
+    }
+
     if not ready:
         response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
 
