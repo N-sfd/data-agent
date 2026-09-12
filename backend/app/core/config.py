@@ -106,6 +106,9 @@ class Settings(BaseSettings):
     ocr_enabled: bool = True
     ocr_language: str = "eng"
     ocr_dpi: int = 300
+    # Bounds a single Tesseract invocation so one malformed/huge image
+    # cannot occupy a worker (or the request thread) indefinitely.
+    ocr_page_timeout_seconds: int = 45
 
     ocr_min_character_count: int = 40
     ocr_min_word_count: int = 8

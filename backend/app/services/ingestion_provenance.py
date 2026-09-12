@@ -26,7 +26,7 @@ def empty_provenance(*, source_format: str, size_tier: str) -> dict[str, Any]:
 
 
 def merge_provenance(document: Document, updates: dict[str, Any]) -> dict[str, Any]:
-    current = dict(document.ingestion_provenance or {})
+    current = dict(getattr(document, "ingestion_provenance", None) or {})
     current.update({key: value for key, value in updates.items() if value is not None})
     document.ingestion_provenance = current
     return current

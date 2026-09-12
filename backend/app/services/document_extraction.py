@@ -477,7 +477,11 @@ def process_fitz_pages(
         ]
         finalize_processor_provenance(
             document_record,
-            extension=file_path.suffix,
+            # Use the stored (original) filename's extension, not
+            # `file_path` — raster adapters may have normalized the file
+            # on disk (e.g. a multi-frame TIFF rebuilt as a synthetic
+            # PDF) while the document itself is still a TIFF.
+            extension=Path(document_record.stored_filename).suffix,
             page_count=len(all_stored_pages),
             ocr_pages=ocr_pages,
             conversion_used=False,

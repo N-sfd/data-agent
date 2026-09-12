@@ -211,6 +211,8 @@ def extract_page(
                 fallback = ocr_image_bytes(
                     pixmap.tobytes("png"),
                     language=settings.ocr_language,
+                    timeout_seconds=settings.ocr_page_timeout_seconds,
+                    page_number=page_number,
                 )
                 if fallback:
                     ocr_text = fallback

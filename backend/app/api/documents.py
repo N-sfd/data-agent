@@ -5,6 +5,7 @@ from uuid import UUID, uuid4
 
 import fitz
 from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, Response, UploadFile
+from fastapi.concurrency import run_in_threadpool
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
@@ -423,8 +424,15 @@ async def upload_document(
             )
         else:
             if spec.kind in NATIVE_PAGE_KINDS:
-                page_count = _ingest_native_pages(
-                    database, document_id, destination, spec
+                # DOCX/PPTX may OCR embedded scanned images synchronously
+                # inside this call — keep it off the event loop so one
+                # slow/hung Tesseract call can't stall the whole API.
+                page_count = await run_in_threadpool(
+                    _ingest_native_pages,
+                    database,
+                    document_id,
+                    destination,
+                    spec,
                 )
                 metadata = PDFMetadata(
                     page_count=page_count,
@@ -670,8 +678,12 @@ async def resolve_duplicate(
         log.append("Stored as a new document")
 
         if spec.kind in NATIVE_PAGE_KINDS:
-            page_count = _ingest_native_pages(
-                database, document_id, destination, spec
+            page_count = await run_in_threadpool(
+                _ingest_native_pages,
+                database,
+                document_id,
+                destination,
+                spec,
             )
             metadata = PDFMetadata(
                 page_count=page_count,
