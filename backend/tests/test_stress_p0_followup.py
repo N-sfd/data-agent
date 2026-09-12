@@ -13,6 +13,7 @@ from PIL import Image, ImageDraw, ImageFont
 
 from app.main import app
 from app.services.embedded_image_ocr import ocr_image_bytes
+from app.services.page_text_extractor import _run_with_timeout
 
 client = TestClient(app)
 
@@ -113,3 +114,25 @@ def test_ocr_image_bytes_passes_timeout_to_pytesseract() -> None:
 
     assert text == "ok"
     assert captured["timeout"] == 7
+
+
+def test_run_with_timeout_recovers_from_hung_native_call() -> None:
+    import time
+
+    def hangs_forever():
+        time.sleep(30)
+        return "should never get here"
+
+    started = time.perf_counter()
+    with pytest.raises(TimeoutError):
+        _run_with_timeout(hangs_forever, timeout_seconds=0.5)
+    elapsed = time.perf_counter() - started
+
+    assert elapsed < 5, (
+        "caller should recover promptly instead of waiting for the "
+        "abandoned thread"
+    )
+
+
+def test_run_with_timeout_returns_result_when_fast_enough() -> None:
+    assert _run_with_timeout(lambda: 42, timeout_seconds=5) == 42

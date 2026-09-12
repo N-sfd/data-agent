@@ -1,3 +1,4 @@
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError
 from dataclasses import dataclass
 
 import fitz
@@ -7,6 +8,27 @@ from app.services.ocr_detection import (
     OCRDetection,
     detect_ocr_requirement,
 )
+
+
+def _run_with_timeout(fn, timeout_seconds: float):
+    """Run a native (non-interruptible) call with a wall-clock bound.
+
+    MuPDF's OCR is a direct C call — it has no timeout parameter of its
+    own, so a hang there (e.g. a broken tessdata path some builds treat
+    as a slow retry loop instead of a fast failure) would otherwise block
+    the calling thread forever. A timed-out call's thread is abandoned
+    (Python cannot forcibly kill it), but the caller recovers immediately
+    instead of hanging the whole request.
+    """
+
+    executor = ThreadPoolExecutor(max_workers=1)
+    future = executor.submit(fn)
+    try:
+        return future.result(timeout=timeout_seconds)
+    finally:
+        # wait=False: on timeout, don't block here waiting for a hung
+        # native call to finish — let the orphaned thread run its course.
+        executor.shutdown(wait=False)
 
 
 @dataclass(frozen=True)
@@ -158,11 +180,14 @@ def extract_page(
                 else None
             )
 
-            ocr_text_page = page.get_textpage_ocr(
-                language=settings.ocr_language,
-                dpi=settings.ocr_dpi,
-                full=True,
-                tessdata=tessdata,
+            ocr_text_page = _run_with_timeout(
+                lambda: page.get_textpage_ocr(
+                    language=settings.ocr_language,
+                    dpi=settings.ocr_dpi,
+                    full=True,
+                    tessdata=tessdata,
+                ),
+                settings.ocr_page_timeout_seconds,
             )
 
             ocr_text = page.get_text(
@@ -196,6 +221,11 @@ def extract_page(
                 extraction_method = "native"
                 ocr_succeeded = True
 
+        except FutureTimeoutError:
+            ocr_error = (
+                f"MuPDF OCR exceeded {settings.ocr_page_timeout_seconds}s "
+                "and was abandoned."
+            )
         except Exception as exc:
             ocr_error = str(exc)
 
