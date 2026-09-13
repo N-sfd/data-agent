@@ -31,11 +31,29 @@ def _split_multiframe_tiff(file_path: Path) -> Path | None:
 
         synthetic = fitz.open()
         for frame in ImageSequence.Iterator(image):
+            # frame.size is in pixels but fitz.new_page() takes PDF points
+            # (72/inch). Without converting through the frame's DPI, a
+            # 300-DPI scan produces a page ~4x too large per side (~17x
+            # the area) — and OCR then renders that oversized page at
+            # settings.ocr_dpi on top, multiplying the blow-up again and
+            # risking OOM on memory-constrained hosts.
+            # TIFFs saved without explicit resolution tags often round-trip
+            # through PIL as dpi=(1, 1) rather than being absent — treat
+            # any implausibly low value (real scans are never under ~10
+            # DPI) as "unknown" the same as a missing tag.
+            dpi_x, dpi_y = frame.info.get("dpi", (72, 72))
+            dpi_x = dpi_x if dpi_x and dpi_x > 10 else 72
+            dpi_y = dpi_y if dpi_y and dpi_y > 10 else 72
+            page_width = frame.width * 72.0 / dpi_x
+            page_height = frame.height * 72.0 / dpi_y
+
             rgb = frame.convert("RGB")
             buffer = BytesIO()
             rgb.save(buffer, format="PNG")
-            width, height = rgb.size
-            page = synthetic.new_page(width=width, height=height)
+            page = synthetic.new_page(
+                width=page_width,
+                height=page_height,
+            )
             page.insert_image(page.rect, stream=buffer.getvalue())
 
     synthetic_path = file_path.with_suffix(".frames.pdf")
