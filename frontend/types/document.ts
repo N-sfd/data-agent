@@ -427,6 +427,7 @@ export interface ExtractionSummary {
 
   page_numbers_processed: number[];
   warnings: string[];
+  page_text_chars?: number;
 
   completed_at: string;
 }

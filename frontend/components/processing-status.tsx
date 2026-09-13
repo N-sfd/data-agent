@@ -6,14 +6,34 @@ interface ProcessingStatusProps {
   document: UploadedDocument;
   extraction: ExtractionSummary | null;
   extracting: boolean;
+  schemaTargetCount?: number | null;
 }
 
 export default function ProcessingStatus({
   document,
   extraction,
   extracting,
+  schemaTargetCount = null,
 }: ProcessingStatusProps) {
   const extractionComplete = Boolean(extraction);
+  const ocrRequired = extraction?.ocr_required_pages ?? 0;
+  const ocrCompleted = extraction?.ocr_completed_pages ?? 0;
+  const pageTextChars =
+    extraction?.page_text_chars ??
+    (typeof document.ingestion_provenance?.page_text_chars === "number"
+      ? document.ingestion_provenance.page_text_chars
+      : null);
+  const ocrExecutionComplete =
+    extractionComplete && (ocrRequired === 0 || ocrCompleted >= ocrRequired);
+  const textExtracted =
+    extractionComplete && (pageTextChars == null || pageTextChars > 0);
+  const schemaComplete =
+    schemaTargetCount != null
+      ? schemaTargetCount > 0
+      : Boolean(
+          document.ingestion_provenance?.targets_discovered != null &&
+            Number(document.ingestion_provenance.targets_discovered) > 0,
+        );
 
   return (
     <div className="mt-8 border-t border-border pt-8">
@@ -51,17 +71,59 @@ export default function ProcessingStatus({
             />
 
             <StatusItem
-              complete={
-                extractionComplete &&
-                (extraction?.ocr_required_pages ?? 0) ===
-                  (extraction?.ocr_completed_pages ?? 0)
-              }
+              complete={extractionComplete && ocrRequired >= 0}
               active={extracting && !extractionComplete}
               title="OCR detection"
               description={
                 extractionComplete
-                  ? `${extraction?.ocr_required_pages ?? 0} pages required OCR.`
+                  ? `${ocrRequired} page${ocrRequired === 1 ? "" : "s"} required OCR.`
                   : "Detect scanned and image-based pages."
+              }
+            />
+
+            <StatusItem
+              complete={ocrExecutionComplete}
+              active={extracting && !extractionComplete}
+              title="OCR execution"
+              description={
+                extractionComplete
+                  ? ocrRequired === 0
+                    ? "OCR not required for this document."
+                    : `${ocrCompleted} / ${ocrRequired} page${ocrRequired === 1 ? "" : "s"} OCR'd.`
+                  : "Run Tesseract on pages that need OCR."
+              }
+            />
+
+            <StatusItem
+              complete={Boolean(textExtracted)}
+              active={extracting && !extractionComplete}
+              title="Text extracted"
+              description={
+                extractionComplete
+                  ? pageTextChars == null
+                    ? "Page text persisted."
+                    : `${pageTextChars.toLocaleString()} characters extracted.`
+                  : "Normalize OCR/native text onto DocumentPage rows."
+              }
+            />
+
+            <StatusItem
+              complete={schemaComplete}
+              active={false}
+              title="Schema discovery"
+              description={
+                schemaTargetCount != null
+                  ? `${schemaTargetCount} target${schemaTargetCount === 1 ? "" : "s"} discovered.`
+                  : typeof document.ingestion_provenance?.targets_discovered ===
+                      "number"
+                    ? `${document.ingestion_provenance.targets_discovered} target${
+                        Number(
+                          document.ingestion_provenance.targets_discovered,
+                        ) === 1
+                          ? ""
+                          : "s"
+                      } discovered.`
+                    : "Awaiting schema discovery."
               }
             />
           </>

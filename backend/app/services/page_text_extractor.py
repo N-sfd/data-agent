@@ -1,9 +1,11 @@
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError
 from dataclasses import dataclass
+import time
 
 import fitz
 
 from app.core.config import Settings
+from app.core.observability import log_event
 from app.services.ocr_detection import (
     OCRDetection,
     detect_ocr_requirement,
@@ -150,6 +152,17 @@ def extract_page(
         settings=settings,
     )
 
+    log_event(
+        "ocr_detection",
+        stage="rendering_ocr",
+        page=page_number,
+        requires_ocr=detection.requires_ocr,
+        force_ocr=force_ocr,
+        native_chars=len(native_text),
+        image_count=detection.image_count,
+        reasons=detection.reasons[:5],
+    )
+
     native_block_data = convert_blocks(
         native_blocks,
         extraction_method="native",
@@ -172,6 +185,7 @@ def extract_page(
 
     if should_run_ocr:
         ocr_attempted = True
+        mupdf_started = time.perf_counter()
 
         try:
             tessdata = (
@@ -221,13 +235,43 @@ def extract_page(
                 extraction_method = "native"
                 ocr_succeeded = True
 
+            log_event(
+                "ocr_mupdf",
+                stage="rendering_ocr",
+                status="ok" if ocr_text else "empty",
+                page=page_number,
+                ocr_engine="mupdf_tesseract",
+                duration_ms=int((time.perf_counter() - mupdf_started) * 1000),
+                text_chars=len(ocr_text or ""),
+                tessdata_set=bool(tessdata),
+            )
+
         except FutureTimeoutError:
             ocr_error = (
                 f"MuPDF OCR exceeded {settings.ocr_page_timeout_seconds}s "
                 "and was abandoned."
             )
+            log_event(
+                "ocr_mupdf",
+                stage="rendering_ocr",
+                status="timeout",
+                error_category="Timeout",
+                page=page_number,
+                ocr_engine="mupdf_tesseract",
+                duration_ms=int((time.perf_counter() - mupdf_started) * 1000),
+                timeout_seconds=settings.ocr_page_timeout_seconds,
+            )
         except Exception as exc:
             ocr_error = str(exc)
+            log_event(
+                "ocr_mupdf",
+                stage="rendering_ocr",
+                status="error",
+                error_category=type(exc).__name__,
+                page=page_number,
+                ocr_engine="mupdf_tesseract",
+                duration_ms=int((time.perf_counter() - mupdf_started) * 1000),
+            )
 
         # Raster / scanned pages: if MuPDF OCR yielded nothing, try
         # pytesseract directly against a rendered pixmap.
@@ -265,6 +309,31 @@ def extract_page(
             except Exception as exc:
                 if ocr_error is None:
                     ocr_error = str(exc)
+
+        if ocr_attempted and not (final_text or "").strip():
+            if ocr_error is None:
+                ocr_error = "OCR executed but produced no extractable text."
+            ocr_succeeded = False
+            log_event(
+                "ocr_empty_result",
+                stage="rendering_ocr",
+                status="warning",
+                page=page_number,
+                force_ocr=force_ocr,
+                requires_ocr=detection.requires_ocr,
+                error_type=ocr_error[:120],
+            )
+
+    log_event(
+        "page_text_extracted",
+        stage="rendering_ocr",
+        page=page_number,
+        extraction_method=extraction_method,
+        ocr_attempted=ocr_attempted,
+        ocr_succeeded=ocr_succeeded,
+        page_text_chars=len(final_text or ""),
+        has_ocr_error=bool(ocr_error),
+    )
 
     return PageExtractionData(
         page_number=page_number,

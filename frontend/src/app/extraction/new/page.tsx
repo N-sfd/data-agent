@@ -486,6 +486,10 @@ function NewExtractionPageContent() {
             (page) => page.page_number,
           ),
           warnings: [],
+          page_text_chars: extractedPages.reduce(
+            (total, page) => total + (page.final_text?.length ?? 0),
+            0,
+          ),
           completed_at: new Date().toISOString(),
         });
       }
@@ -1120,6 +1124,7 @@ function NewExtractionPageContent() {
           elapsedSeconds={elapsedSeconds}
           waking={waking}
           pipelineStage={pipelineStage}
+          schemaTargetCount={schemaDiscovery?.targets?.length ?? null}
         />
       )}
     </>

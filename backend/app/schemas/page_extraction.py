@@ -106,6 +106,7 @@ class DocumentExtractionSummary(BaseModel):
 
     page_numbers_processed: list[int]
     warnings: list[str]
+    page_text_chars: int = 0
 
     completed_at: datetime
 

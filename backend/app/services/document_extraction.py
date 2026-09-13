@@ -7,6 +7,7 @@ from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
 from app.core.config import Settings
+from app.core.observability import log_event
 from app.models.document import Document
 from app.models.document_page import DocumentPage
 from app.models.page_text_block import PageTextBlock
@@ -64,6 +65,7 @@ def summarize_stored_pages(
             page.page_number for page in pages
         ],
         "warnings": [],
+        "page_text_chars": sum(len(page.final_text or "") for page in pages),
         "completed_at": datetime.now(timezone.utc),
     }
 
@@ -274,7 +276,25 @@ def process_fitz_pages(
                 )
             )
 
-            if existing_page and not force_reprocess:
+            # Re-run OCR when a prior attempt left required-OCR pages empty.
+            # Without this, a failed extract (e.g. missing tesseract) is
+            # permanently sticky until the caller remembers force_reprocess.
+            needs_ocr_retry = bool(
+                existing_page
+                and run_ocr
+                and not force_reprocess
+                and (
+                    existing_page.requires_ocr
+                    or is_raster_image
+                )
+                and not (existing_page.final_text or "").strip()
+            )
+
+            if (
+                existing_page
+                and not force_reprocess
+                and not needs_ocr_retry
+            ):
                 processed_pages.append(page_number)
 
                 if existing_page.requires_ocr:
@@ -288,7 +308,12 @@ def process_fitz_pages(
 
                 continue
 
-            if existing_page and force_reprocess:
+            if existing_page and (force_reprocess or needs_ocr_retry):
+                if needs_ocr_retry:
+                    warnings.append(
+                        f"Page {page_number}: retrying OCR after empty "
+                        "prior extraction."
+                    )
                 database.execute(
                     delete(PageTextBlock).where(
                         PageTextBlock.document_page_id
@@ -416,6 +441,15 @@ def process_fitz_pages(
                         f"Page {page_number}: OCR failed: "
                         f"{extracted.ocr_error}"
                     )
+                elif (
+                    extracted.ocr_attempted
+                    and not (extracted.final_text or "").strip()
+                ):
+                    warnings.append(
+                        f"Page {page_number}: OCR produced no text "
+                        f"({len(extracted.detection.reasons)} detection "
+                        "signal(s))."
+                    )
 
                 database.commit()
 
@@ -486,7 +520,36 @@ def process_fitz_pages(
             ocr_pages=ocr_pages,
             conversion_used=False,
         )
+        page_text_chars = sum(
+            len(page.final_text or "") for page in all_stored_pages
+        )
+        from app.services.ingestion_provenance import merge_provenance
+
+        empty_warning = None
+        if page_text_chars == 0 and (
+            ocr_required_pages > 0 or is_raster_image
+        ):
+            empty_warning = (
+                "Processing completed, but OCR produced no extractable text."
+            )
+        merge_provenance(
+            document_record,
+            {
+                "page_text_chars": page_text_chars,
+                "empty_extraction_warning": empty_warning,
+            },
+        )
         database.commit()
+
+        log_event(
+            "document_pages_extracted",
+            stage="rendering_ocr",
+            page_count=len(all_stored_pages),
+            ocr_required_pages=ocr_required_pages,
+            ocr_completed_pages=ocr_completed_pages,
+            page_text_chars=page_text_chars,
+            warnings_count=len(warnings),
+        )
 
         return {
             "document_id": document_record.id,
@@ -500,6 +563,7 @@ def process_fitz_pages(
             "failed_pages": failed_pages,
             "page_numbers_processed": processed_pages,
             "warnings": warnings,
+            "page_text_chars": page_text_chars,
             "completed_at": datetime.now(timezone.utc),
         }
 

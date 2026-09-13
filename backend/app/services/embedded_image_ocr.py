@@ -2,10 +2,36 @@
 
 from __future__ import annotations
 
+import os
+import shutil
 import time
 from io import BytesIO
 
 from app.core.observability import log_event
+
+
+def _configure_pytesseract() -> None:
+    """Point pytesseract at the system binary + tessdata when available."""
+
+    try:
+        import pytesseract
+    except ImportError:
+        return
+
+    binary = shutil.which("tesseract")
+    if binary:
+        pytesseract.pytesseract.tesseract_cmd = binary
+
+    if not os.environ.get("TESSDATA_PREFIX"):
+        marker = "/etc/tessdata_prefix"
+        if os.path.isfile(marker):
+            try:
+                with open(marker, encoding="utf-8") as handle:
+                    prefix = handle.read().strip()
+            except OSError:
+                prefix = ""
+            if prefix:
+                os.environ["TESSDATA_PREFIX"] = prefix
 
 
 def ocr_image_bytes(
@@ -25,8 +51,17 @@ def ocr_image_bytes(
         from PIL import Image
         import pytesseract
     except ImportError:
+        log_event(
+            "embedded_image_ocr",
+            stage="rendering_ocr",
+            status="error",
+            error_category="ImportError",
+            ocr_engine="pytesseract",
+            page=page_number,
+        )
         return ""
 
+    _configure_pytesseract()
     started = time.perf_counter()
 
     try:
@@ -42,11 +77,17 @@ def ocr_image_bytes(
         log_event(
             "embedded_image_ocr",
             stage="rendering_ocr",
-            status="complete",
-            ocr_engine="tesseract",
+            status="complete" if text else "empty",
+            ocr_engine="pytesseract",
             page=page_number,
             duration_ms=int((time.perf_counter() - started) * 1000),
             text_chars=len(text),
+            tesseract_cmd=getattr(
+                getattr(pytesseract, "pytesseract", None),
+                "tesseract_cmd",
+                None,
+            ),
+            tessdata_prefix=os.environ.get("TESSDATA_PREFIX"),
         )
         return text
     except RuntimeError as exc:
@@ -56,7 +97,7 @@ def ocr_image_bytes(
             stage="rendering_ocr",
             status="timeout",
             error_category=type(exc).__name__,
-            ocr_engine="tesseract",
+            ocr_engine="pytesseract",
             page=page_number,
             duration_ms=int((time.perf_counter() - started) * 1000),
             timeout_seconds=timeout_seconds,
@@ -68,7 +109,7 @@ def ocr_image_bytes(
             stage="rendering_ocr",
             status="error",
             error_category=type(exc).__name__,
-            ocr_engine="tesseract",
+            ocr_engine="pytesseract",
             page=page_number,
             duration_ms=int((time.perf_counter() - started) * 1000),
         )

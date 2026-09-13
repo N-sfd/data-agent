@@ -22,6 +22,7 @@ interface ProcessingDetailsDrawerProps {
   elapsedSeconds: number;
   waking: boolean;
   pipelineStage?: string | null;
+  schemaTargetCount?: number | null;
 }
 
 // Everything that used to sit permanently in the right column — the
@@ -39,6 +40,7 @@ export default function ProcessingDetailsDrawer({
   elapsedSeconds,
   waking,
   pipelineStage = null,
+  schemaTargetCount = null,
 }: ProcessingDetailsDrawerProps) {
   if (!open) {
     return null;
@@ -81,6 +83,7 @@ export default function ProcessingDetailsDrawer({
             document={document}
             extraction={extraction}
             extracting={extracting}
+            schemaTargetCount={schemaTargetCount}
           />
         </div>
       </div>
