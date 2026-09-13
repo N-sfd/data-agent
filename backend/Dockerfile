@@ -5,8 +5,11 @@ WORKDIR /app
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 
-ARG GIT_SHA=unknown
-ENV GIT_SHA=$GIT_SHA
+# Render auto-populates ARGs that match its own injected build vars —
+# RENDER_GIT_COMMIT is one — without needing a --build-arg wired through
+# render.yaml. GIT_SHA=unknown otherwise (e.g. local `docker build`).
+ARG RENDER_GIT_COMMIT=unknown
+ENV GIT_SHA=$RENDER_GIT_COMMIT
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
