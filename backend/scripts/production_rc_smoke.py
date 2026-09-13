@@ -307,8 +307,9 @@ def main() -> None:
         f"/api/documents/{document_id}/pages/{page_no}/render",
         params={"highlight": str(edited.get("extracted_value") or "")[:80]},
     )
-    _require(render, "page render")
-    assert "image" in (render.headers.get("content-type") or "")
+    render_body = _require(render, "page render")
+    assert isinstance(render_body, dict)
+    assert (render_body.get("image_data_url") or "").startswith("data:image/")
     gate["source_verification"] = "PASS"
 
     print("\n=== GATE SUMMARY ===")
