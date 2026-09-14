@@ -33,6 +33,27 @@ def _run_with_timeout(fn, timeout_seconds: float):
         executor.shutdown(wait=False)
 
 
+# Ceiling on the long side of an OCR raster, independent of page size or
+# DPI metadata. A page's point-dimensions can be wrong or absent (a
+# multi-frame TIFF with no resolution tag, a malformed PDF, ...); without
+# this, get_textpage_ocr()/get_pixmap() render at settings.ocr_dpi against
+# whatever the page claims its size is, and an oversized page can allocate
+# a raster large enough to OOM the process. 4200px covers Letter (3300px),
+# A4 (3508px), and Legal (4200px) at a full 300 DPI with zero clamping —
+# every real-world scan renders at its intended quality — while still
+# bounding peak memory for anything larger or for pages whose reported
+# size can't be trusted (missing/garbage DPI, malformed dimensions).
+MAX_OCR_RASTER_DIMENSION_PX = 4200
+
+
+def _bounded_ocr_dpi(page: fitz.Page, requested_dpi: int) -> int:
+    long_side_pt = max(page.rect.width, page.rect.height)
+    if long_side_pt <= 0:
+        return requested_dpi
+    max_dpi_for_cap = MAX_OCR_RASTER_DIMENSION_PX * 72.0 / long_side_pt
+    return max(1, min(requested_dpi, int(max_dpi_for_cap)))
+
+
 @dataclass(frozen=True)
 class TextBlockData:
     block_index: int
@@ -194,10 +215,25 @@ def extract_page(
                 else None
             )
 
+            effective_dpi = _bounded_ocr_dpi(
+                page, settings.ocr_dpi
+            )
+
+            if effective_dpi != settings.ocr_dpi:
+                log_event(
+                    "ocr_dpi_clamped",
+                    stage="rendering_ocr",
+                    page=page_number,
+                    requested_dpi=settings.ocr_dpi,
+                    effective_dpi=effective_dpi,
+                    page_width_pt=page.rect.width,
+                    page_height_pt=page.rect.height,
+                )
+
             ocr_text_page = _run_with_timeout(
                 lambda: page.get_textpage_ocr(
                     language=settings.ocr_language,
-                    dpi=settings.ocr_dpi,
+                    dpi=effective_dpi,
                     full=True,
                     tessdata=tessdata,
                 ),
@@ -281,7 +317,9 @@ def extract_page(
             try:
                 from app.services.embedded_image_ocr import ocr_image_bytes
 
-                pixmap = page.get_pixmap(dpi=settings.ocr_dpi)
+                pixmap = page.get_pixmap(
+                    dpi=_bounded_ocr_dpi(page, settings.ocr_dpi)
+                )
                 fallback = ocr_image_bytes(
                     pixmap.tobytes("png"),
                     language=settings.ocr_language,
