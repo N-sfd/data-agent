@@ -1,5 +1,8 @@
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError
 from dataclasses import dataclass
+import ctypes
+import gc
+import sys
 import time
 
 import fitz
@@ -44,6 +47,27 @@ def _run_with_timeout(fn, timeout_seconds: float):
 # bounding peak memory for anything larger or for pages whose reported
 # size can't be trusted (missing/garbage DPI, malformed dimensions).
 MAX_OCR_RASTER_DIMENSION_PX = 4200
+
+
+def _release_native_memory() -> None:
+    """Return freed OCR buffers to the OS after each page.
+
+    PIL/MuPDF/Tesseract allocate large native buffers per page (a capped
+    raster is still several MB). CPython's GC frees the Python-level
+    references, but glibc's allocator doesn't hand that memory back to
+    the OS on its own — on a long-lived single worker process, repeated
+    large OCR allocations can ratchet up RSS across requests even though
+    each one is individually bounded (see MAX_OCR_RASTER_DIMENSION_PX
+    above), until a memory-constrained host OOMs. gc.collect() first so
+    there's something for malloc_trim to actually release.
+    """
+    gc.collect()
+    if sys.platform != "linux":
+        return
+    try:
+        ctypes.CDLL("libc.so.6").malloc_trim(0)
+    except OSError:
+        pass
 
 
 def _bounded_ocr_dpi(page: fitz.Page, requested_dpi: int) -> int:
@@ -361,6 +385,8 @@ def extract_page(
                 requires_ocr=detection.requires_ocr,
                 error_type=ocr_error[:120],
             )
+
+        _release_native_memory()
 
     log_event(
         "page_text_extracted",
