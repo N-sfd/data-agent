@@ -32,6 +32,10 @@ from app.services.document_storage import (
     DocumentStorageError,
     ensure_local_copy,
 )
+from app.services.file_processors.image_processor import (
+    _ensure_fitz_readable,
+)
+from app.services.security_validation import RASTER_EXTENSIONS
 
 router = APIRouter()
 settings = get_settings()
@@ -354,11 +358,14 @@ async def render_document_page(
             detail="Document not found.",
         )
 
-    if Path(document.stored_filename).suffix.lower() != ".pdf":
+    suffix = Path(document.stored_filename).suffix.lower()
+
+    if suffix != ".pdf" and suffix not in RASTER_EXTENSIONS:
         raise HTTPException(
             status_code=422,
             detail=(
-                "Page rendering is only available for PDF documents."
+                "Page rendering is only available for PDF and "
+                "image documents."
             ),
         )
 
@@ -373,6 +380,21 @@ async def render_document_page(
             status_code=422,
             detail=str(exc),
         ) from exc
+
+    if suffix in RASTER_EXTENSIONS:
+        # Same normalization the extraction path uses (splits multi-frame
+        # TIFFs into one page per frame, converts BMP/WEBP to something
+        # fitz can open directly) so page numbers here line up exactly
+        # with the DocumentPage rows OCR already produced.
+        try:
+            file_path = await run_in_threadpool(
+                _ensure_fitz_readable, file_path
+            )
+        except Exception as exc:
+            raise HTTPException(
+                status_code=422,
+                detail="The image could not be rendered.",
+            ) from exc
 
     pdf: fitz.Document | None = None
 
