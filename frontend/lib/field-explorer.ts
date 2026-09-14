@@ -41,6 +41,37 @@ async function loadFieldsForDocument(documentId: string): Promise<
   }
 }
 
+// Render's free-tier backend is a single worker process; firing
+// Promise.all across up to 100 documents (each up to two heavy calls —
+// contract-analysis, with an extract-results fallback) sends a burst of
+// ~100-200 simultaneous requests and can crash the process under real
+// repository sizes. Cap how many documents are in flight at once so the
+// page takes a bit longer instead of taking the backend down.
+const MAX_CONCURRENT_DOCUMENT_LOADS = 5;
+
+async function mapWithConcurrencyLimit<T, R>(
+  items: T[],
+  limit: number,
+  fn: (item: T) => Promise<R>,
+): Promise<R[]> {
+  const results: R[] = new Array(items.length);
+  let nextIndex = 0;
+
+  async function worker() {
+    while (nextIndex < items.length) {
+      const current = nextIndex;
+      nextIndex += 1;
+      results[current] = await fn(items[current]);
+    }
+  }
+
+  await Promise.all(
+    Array.from({ length: Math.min(limit, items.length) }, worker),
+  );
+
+  return results;
+}
+
 function fieldMatchesKey(
   fieldKey: string,
   explorerKey: ExplorerFieldKey,
@@ -64,8 +95,10 @@ export async function aggregateFieldAcrossRepository(
   const matches: FieldMatchRow[] = [];
   const bucketCounts = new Map<string, number>();
 
-  await Promise.all(
-    documents.map(async (doc) => {
+  await mapWithConcurrencyLimit(
+    documents,
+    MAX_CONCURRENT_DOCUMENT_LOADS,
+    async (doc) => {
       const fields = await loadFieldsForDocument(doc.document_id);
       if (fields.length === 0) return;
 
@@ -106,7 +139,7 @@ export async function aggregateFieldAcrossRepository(
           expirationField?.value ?? doc.expiration_date ?? null,
         confidence: field.confidence,
       });
-    }),
+    },
   );
 
   const buckets: FieldValueBucket[] = [...bucketCounts.entries()]
