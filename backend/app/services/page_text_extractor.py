@@ -41,12 +41,18 @@ def _run_with_timeout(fn, timeout_seconds: float):
 # multi-frame TIFF with no resolution tag, a malformed PDF, ...); without
 # this, get_textpage_ocr()/get_pixmap() render at settings.ocr_dpi against
 # whatever the page claims its size is, and an oversized page can allocate
-# a raster large enough to OOM the process. 4200px covers Letter (3300px),
-# A4 (3508px), and Legal (4200px) at a full 300 DPI with zero clamping —
-# every real-world scan renders at its intended quality — while still
-# bounding peak memory for anything larger or for pages whose reported
-# size can't be trusted (missing/garbage DPI, malformed dimensions).
-MAX_OCR_RASTER_DIMENSION_PX = 4200
+# a raster large enough to OOM the process.
+#
+# 4200px (the original value) covered Letter/A4/Legal at a full 300 DPI,
+# but on Render's free-tier single worker, back-to-back OCR-heavy
+# requests still accumulated enough peak memory to OOM the request
+# immediately *after* a capped-but-large page finished (see 59871a6's
+# malloc_trim mitigation — it helped but didn't fully close the gap).
+# 3300px covers Letter exactly at 300 DPI (zero clamping on the most
+# common real-world case) while giving ~38% less peak raster area than
+# 4200px for anything larger, trading a barely-perceptible DPI reduction
+# on A4/Legal scans for materially lower peak memory.
+MAX_OCR_RASTER_DIMENSION_PX = 3300
 
 
 def _release_native_memory() -> None:
