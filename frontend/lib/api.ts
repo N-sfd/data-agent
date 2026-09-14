@@ -20,7 +20,7 @@ function sleep(ms: number): Promise<void> {
 // rejects with a TypeError (network failure, DNS, CORS block, ...) —
 // there is no way from JS to tell those apart, so we retry on any of
 // them and only give up once the backoff window is exhausted.
-const COLD_START_RETRY_DELAYS_MS = [2000, 4000, 8000, 16000, 30000, 45000];
+export const COLD_START_RETRY_DELAYS_MS = [2000, 4000, 8000, 16000, 30000, 45000];
 
 function isRenderBackend(): boolean {
   return API_URL.includes("onrender.com");

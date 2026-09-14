@@ -97,12 +97,61 @@ describe("uploadFileWithProgress", () => {
     await expect(promise.catch((e) => e)).resolves.toBeInstanceOf(ApiError);
   });
 
-  it("rejects with a network error message on xhr.onerror", async () => {
-    const file = new File(["hello"], "test.pdf", { type: "application/pdf" });
-    const promise = uploadFileWithProgress("/api/documents/upload", file);
+  it("retries a network error and succeeds once a later attempt connects", async () => {
+    vi.useFakeTimers();
+    try {
+      const file = new File(["hello"], "test.pdf", { type: "application/pdf" });
+      const onRetry = vi.fn();
+      const promise = uploadFileWithProgress(
+        "/api/documents/upload",
+        file,
+        undefined,
+        onRetry,
+      );
 
-    MockXhr.instances[0].onerror?.();
+      expect(MockXhr.instances).toHaveLength(1);
+      MockXhr.instances[0].onerror?.();
 
-    await expect(promise).rejects.toThrow(/cannot reach/i);
+      // Let the retry's backoff delay (first entry in the schedule) elapse.
+      await vi.advanceTimersByTimeAsync(2000);
+
+      expect(onRetry).toHaveBeenCalledWith(1, expect.any(Number));
+      expect(MockXhr.instances).toHaveLength(2);
+
+      MockXhr.instances[1].status = 201;
+      MockXhr.instances[1].responseText = JSON.stringify({ document_id: "abc-123" });
+      MockXhr.instances[1].onload?.();
+
+      await expect(promise).resolves.toEqual({ document_id: "abc-123" });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("rejects with a network error message once every retry is exhausted", async () => {
+    vi.useFakeTimers();
+    try {
+      const file = new File(["hello"], "test.pdf", { type: "application/pdf" });
+      const promise = uploadFileWithProgress("/api/documents/upload", file);
+      // Swallow the rejection until we assert on it below — otherwise
+      // Node logs an unhandled-rejection warning while timers advance.
+      const outcome = promise.catch((e) => e);
+
+      const delays = [2000, 4000, 8000, 16000, 30000, 45000];
+      for (let i = 0; i < delays.length; i += 1) {
+        MockXhr.instances[i].onerror?.();
+        await vi.advanceTimersByTimeAsync(delays[i]);
+      }
+
+      // One initial attempt + one per delay.
+      expect(MockXhr.instances).toHaveLength(delays.length + 1);
+      MockXhr.instances[delays.length].onerror?.();
+
+      const error = await outcome;
+      expect(error).toBeInstanceOf(Error);
+      expect((error as Error).message).toMatch(/cannot reach/i);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
