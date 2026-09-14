@@ -26,13 +26,25 @@ function isRenderBackend(): boolean {
   return API_URL.includes("onrender.com");
 }
 
+// Derived from the actual configured API_URL rather than hardcoded, so
+// this never goes stale again when the backend is repointed at a
+// different Render service (as happened moving off data-agent-backend
+// onto data-agent-backend-qbmc).
+function renderServiceName(): string {
+  try {
+    return new URL(API_URL).hostname.split(".")[0];
+  } catch {
+    return "your Render service";
+  }
+}
+
 function unreachableBackendMessage(): string {
   if (isRenderBackend()) {
     return (
       `Cannot reach the Data Agent API at ${API_URL}. ` +
       "The Render backend may be suspended, redeploying, or waking from idle — " +
       "wait 60–90 seconds and retry. If this persists, open the Render dashboard " +
-      "and resume or redeploy the data-agent-backend service."
+      `and resume or redeploy the ${renderServiceName()} service.`
     );
   }
 
@@ -174,10 +186,13 @@ export async function wakeBackend(
   await apiFetch("/health", { cache: "no-store" }, onRetry);
 }
 
-/**
- * Lightweight connectivity probe for UI banners (no retries).
- */
-export async function probeBackend(): Promise<BackendProbeResult> {
+// A few quick attempts rather than a single shot — Render's free tier is
+// prone to brief multi-second blips (see this session's OCR load-testing
+// history) that resolve on their own; a UI banner shouldn't alarm the
+// user over something that would have passed by the next request anyway.
+const PROBE_RETRY_DELAYS_MS = [1500, 3000];
+
+async function probeOnce(): Promise<BackendProbeResult> {
   try {
     const response = await fetch(apiUrl("/health"), {
       cache: "no-store",
@@ -193,7 +208,8 @@ export async function probeBackend(): Promise<BackendProbeResult> {
         state: "unavailable",
         retryable: false,
         message:
-          "The Render backend has no active server at this URL. Resume or redeploy the data-agent-backend service in the Render dashboard, then retry.",
+          `The Render backend has no active server at this URL. Resume or redeploy the ${renderServiceName()} ` +
+          "service in the Render dashboard, then retry.",
       };
     }
 
@@ -209,4 +225,21 @@ export async function probeBackend(): Promise<BackendProbeResult> {
       message: unreachableBackendMessage(),
     };
   }
+}
+
+/**
+ * Connectivity probe for UI banners. Retries a couple of times over a
+ * few seconds before reporting unavailable, so a brief blip doesn't
+ * flash an alarming "service unavailable" banner at the user.
+ */
+export async function probeBackend(): Promise<BackendProbeResult> {
+  let result = await probeOnce();
+
+  for (const delay of PROBE_RETRY_DELAYS_MS) {
+    if (result.state === "healthy" || !result.retryable) break;
+    await sleep(delay);
+    result = await probeOnce();
+  }
+
+  return result;
 }
