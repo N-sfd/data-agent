@@ -777,19 +777,27 @@ body {
 
 /* Workflow diagram */
 .workflow-diagram-steps {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: flex-start;
-  gap: 0.5rem 0;
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 0.625rem;
   list-style: none;
   padding: 0;
   margin: 0;
+}
+
+/* One row of 5 once there's room, rather than flex-wrap's 2+2+1 orphan. */
+@media (min-width: 640px) {
+  .workflow-diagram-steps {
+    grid-template-columns: repeat(5, 1fr);
+    gap: 0;
+  }
 }
 
 .workflow-diagram-step {
   display: flex;
   align-items: center;
   min-width: 0;
+  width: 100%;
 }
 
 .workflow-diagram-connector {
@@ -809,6 +817,7 @@ body {
 
 .workflow-diagram-node {
   display: flex;
+  flex: 1;
   align-items: flex-start;
   gap: 0.625rem;
   padding: 0.625rem 0.75rem;
@@ -854,12 +863,17 @@ body {
   display: flex;
   height: 2rem;
   width: 2rem;
-  shrink: 0;
+  flex-shrink: 0;
   align-items: center;
   justify-content: center;
   border-radius: 0.5rem;
-  background: color-mix(in srgb, var(--primary) 12%, white);
+  background: color-mix(in srgb, var(--primary) 12%, var(--surface));
   color: var(--primary);
+  transition: background-color 0.5s ease;
+}
+
+.workflow-diagram-node-active .workflow-diagram-icon-wrap {
+  background: color-mix(in srgb, var(--primary) 20%, var(--surface));
 }
 
 .workflow-diagram-label {

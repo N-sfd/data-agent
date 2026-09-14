@@ -146,7 +146,7 @@ export default function GlobalHeader({ onOpenSearch }: GlobalHeaderProps) {
 
           <button
             type="button"
-            className="nav-menu-button"
+            className="nav-icon-button"
             aria-label="Open menu"
             onClick={() => setMobileOpen(true)}
           >
