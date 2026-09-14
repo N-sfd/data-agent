@@ -398,7 +398,7 @@ export default function RepositoryPage() {
       </div>
 
       {view === "table" && total > 0 && (
-        <div className="mt-8 flex items-center justify-between text-sm text-text-secondary">
+        <div className="mt-8 flex flex-wrap items-center justify-between gap-3 text-sm text-text-secondary">
           <p>
             Showing {from}–{to} of {total.toLocaleString()}
           </p>

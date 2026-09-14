@@ -154,7 +154,7 @@ export default function DocumentResultsTable({
   return (
     <div>
       {fullRepository && selectedCount > 0 && (
-        <div className="flex items-center justify-between gap-4 border-b border-border bg-surface-soft/60 px-6 py-3">
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border bg-surface-soft/60 px-4 py-3 sm:px-6">
           <p className="text-sm font-medium text-foreground">
             {selectedCount} selected
           </p>
@@ -162,7 +162,7 @@ export default function DocumentResultsTable({
             <button
               type="button"
               onClick={() => setSelectedIds(new Set())}
-              className="text-sm text-text-secondary transition hover:text-foreground"
+              className="rounded-lg px-2 py-1.5 text-sm text-text-secondary transition hover:text-foreground"
             >
               Clear
             </button>
@@ -181,13 +181,13 @@ export default function DocumentResultsTable({
       )}
 
       {deleteError && (
-        <div className="flex items-start justify-between gap-3 border-b border-danger/20 bg-danger/5 px-6 py-3 text-sm text-danger">
-          <p>{deleteError}</p>
+        <div className="flex items-start justify-between gap-3 border-b border-danger/20 bg-danger/5 px-4 py-3 text-sm text-danger sm:px-6">
+          <p className="min-w-0 break-words">{deleteError}</p>
           <button
             type="button"
             onClick={() => setDeleteError("")}
             aria-label="Dismiss"
-            className="shrink-0 rounded p-0.5 hover:bg-danger/10"
+            className="shrink-0 rounded p-1 hover:bg-danger/10"
           >
             <X className="h-3.5 w-3.5" />
           </button>
@@ -199,7 +199,7 @@ export default function DocumentResultsTable({
           <thead>
             <tr className="border-b border-border">
               {fullRepository && (
-                <th className="w-10 px-4 py-4">
+                <th className="w-12 px-3 py-4 sm:px-4">
                   <input
                     type="checkbox"
                     checked={allVisibleSelected}
@@ -211,15 +211,15 @@ export default function DocumentResultsTable({
                     }}
                     onChange={toggleAllVisible}
                     aria-label="Select all documents on this page"
-                    className="h-4 w-4 rounded border-border accent-primary"
+                    className="h-[18px] w-[18px] rounded border-border accent-primary"
                   />
                 </th>
               )}
-              <th className="px-8 py-4 text-left text-xs font-medium uppercase tracking-wider text-text-secondary">
+              <th className="px-4 py-4 text-left text-xs font-medium uppercase tracking-wider text-text-secondary sm:px-8">
                 Document
               </th>
               {fullRepository && (
-                <th className="px-4 py-4 text-left text-xs font-medium uppercase tracking-wider text-text-secondary">
+                <th className="hidden px-4 py-4 text-left text-xs font-medium uppercase tracking-wider text-text-secondary lg:table-cell">
                   Party
                 </th>
               )}
@@ -228,45 +228,45 @@ export default function DocumentResultsTable({
               </th>
               {fullRepository && (
                 <>
-                  <th className="px-4 py-4 text-left text-xs font-medium uppercase tracking-wider text-text-secondary">
+                  <th className="hidden px-4 py-4 text-left text-xs font-medium uppercase tracking-wider text-text-secondary lg:table-cell">
                     Effective
                   </th>
-                  <th className="px-4 py-4 text-left text-xs font-medium uppercase tracking-wider text-text-secondary">
+                  <th className="hidden px-4 py-4 text-left text-xs font-medium uppercase tracking-wider text-text-secondary lg:table-cell">
                     Expires
                   </th>
-                  <th className="px-4 py-4 text-left text-xs font-medium uppercase tracking-wider text-text-secondary">
+                  <th className="hidden px-4 py-4 text-left text-xs font-medium uppercase tracking-wider text-text-secondary lg:table-cell">
                     Value
                   </th>
                 </>
               )}
-              <th className="px-4 py-4 text-left text-xs font-medium uppercase tracking-wider text-text-secondary">
+              <th className="hidden px-4 py-4 text-left text-xs font-medium uppercase tracking-wider text-text-secondary sm:table-cell">
                 Confidence
               </th>
               {(fullRepository || dashboardMode) && (
-                <th className="px-4 py-4 text-left text-xs font-medium uppercase tracking-wider text-text-secondary">
+                <th className="hidden px-4 py-4 text-left text-xs font-medium uppercase tracking-wider text-text-secondary md:table-cell">
                   {fullRepository ? "Review" : "Status"}
                 </th>
               )}
               {fullRepository && (
-                <th className="px-4 py-4 text-left text-xs font-medium uppercase tracking-wider text-text-secondary">
+                <th className="hidden px-4 py-4 text-left text-xs font-medium uppercase tracking-wider text-text-secondary lg:table-cell">
                   Relationship
                 </th>
               )}
               {(fullRepository || dashboardMode) && (
-                <th className="px-4 py-4 text-left text-xs font-medium uppercase tracking-wider text-text-secondary">
+                <th className="hidden px-4 py-4 text-left text-xs font-medium uppercase tracking-wider text-text-secondary md:table-cell">
                   Source
                 </th>
               )}
               {!dashboardMode && showExtendedColumns && !fullRepository && (
-                <th className="px-4 py-4 text-left text-xs font-medium uppercase tracking-wider text-text-secondary">
+                <th className="hidden px-4 py-4 text-left text-xs font-medium uppercase tracking-wider text-text-secondary sm:table-cell">
                   Status
                 </th>
               )}
-              <th className="px-8 py-4 text-left text-xs font-medium uppercase tracking-wider text-text-secondary">
+              <th className="hidden px-4 py-4 text-left text-xs font-medium uppercase tracking-wider text-text-secondary sm:table-cell sm:px-8">
                 Updated
               </th>
               {fullRepository && (
-                <th className="px-4 py-4 text-left text-xs font-medium uppercase tracking-wider text-text-secondary">
+                <th className="px-3 py-4 text-left text-xs font-medium uppercase tracking-wider text-text-secondary sm:px-4">
                   <span className="sr-only">Actions</span>
                 </th>
               )}
@@ -304,7 +304,7 @@ export default function DocumentResultsTable({
                 >
                   {fullRepository && (
                     <td
-                      className="px-4 py-5"
+                      className="px-3 py-5 sm:px-4"
                       onClick={(event) => event.stopPropagation()}
                     >
                       <input
@@ -312,11 +312,11 @@ export default function DocumentResultsTable({
                         checked={isSelected}
                         onChange={() => toggleOne(document.document_id)}
                         aria-label={`Select ${document.original_filename}`}
-                        className="h-4 w-4 rounded border-border accent-primary"
+                        className="h-[18px] w-[18px] rounded border-border accent-primary"
                       />
                     </td>
                   )}
-                  <td className="px-8 py-[18px]">
+                  <td className="px-4 py-[18px] sm:px-8">
                     <div className="flex items-start gap-3">
                       <span
                         className={[
@@ -334,14 +334,14 @@ export default function DocumentResultsTable({
                         <p className="text-[15px] font-medium text-foreground">
                           {document.document_type ?? contractTitle(document)}
                         </p>
-                        <p className="mt-0.5 text-sm text-text-secondary">
+                        <p className="mt-0.5 truncate text-sm text-text-secondary">
                           {document.original_filename}
                         </p>
                       </div>
                     </div>
                   </td>
                   {fullRepository && (
-                    <td className="px-5 py-[18px] text-sm text-text-secondary">
+                    <td className="hidden px-5 py-[18px] text-sm text-text-secondary lg:table-cell">
                       {document.counterparty ?? "—"}
                     </td>
                   )}
@@ -350,18 +350,18 @@ export default function DocumentResultsTable({
                   </td>
                   {fullRepository && (
                     <>
-                      <td className="px-5 py-[18px] text-sm text-text-secondary">
+                      <td className="hidden px-5 py-[18px] text-sm text-text-secondary lg:table-cell">
                         {document.effective_date ?? "—"}
                       </td>
-                      <td className="px-5 py-[18px] text-sm text-text-secondary">
+                      <td className="hidden px-5 py-[18px] text-sm text-text-secondary lg:table-cell">
                         {document.expiration_date ?? "—"}
                       </td>
-                      <td className="px-5 py-[18px] text-sm text-text-secondary">
+                      <td className="hidden px-5 py-[18px] text-sm text-text-secondary lg:table-cell">
                         {document.contract_value ?? "—"}
                       </td>
                     </>
                   )}
-                  <td className="px-4 py-5">
+                  <td className="hidden px-4 py-5 sm:table-cell">
                     {document.confidence !== null ? (
                       <ConfidenceIndicator confidence={document.confidence} />
                     ) : (
@@ -369,7 +369,7 @@ export default function DocumentResultsTable({
                     )}
                   </td>
                   {fullRepository && (
-                    <td className="px-5 py-[18px]">
+                    <td className="hidden px-5 py-[18px] md:table-cell">
                       <StatusBadge
                         kind="repository"
                         status={document.repository_status ?? "not_approved"}
@@ -377,17 +377,17 @@ export default function DocumentResultsTable({
                     </td>
                   )}
                   {dashboardMode && (
-                    <td className="px-5 py-[18px]">
+                    <td className="hidden px-5 py-[18px] md:table-cell">
                       <StatusBadge kind="document" status={document.status} />
                     </td>
                   )}
                   {fullRepository && (
-                    <td className="px-5 py-[18px] text-sm text-text-secondary">
+                    <td className="hidden px-5 py-[18px] text-sm text-text-secondary lg:table-cell">
                       {document.relationship ?? "—"}
                     </td>
                   )}
                   {(fullRepository || dashboardMode) && (
-                    <td className="px-5 py-[18px] text-sm">
+                    <td className="hidden px-5 py-[18px] text-sm md:table-cell">
                       {document.source_status === "missing" ? (
                         <span
                           className="font-medium text-warning"
@@ -403,16 +403,16 @@ export default function DocumentResultsTable({
                     </td>
                   )}
                   {!dashboardMode && showExtendedColumns && !fullRepository && (
-                    <td className="px-5 py-[18px]">
+                    <td className="hidden px-5 py-[18px] sm:table-cell">
                       <StatusBadge kind="document" status={document.status} />
                     </td>
                   )}
-                  <td className="px-8 py-5 text-sm text-text-secondary">
+                  <td className="hidden px-4 py-5 text-sm text-text-secondary sm:table-cell sm:px-8">
                     {formatRelativeTime(document.last_updated)}
                   </td>
                   {fullRepository && (
                     <td
-                      className="px-4 py-5"
+                      className="px-3 py-5 sm:px-4"
                       onClick={(event) => event.stopPropagation()}
                     >
                       <button
@@ -423,7 +423,7 @@ export default function DocumentResultsTable({
                         disabled={isRowDeleting}
                         title="Delete document"
                         aria-label={`Delete ${document.original_filename}`}
-                        className="rounded-lg p-2 text-text-secondary transition duration-200 hover:bg-danger/10 hover:text-danger disabled:opacity-40"
+                        className="rounded-lg p-2.5 text-text-secondary transition duration-200 hover:bg-danger/10 hover:text-danger disabled:opacity-40"
                       >
                         {isRowDeleting ? (
                           <Loader2 className="h-4 w-4 animate-spin" />

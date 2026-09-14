@@ -46,7 +46,7 @@ export default function DeleteConfirmModal({
         aria-labelledby="delete-confirm-title"
         aria-describedby="delete-confirm-description"
         onClick={(event) => event.stopPropagation()}
-        className="editorial-card w-full max-w-md p-6"
+        className="editorial-card w-full max-w-md p-5 sm:p-6"
       >
         <div className="flex items-start gap-3">
           <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-danger/10">
@@ -74,7 +74,7 @@ export default function DeleteConfirmModal({
             type="button"
             onClick={onCancel}
             disabled={busy}
-            className="btn-secondary disabled:cursor-not-allowed disabled:opacity-60"
+            className="btn-secondary w-full disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto"
           >
             Cancel
           </button>
@@ -82,7 +82,7 @@ export default function DeleteConfirmModal({
             type="button"
             onClick={onConfirm}
             disabled={busy}
-            className="inline-flex items-center justify-center gap-1.5 rounded-[var(--radius-button)] bg-danger px-[1.375rem] py-[0.6875rem] text-sm font-medium text-white transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
+            className="inline-flex w-full items-center justify-center gap-1.5 rounded-[var(--radius-button)] bg-danger px-[1.375rem] py-[0.6875rem] text-sm font-medium text-white transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto"
           >
             {busy && <Loader2 className="h-4 w-4 animate-spin" />}
             {confirmLabel}
