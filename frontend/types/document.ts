@@ -831,3 +831,13 @@ export interface ExtractionModel {
   created_at: string;
   fields: ExtractionField[];
 }
+
+export interface ActorInfo {
+  id: string;
+  actor_type: string;
+  display_name: string;
+  email: string | null;
+  role: string;
+  active: boolean;
+  permissions: string[];
+}

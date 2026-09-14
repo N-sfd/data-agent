@@ -1,3 +1,4 @@
+import AdminSessionKey from "@/components/admin-session-key";
 import ContentSection from "@/components/layout/ContentSection";
 import PageHero from "@/components/layout/PageHero";
 
@@ -11,11 +12,18 @@ export default function ApiKeysPage() {
       />
 
       <ContentSection>
-        <div className="editorial-card p-10 text-center">
-          <p className="text-base font-medium text-foreground">Coming soon</p>
-          <p className="mt-2 text-sm text-text-secondary">
-            API key management will be available in a future release.
-          </p>
+        <div className="space-y-6">
+          <AdminSessionKey />
+
+          <div className="editorial-card p-10 text-center">
+            <p className="text-base font-medium text-foreground">
+              Integration key management coming soon
+            </p>
+            <p className="mt-2 text-sm text-text-secondary">
+              Issuing and revoking keys for external systems and
+              automation will be available in a future release.
+            </p>
+          </div>
         </div>
       </ContentSection>
     </>
