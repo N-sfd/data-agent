@@ -46,6 +46,12 @@ export async function listDocuments(
   return apiFetch(`/api/documents?limit=${limit}`);
 }
 
+export async function deleteDocument(documentId: string): Promise<void> {
+  return apiFetch(`/api/documents/${documentId}`, {
+    method: "DELETE",
+  });
+}
+
 export async function getDashboardStats(): Promise<DashboardStats> {
   return apiFetch("/api/dashboard/stats");
 }

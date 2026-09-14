@@ -34,9 +34,11 @@ from app.services.dashboard_stats import (
     compute_document_confidence,
     compute_document_status,
 )
+from app.core.auth import ActorContext, require_permission
 from app.core.observability import bind_job_context, log_event
 from app.services.document_storage import (
     DocumentStorageError,
+    delete_object,
     is_file_available,
     source_status_for,
     upload_object,
@@ -966,6 +968,62 @@ async def list_documents(
         _build_document_summary(database, document)
         for document in documents
     ]
+
+
+@router.delete(
+    "/{document_id}",
+    status_code=204,
+)
+async def delete_document(
+    document_id: str,
+    database: Session = Depends(get_database),
+    actor: ActorContext = Depends(
+        require_permission("documents.delete")
+    ),
+) -> Response:
+    document = database.get(Document, document_id)
+
+    if document is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Document not found.",
+        )
+
+    settings = get_settings()
+
+    # Child documents (portfolio-extracted files) point back at this one
+    # via parent_document_id, which has no ON DELETE CASCADE — detach
+    # them first so they survive as standalone documents instead of
+    # blocking the delete with a foreign-key violation.
+    for child in database.scalars(
+        select(Document).where(
+            Document.parent_document_id == document_id
+        )
+    ):
+        child.parent_document_id = None
+
+    local_path = settings.upload_path / document.stored_filename
+    if local_path.exists():
+        local_path.unlink()
+
+    try:
+        delete_object(settings, document.stored_filename)
+    except Exception:
+        # Remote storage cleanup is best-effort — the document row and
+        # its local file are the source of truth for whether it's gone.
+        pass
+
+    log_event(
+        "document_deleted",
+        document_id=document_id,
+        original_filename=document.original_filename,
+        actor_id=actor.id,
+    )
+
+    database.delete(document)
+    database.commit()
+
+    return Response(status_code=204)
 
 
 @router.get(

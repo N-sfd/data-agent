@@ -24,6 +24,7 @@ Role = Literal[
 Permission = Literal[
     "documents.view",
     "documents.upload",
+    "documents.delete",
     "extraction.run",
     "fields.edit_draft",
     "review.accept",
@@ -43,6 +44,7 @@ ROLE_PERMISSIONS: Final[dict[Role, frozenset[Permission]]] = {
         {
             "documents.view",
             "documents.upload",
+            "documents.delete",
             "extraction.run",
             "fields.edit_draft",
             "review.accept",

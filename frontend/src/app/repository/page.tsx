@@ -390,6 +390,7 @@ export default function RepositoryPage() {
             documents={documents}
             emptyMessage="No documents match your filters."
             repositoryMode
+            onDeleted={() => setReloadKey((key) => key + 1)}
           />
         ) : (
           <ContractHierarchy roots={hierarchyRoots} />

@@ -1,6 +1,8 @@
 "use client";
 
+import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { Trash2 } from "lucide-react";
 
 import ConfidenceIndicator from "@/components/confidence-indicator";
 import DocumentTypeBadge from "@/components/document-type-badge";
@@ -8,6 +10,7 @@ import EmptyState from "@/components/illustrations/empty-state";
 import StatusBadge from "@/components/status-badge";
 import { getDocumentTypeAppearance } from "@/lib/document-type-icon";
 import { formatRelativeTime } from "@/lib/format";
+import { deleteDocument } from "@/lib/documents";
 import type { DocumentSummary } from "@/types/document";
 
 function contractTitle(document: DocumentSummary): string {
@@ -20,6 +23,7 @@ interface DocumentResultsTableProps {
   showExtendedColumns?: boolean;
   repositoryMode?: boolean;
   dashboardMode?: boolean;
+  onDeleted?: (documentId: string) => void;
 }
 
 export default function DocumentResultsTable({
@@ -28,8 +32,36 @@ export default function DocumentResultsTable({
   showExtendedColumns = false,
   repositoryMode = false,
   dashboardMode = false,
+  onDeleted,
 }: DocumentResultsTableProps) {
   const router = useRouter();
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+
+  async function handleDelete(
+    event: React.MouseEvent,
+    document: DocumentSummary,
+  ) {
+    event.stopPropagation();
+
+    const confirmed = window.confirm(
+      `Delete "${document.original_filename}"? This permanently removes the document, its extracted data, and cannot be undone.`,
+    );
+    if (!confirmed) return;
+
+    setDeletingId(document.document_id);
+    try {
+      await deleteDocument(document.document_id);
+      onDeleted?.(document.document_id);
+    } catch (err) {
+      window.alert(
+        err instanceof Error
+          ? err.message
+          : "Unable to delete this document.",
+      );
+    } finally {
+      setDeletingId(null);
+    }
+  }
 
   if (documents.length === 0) {
     return (
@@ -97,6 +129,11 @@ export default function DocumentResultsTable({
             <th className="px-8 py-4 text-left text-xs font-medium uppercase tracking-wider text-text-secondary">
               Updated
             </th>
+            {fullRepository && (
+              <th className="px-4 py-4 text-left text-xs font-medium uppercase tracking-wider text-text-secondary">
+                <span className="sr-only">Actions</span>
+              </th>
+            )}
           </tr>
         </thead>
         <tbody>
@@ -211,6 +248,20 @@ export default function DocumentResultsTable({
               <td className="px-8 py-5 text-sm text-text-secondary">
                 {formatRelativeTime(document.last_updated)}
               </td>
+              {fullRepository && (
+                <td className="px-4 py-5">
+                  <button
+                    type="button"
+                    onClick={(event) => handleDelete(event, document)}
+                    disabled={deletingId === document.document_id}
+                    title="Delete document"
+                    aria-label={`Delete ${document.original_filename}`}
+                    className="rounded-lg p-2 text-text-secondary transition duration-200 hover:bg-danger/10 hover:text-danger disabled:opacity-40"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </button>
+                </td>
+              )}
             </tr>
             );
           })}
