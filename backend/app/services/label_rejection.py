@@ -131,6 +131,25 @@ def looks_like_identifier_sentence(value: str | None) -> bool:
     return False
 
 
+# Common function words. A real field value (a name, an ID, a phone
+# number, a short address) is dense with proper nouns/digits and sparse
+# with these; a stray sentence pulled in from surrounding prose ("...as
+# only these two individuals will receive the original file") is the
+# opposite — mostly function words holding a clause together.
+_FUNCTION_WORDS = frozenset(
+    {
+        "a", "an", "the", "is", "are", "was", "were", "be", "been", "being",
+        "up", "to", "in", "on", "at", "by", "of", "for", "and", "or", "as",
+        "only", "these", "those", "this", "that", "will", "would", "shall",
+        "should", "can", "could", "may", "might", "must", "with", "from",
+        "into", "onto", "so", "than", "then", "if", "not", "no", "receive",
+        "which", "who", "whom", "their", "its", "his", "her", "our", "your",
+    }
+)
+_NARRATIVE_WORD_COUNT_FLOOR = 8
+_NARRATIVE_FUNCTION_WORD_RATIO = 0.35
+
+
 def looks_like_narrative_fragment(value: str | None) -> bool:
     """Reject mid-sentence OCR slices proposed as dates/names/IDs."""
 
@@ -144,6 +163,13 @@ def looks_like_narrative_fragment(value: str | None) -> bool:
         return True
     if " of any " in lowered or " current as of " in lowered:
         return True
+
+    words = re.findall(r"[a-z']+", lowered)
+    if len(words) >= _NARRATIVE_WORD_COUNT_FLOOR:
+        function_count = sum(1 for word in words if word in _FUNCTION_WORDS)
+        if function_count / len(words) >= _NARRATIVE_FUNCTION_WORD_RATIO:
+            return True
+
     return False
 
 
@@ -215,11 +241,13 @@ def reject_as_field_value(
         if looks_like_narrative_fragment(text):
             return "name_looks_like_narrative"
 
-    if looks_like_narrative_fragment(text) and effective_type not in {
-        "text",
-        "address",
-        "clause",
-    }:
+    # "clause" is the one type where long prose IS the correct value
+    # (a full FAR/DFARS clause). "text"/"address" used to be exempted
+    # too, but that's too broad a loophole — most generic discovered
+    # fields default to "text", which silently disabled narrative
+    # rejection for the majority of real fields. The word-ratio check
+    # above is tuned to leave genuine short descriptive values alone.
+    if looks_like_narrative_fragment(text) and effective_type not in {"clause"}:
         return "narrative_fragment"
 
     return None
