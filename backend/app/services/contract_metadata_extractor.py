@@ -1,5 +1,3 @@
-import re
-
 from dateutil import parser as dateutil_parser
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
@@ -29,6 +27,7 @@ from app.services.generic_label_extractor import (
     normalize_label,
 )
 from app.services.label_rejection import reject_as_field_value
+from app.services.section_detection import find_nearby_section
 from app.services.source_validator import validate_source_value
 
 
@@ -72,42 +71,7 @@ def _normalize_code(field_key: str, raw_value: str) -> str:
     return raw_value
 
 
-# Matches numbered heading lines like "6.2 Payment Terms",
-# "Section 6.2 - Payment", or "6. Termination".
-SECTION_HEADING_PATTERN = re.compile(
-    r"^\s*(?:Section\s+)?(\d{1,2}(?:\.\d{1,2})?)\s*"
-    r"[-–—.]?\s*"
-    r"([A-Z][A-Za-z0-9 /&'\-]{2,60})\s*$",
-    re.MULTILINE,
-)
-
-
-def _find_nearby_section(
-    text: str, value: str
-) -> str | None:
-    """
-    Best-effort: find the nearest numbered heading preceding the
-    matched value on the same page. Returns None (never fabricated)
-    when no heading is confidently found.
-    """
-
-    offset = text.find(value)
-
-    if offset == -1:
-        return None
-
-    preceding = text[:offset]
-
-    matches = list(SECTION_HEADING_PATTERN.finditer(preceding))
-
-    if not matches:
-        return None
-
-    match = matches[-1]
-    number = match.group(1)
-    title = match.group(2).strip()
-
-    return f"Section {number} — {title}"
+_find_nearby_section = find_nearby_section
 
 
 def _normalize_field_value(
@@ -171,12 +135,14 @@ def _try_deterministic(
             requested_label=field.label,
             known_labels=known_labels,
         )
-        is_scanned = bool(
-            getattr(page, "is_scanned", False)
-            or getattr(page, "requires_ocr", False)
-            or getattr(page, "ocr_layout_json", None)
-        )
-        if not raw_value and not is_scanned:
+        # The regex fallback always runs too, even on pages flagged as
+        # scanned — `is_scanned`/`requires_ocr` can be true for tiny/sparse
+        # native-text pages (low text-coverage heuristics), and skipping
+        # the fallback there means deterministic extraction silently loses
+        # fields it used to resolve. `extract_labeled_value_from_layout`
+        # already refuses to run on placeholder (all-zero) geometry, so it
+        # costs nothing extra to also try the text-based path.
+        if not raw_value:
             raw_value = extract_labeled_value(
                 text=text,
                 requested_label=field.label,
