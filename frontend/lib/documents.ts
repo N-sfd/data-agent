@@ -114,6 +114,7 @@ export async function resolveDuplicate(
   action: DuplicateResolution,
   originalFilename?: string,
   onRetry?: (attempt: number, total: number) => void,
+  existingDocumentId?: string,
 ): Promise<UploadedDocument> {
   return apiFetch(
     `/api/documents/${documentId}/resolve-duplicate`,
@@ -125,6 +126,7 @@ export async function resolveDuplicate(
       body: JSON.stringify({
         action,
         original_filename: originalFilename ?? null,
+        existing_document_id: existingDocumentId ?? null,
       }),
     },
     onRetry,

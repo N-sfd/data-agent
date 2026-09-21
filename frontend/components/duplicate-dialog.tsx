@@ -35,6 +35,8 @@ export default function DuplicateDialog({
     };
   }, [onCancel]);
 
+  const fileMissing = !existingDocument.file_available;
+
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4"
@@ -70,15 +72,17 @@ export default function DuplicateDialog({
             </p>
 
             <p className="mt-2 text-sm text-slate-500">
-              Similarity: <span className="font-medium text-slate-800">100%</span>
+              Similarity:{" "}
+              <span className="font-medium text-slate-800">100%</span>
             </p>
 
-            {!existingDocument.file_available && (
+            {fileMissing ? (
               <p className="mt-2 text-sm text-amber-700">
-                The original file for this document is no longer available
-                on the server, so it can&apos;t be reused.
+                The original PDF is no longer on the server. You can still open
+                any saved extraction results, or upload this file again as a
+                fresh copy.
               </p>
-            )}
+            ) : null}
           </div>
         </div>
 
@@ -87,25 +91,19 @@ export default function DuplicateDialog({
             type="button"
             onClick={onUploadAnyway}
             disabled={busy}
-            className={
-              existingDocument.file_available
-                ? "rounded-xl border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
-                : "rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
-            }
+            className="rounded-xl border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
           >
-            Upload Anyway
+            {fileMissing ? "Upload fresh copy" : "Upload Anyway"}
           </button>
 
-          {existingDocument.file_available && (
-            <button
-              type="button"
-              onClick={onUseExisting}
-              disabled={busy}
-              className="rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              Use Existing
-            </button>
-          )}
+          <button
+            type="button"
+            onClick={onUseExisting}
+            disabled={busy}
+            className="rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {fileMissing ? "Open existing results" : "Use Existing"}
+          </button>
         </div>
       </div>
     </div>

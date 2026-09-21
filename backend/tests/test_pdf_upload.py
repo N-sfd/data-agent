@@ -184,3 +184,60 @@ def test_resolve_duplicate_upload_anyway() -> None:
     assert body["document_id"] == staged_document_id
     assert body["document_id"] != original["document_id"]
     assert body["checksum_sha256"] == original["checksum_sha256"]
+
+
+def test_allow_duplicate_skips_duplicate_gate() -> None:
+    content = create_test_pdf()
+
+    first = client.post(
+        "/api/documents/upload",
+        files={"file": ("a.pdf", content, "application/pdf")},
+    )
+    assert first.status_code == 201
+    original_id = first.json()["document_id"]
+
+    second = client.post(
+        "/api/documents/upload?allow_duplicate=true",
+        files={"file": ("a-copy.pdf", content, "application/pdf")},
+    )
+    assert second.status_code == 201, second.text
+    body = second.json()
+    assert body["duplicate"] is False
+    assert body["status"] == "ready"
+    assert body["document_id"] != original_id
+
+
+def test_use_existing_without_staged_file() -> None:
+    content = create_test_pdf()
+
+    first = client.post(
+        "/api/documents/upload",
+        files={"file": ("keep.pdf", content, "application/pdf")},
+    )
+    original_id = first.json()["document_id"]
+
+    # Fake a staged id that has no file on disk.
+    from uuid import uuid4
+
+    fake_staged = str(uuid4())
+    resolved = client.post(
+        f"/api/documents/{fake_staged}/resolve-duplicate",
+        json={
+            "action": "use_existing",
+            "existing_document_id": original_id,
+        },
+    )
+    assert resolved.status_code == 200, resolved.text
+    assert resolved.json()["document_id"] == original_id
+
+
+def test_upload_anyway_without_staged_returns_expired() -> None:
+    from uuid import uuid4
+
+    fake_staged = str(uuid4())
+    resolved = client.post(
+        f"/api/documents/{fake_staged}/resolve-duplicate",
+        json={"action": "upload_anyway"},
+    )
+    assert resolved.status_code == 409
+    assert "STAGED_UPLOAD_EXPIRED" in resolved.json()["detail"]

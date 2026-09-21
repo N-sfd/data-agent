@@ -235,16 +235,54 @@ export default function DocumentUploader({
     setError("");
 
     try {
-      const result = await resolveDuplicate(
-        pendingDuplicate.documentId,
-        action,
-        pendingDuplicate.originalFilename,
-        () => setResolving(true),
+      const existingId = String(
+        pendingDuplicate.existingDocument.document_id,
       );
 
-      setPendingDuplicate(null);
-      setStage("upload_complete");
-      onUploadComplete(result);
+      try {
+        const result = await resolveDuplicate(
+          pendingDuplicate.documentId,
+          action,
+          pendingDuplicate.originalFilename,
+          () => setResolving(true),
+          existingId,
+        );
+
+        setPendingDuplicate(null);
+        setStage("upload_complete");
+        onUploadComplete(result);
+        return;
+      } catch (resolveError) {
+        const message =
+          resolveError instanceof Error
+            ? resolveError.message
+            : "Unable to resolve the duplicate upload.";
+
+        // Staged temp file expired (common on multi-instance hosts).
+        // Re-upload the selected file with allow_duplicate=true.
+        if (
+          action === "upload_anyway" &&
+          selectedFile &&
+          (message.includes("STAGED_UPLOAD_EXPIRED") ||
+            message.includes("No pending upload found"))
+        ) {
+          const result = await uploadFileWithProgress<UploadedDocument>(
+            "/api/documents/upload?allow_duplicate=true",
+            selectedFile,
+            setUploadFraction,
+          );
+          setPendingDuplicate(null);
+          setStage("upload_complete");
+          onUploadComplete(result);
+          return;
+        }
+
+        // use_existing with missing stage still works when existing id is sent;
+        // if that fails, surface the error.
+        throw resolveError instanceof Error
+          ? resolveError
+          : new Error(message);
+      }
     } catch (resolveError) {
       setError(
         resolveError instanceof Error

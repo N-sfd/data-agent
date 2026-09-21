@@ -47,6 +47,7 @@ class UploadedDocumentResponse(BaseModel):
 class ResolveDuplicateRequest(BaseModel):
     action: Literal["use_existing", "upload_anyway"]
     original_filename: str | None = None
+    existing_document_id: UUID | None = None
 
 
 class SelectPortfolioFileRequest(BaseModel):

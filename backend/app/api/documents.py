@@ -4,7 +4,16 @@ from pathlib import Path
 from uuid import UUID, uuid4
 
 import fitz
-from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, Response, UploadFile
+from fastapi import (
+    APIRouter,
+    BackgroundTasks,
+    Depends,
+    File,
+    HTTPException,
+    Query,
+    Response,
+    UploadFile,
+)
 from fastapi.concurrency import run_in_threadpool
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
@@ -39,6 +48,7 @@ from app.core.observability import bind_job_context, log_event
 from app.services.document_storage import (
     DocumentStorageError,
     delete_object,
+    ensure_local_copy,
     is_file_available,
     source_status_for,
     upload_object,
@@ -108,6 +118,17 @@ def _find_staged_upload(
 ) -> tuple[Path, UploadTypeSpec] | None:
     for extension, spec in UPLOAD_TYPES.items():
         candidate = settings.upload_path / f"{document_id}{extension}"
+
+        if candidate.exists():
+            return candidate, spec
+
+        # Multi-instance / ephemeral disk: restore staged bytes from remote.
+        try:
+            ensure_local_copy(
+                settings, stored_filename=f"{document_id}{extension}"
+            )
+        except DocumentStorageError:
+            continue
 
         if candidate.exists():
             return candidate, spec
@@ -257,6 +278,13 @@ async def upload_document(
     response: Response,
     background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
+    allow_duplicate: bool = Query(
+        False,
+        description=(
+            "When true, skip duplicate detection and always create a new "
+            "document (used after Upload Anyway when the staged file expired)."
+        ),
+    ),
     database: Session = Depends(get_database),
 ) -> UploadedDocumentResponse:
     document_id = uuid4()
@@ -336,10 +364,27 @@ async def upload_document(
                 f"{display_filename} → {metadata.embedded_filename}"
             )
 
-        duplicate = _find_duplicate(database, checksum)
+        duplicate = None if allow_duplicate else _find_duplicate(database, checksum)
 
         if duplicate is not None:
             log.append("Checked for duplicates — possible duplicate found")
+
+            # Persist staged bytes remotely so resolve-duplicate works across
+            # multi-instance / ephemeral disks (e.g. Render).
+            try:
+                upload_object(
+                    settings,
+                    stored_filename,
+                    content_type=spec.content_type,
+                    file_path=destination,
+                    size_bytes=size_bytes,
+                )
+                log.append("Staged duplicate file to remote storage")
+            except DocumentStorageError:
+                log.append(
+                    "Could not stage duplicate to remote storage — "
+                    "resolve may require re-upload"
+                )
 
             # Keep the staged file on disk rather than silently reusing
             # the existing document. The caller decides whether to reuse
@@ -368,7 +413,10 @@ async def upload_document(
                 pipeline_log=log,
             )
 
-        log.append("Checked for duplicates — none found")
+        if allow_duplicate:
+            log.append("Duplicate check skipped (allow_duplicate=true)")
+        else:
+            log.append("Checked for duplicates — none found")
         log.append(f"Extracted {spec.kind.upper()} metadata")
 
         document, uploaded_at = _create_document_record(
@@ -602,9 +650,50 @@ async def resolve_duplicate(
     staged = _find_staged_upload(document_id)
 
     if staged is None:
+        # Staged file expired (ephemeral disk / multi-instance). Still allow
+        # opening the existing document; for upload_anyway the client must
+        # re-POST with allow_duplicate=true.
+        if payload.action == "use_existing":
+            existing_id = payload.existing_document_id
+            if existing_id is None:
+                raise HTTPException(
+                    status_code=404,
+                    detail=(
+                        "No pending upload found for this document id, "
+                        "and no existing_document_id was provided."
+                    ),
+                )
+            duplicate = database.get(Document, str(existing_id))
+            if duplicate is None:
+                raise HTTPException(
+                    status_code=404,
+                    detail="Existing document not found.",
+                )
+            return UploadedDocumentResponse(
+                document_id=duplicate.id,
+                original_filename=duplicate.original_filename,
+                status=duplicate.status,
+                content_type=duplicate.content_type,
+                size_bytes=duplicate.size_bytes,
+                checksum_sha256=duplicate.checksum_sha256,
+                page_count=duplicate.page_count,
+                encrypted=duplicate.encrypted,
+                uploaded_at=duplicate.uploaded_at,
+                message="Continuing with the existing document.",
+                pipeline_log=["Reused the existing document"],
+                approved_by=duplicate.approved_by,
+                approved_at=duplicate.approved_at,
+                source_status=source_status_for(
+                    settings, stored_filename=duplicate.stored_filename
+                ),
+            )
+
         raise HTTPException(
-            status_code=404,
-            detail="No pending upload found for this document id.",
+            status_code=409,
+            detail=(
+                "STAGED_UPLOAD_EXPIRED: The temporary upload is no longer "
+                "on the server. Re-upload with allow_duplicate=true."
+            ),
         )
 
     destination, spec = staged
@@ -619,6 +708,9 @@ async def resolve_duplicate(
     checksum = hasher.hexdigest()
     duplicate = _find_duplicate(database, checksum)
 
+    if duplicate is None and payload.existing_document_id is not None:
+        duplicate = database.get(Document, str(payload.existing_document_id))
+
     if duplicate is None:
         raise HTTPException(
             status_code=409,
@@ -630,6 +722,10 @@ async def resolve_duplicate(
 
     if payload.action == "use_existing":
         destination.unlink(missing_ok=True)
+        try:
+            delete_object(settings, destination.name)
+        except Exception:
+            pass
 
         return UploadedDocumentResponse(
             document_id=duplicate.id,
@@ -645,6 +741,9 @@ async def resolve_duplicate(
             pipeline_log=["Reused the existing document"],
             approved_by=duplicate.approved_by,
             approved_at=duplicate.approved_at,
+            source_status=source_status_for(
+                settings, stored_filename=duplicate.stored_filename
+            ),
         )
 
     log = ["Re-validated the staged file"]
