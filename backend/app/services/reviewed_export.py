@@ -19,6 +19,7 @@ from typing import Any
 
 from app.models.document import Document
 from app.models.document_metadata_field import DocumentMetadataField
+from app.services.section_detection import find_nearby_section
 
 AUTHORITATIVE_REVIEW_STATUSES = frozenset({"accepted", "edited"})
 NON_AUTHORITATIVE_REVIEW_STATUSES = frozenset(
@@ -33,6 +34,8 @@ CSV_HEADERS = [
     "confidence",
     "validation_status",
     "source_page",
+    "section",
+    "field_type",
 ]
 
 
@@ -77,7 +80,38 @@ def is_authoritative(field: DocumentMetadataField) -> bool:
     return (field.review_status or "pending") in AUTHORITATIVE_REVIEW_STATUSES
 
 
-def field_to_export_record(field: DocumentMetadataField) -> dict[str, Any]:
+def section_for(
+    field: DocumentMetadataField,
+    *,
+    page_text_by_number: dict[int, str] | None = None,
+) -> str:
+    """Nearby heading for this field — from evidence if already computed
+    at extraction time, otherwise best-effort from the page text."""
+
+    evidence = _evidence(field)
+    section = evidence.get("section")
+    if section:
+        return str(section)
+
+    if not page_text_by_number:
+        return ""
+
+    page_text = page_text_by_number.get(source_page_for(field), "")
+    if not page_text:
+        return ""
+
+    found = find_nearby_section(
+        page_text,
+        extracted_value_for(field) or str(field.value or ""),
+    )
+    return found or ""
+
+
+def field_to_export_record(
+    field: DocumentMetadataField,
+    *,
+    page_text_by_number: dict[int, str] | None = None,
+) -> dict[str, Any]:
     """Rich export row matching the reviewed-value contract."""
 
     status = field.review_status or "pending"
@@ -85,6 +119,7 @@ def field_to_export_record(field: DocumentMetadataField) -> dict[str, Any]:
         "field": field.label,
         "field_key": field.field_key,
         "field_group": field.field_group,
+        "section": section_for(field, page_text_by_number=page_text_by_number),
         "extracted_value": extracted_value_for(field),
         "value": field.value,
         "review_status": status,
@@ -132,6 +167,7 @@ def build_export_csv(
     fields: list[DocumentMetadataField],
     *,
     authoritative_only: bool = False,
+    page_text_by_number: dict[int, str] | None = None,
 ) -> str:
     """Business CSV: effective reviewed ``value`` is the primary column."""
 
@@ -144,10 +180,14 @@ def build_export_csv(
     writer = csv.DictWriter(buffer, fieldnames=CSV_HEADERS, extrasaction="ignore")
     writer.writeheader()
     for field in selected:
-        record = field_to_export_record(field)
+        record = field_to_export_record(
+            field, page_text_by_number=page_text_by_number
+        )
         writer.writerow(
             {
                 "field": record["field"],
+                "section": record["section"],
+                "field_type": record["field_group"],
                 "value": record["value"],
                 "extracted_value": record["extracted_value"],
                 "review_status": record["review_status"],
@@ -205,6 +245,7 @@ def build_export_xlsx(
     fields: list[DocumentMetadataField],
     tables: list[Any] | None = None,
     authoritative_only: bool = False,
+    page_text_by_number: dict[int, str] | None = None,
 ) -> bytes:
     """Complete workbook: Document, Fields (wide), table sheets, Source Evidence."""
 
@@ -259,13 +300,16 @@ def build_export_xlsx(
     )
     evidence_sheet.append(
         [
+            "document",
             "field",
             "field_key",
+            "section",
+            "field_type",
+            "source_page",
             "raw_ocr",
             "normalized_value",
             "extracted_value",
             "value",
-            "source_page",
             "confidence",
             "validation_status",
             "review_status",
@@ -276,13 +320,16 @@ def build_export_xlsx(
         evidence = _evidence(field)
         evidence_sheet.append(
             [
+                document.original_filename,
                 field.label,
                 field.field_key,
+                section_for(field, page_text_by_number=page_text_by_number),
+                field.field_group,
+                source_page_for(field),
                 evidence.get("raw_ocr") or evidence.get("source_text") or "",
                 evidence.get("normalized_value") or field.value or "",
                 extracted_value_for(field),
                 field.value,
-                source_page_for(field),
                 field.confidence,
                 validation_status_for(field),
                 field.review_status or "pending",

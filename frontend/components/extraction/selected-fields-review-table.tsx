@@ -57,6 +57,9 @@ export default function SelectedFieldsReviewTable({
               Selected Field
             </th>
             <th className="px-3 py-2.5 text-xs font-semibold uppercase tracking-wide text-text-secondary">
+              Section
+            </th>
+            <th className="px-3 py-2.5 text-xs font-semibold uppercase tracking-wide text-text-secondary">
               Extracted Value
             </th>
             <th className="px-3 py-2.5 text-xs font-semibold uppercase tracking-wide text-text-secondary">
@@ -74,6 +77,20 @@ export default function SelectedFieldsReviewTable({
           {rows.map((row) => {
             const page =
               row.evidence?.page_number ?? row.scalar?.page ?? null;
+            const jumpToEvidence = () => {
+              onSelectRow?.(row);
+              if (onViewSource && page) {
+                onViewSource({
+                  id: row.id,
+                  pageNumber: page,
+                  highlightText: row.evidence?.source_text || String(row.value ?? ""),
+                  label: row.label,
+                  value: String(row.value ?? ""),
+                  confidence: row.confidence ?? undefined,
+                  verified: row.verified,
+                });
+              }
+            };
             const empty =
               row.value == null ||
               String(row.value).trim() === "" ||
@@ -93,31 +110,19 @@ export default function SelectedFieldsReviewTable({
                   <button
                     type="button"
                     className="text-left font-medium text-foreground hover:text-primary"
-                    onClick={() => onSelectRow?.(row)}
+                    onClick={jumpToEvidence}
                   >
                     {row.label}
                   </button>
+                </td>
+                <td className="max-w-[10rem] px-3 py-2.5 align-top text-text-secondary">
+                  {row.evidence?.section || "—"}
                 </td>
                 <td className="max-w-[20rem] px-3 py-2.5 align-top">
                   <button
                     type="button"
                     className="w-full text-left"
-                    onClick={() => {
-                      onSelectRow?.(row);
-                      if (onViewSource && page) {
-                        onViewSource({
-                          id: row.id,
-                          pageNumber: page,
-                          highlightText:
-                            row.evidence?.source_text ||
-                            String(row.value ?? ""),
-                          label: row.label,
-                          value: String(row.value ?? ""),
-                          confidence: row.confidence ?? undefined,
-                          verified: row.verified,
-                        });
-                      }
-                    }}
+                    onClick={jumpToEvidence}
                   >
                     {empty ? (
                       <span className="text-xs font-medium text-warning">

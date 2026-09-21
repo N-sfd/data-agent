@@ -111,6 +111,7 @@ def test_export_json_preserves_machine_and_reviewed_values() -> None:
         "field": "Total Amount",
         "field_key": "total_amount",
         "field_group": "Financial",
+        "section": "",
         "extracted_value": "$120,000",
         "value": "$125,000",
         "review_status": "edited",

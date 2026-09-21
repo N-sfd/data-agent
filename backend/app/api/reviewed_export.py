@@ -15,6 +15,7 @@ from app.core.observability import get_request_id
 from app.database.dependencies import get_database
 from app.models.document import Document
 from app.models.document_metadata_field import DocumentMetadataField
+from app.models.document_page import DocumentPage
 from app.models.integration_audit_log import IntegrationAuditLog
 from app.services.reviewed_export import (
     build_document_export,
@@ -52,6 +53,18 @@ def _load_fields(database: Session, document_id: str) -> list[DocumentMetadataFi
             .order_by(DocumentMetadataField.id.asc())
         )
     )
+
+
+def _load_page_text_by_number(
+    database: Session, document_id: str
+) -> dict[int, str]:
+    """Best-effort section lookup source — cheap enough to always load,
+    and missing pages simply mean no section gets attached, not an error."""
+
+    rows = database.scalars(
+        select(DocumentPage).where(DocumentPage.document_id == document_id)
+    )
+    return {row.page_number: row.final_text or "" for row in rows}
 
 
 @router.get("/{document_id}/export")
@@ -110,7 +123,12 @@ async def export_document_csv(
             detail="No metadata fields found for this document.",
         )
     if format == "long":
-        csv_body = build_export_csv(fields, authoritative_only=authoritative_only)
+        page_text_by_number = _load_page_text_by_number(database, document_id)
+        csv_body = build_export_csv(
+            fields,
+            authoritative_only=authoritative_only,
+            page_text_by_number=page_text_by_number,
+        )
     else:
         csv_body = build_fields_wide_csv(
             fields, authoritative_only=authoritative_only
@@ -154,11 +172,13 @@ async def export_document_xlsx(
             .order_by(DocumentExtractedTable.id.asc())
         )
     )
+    page_text_by_number = _load_page_text_by_number(database, document_id)
     body = build_export_xlsx(
         document=document,
         fields=fields,
         tables=tables,
         authoritative_only=authoritative_only,
+        page_text_by_number=page_text_by_number,
     )
     filename = f"{document.original_filename.rsplit('.', 1)[0]}-export.xlsx"
     return Response(
