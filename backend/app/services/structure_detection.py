@@ -18,6 +18,7 @@ from app.services.generic_entity_extractor import (
     extract_generic_entities,
 )
 from app.services.generic_kv_scanner import (
+    ScannedPair,
     is_internal_form_name,
     is_plausible_kv_label,
     scan_page_for_labeled_pairs,
@@ -25,6 +26,7 @@ from app.services.generic_kv_scanner import (
 from app.services.generic_label_extractor import (
     extract_labeled_value,
 )
+from app.services.label_rejection import looks_like_narrative_fragment
 from app.services.table_quality import assess_table_candidate
 
 DETECTION_PAGE_LIMIT = 40
@@ -528,18 +530,49 @@ def _slugify(label: str) -> str:
     return slug[:60] or "field"
 
 
-def _kv_slug_looks_like_prose(slug: str) -> bool:
-    prose_fragments = (
-        "shall_be",
-        "in_the_",
-        "for_those",
-        "requiring_",
-        "prevail_in",
-        "_those_",
-        "_task_orders_for",
-        "_for_those_",
-    )
-    return any(fragment in slug for fragment in prose_fragments)
+# inline_regex/stacked_line pull "label: value" or "LABEL\nvalue" shapes
+# out of free-form page text with no real form/table structure backing
+# them — a clause heading or a sentence fragment ("With Contiguous United
+# States CONUS", "fringe benefits contribution rates") can pass the
+# looser is_plausible_kv_label() thresholds used for the Field Explorer's
+# broader KV search. Auto-promoting one of these into a selectable
+# kv_<slug> business-field target needs a stricter bar than that: real
+# form labels are short, and clause/heading fragments are not.
+_LOW_CONFIDENCE_KV_METHODS = frozenset({"inline_regex", "stacked_line"})
+_MAX_AUTO_KV_LABEL_WORDS = 4
+_MAX_AUTO_KV_LABEL_CHARS = 32
+_KV_PROMOTION_CONFIDENCE_FLOOR = 0.72
+
+# A label truncated mid-clause ("construction such", "...fringe benefits
+# con") dangles on a connector word a real field label never ends on.
+_DANGLING_TRAILING_WORDS = frozenset(
+    {
+        "such", "as", "for", "with", "of", "the", "and", "or", "to", "in",
+        "on", "at", "by", "from", "under", "including", "than", "a", "an",
+        "that", "which", "who", "into", "per",
+    }
+)
+
+
+def _looks_like_reliable_kv_label(pair: ScannedPair) -> bool:
+    label = pair.raw_label.strip()
+
+    if looks_like_narrative_fragment(label):
+        return False
+
+    if pair.method in _LOW_CONFIDENCE_KV_METHODS:
+        if pair.confidence < _KV_PROMOTION_CONFIDENCE_FLOOR:
+            return False
+        words = label.split()
+        if (
+            len(words) > _MAX_AUTO_KV_LABEL_WORDS
+            or len(label) > _MAX_AUTO_KV_LABEL_CHARS
+        ):
+            return False
+        if words and words[-1].strip(".,;:").lower() in _DANGLING_TRAILING_WORDS:
+            return False
+
+    return True
 
 
 def _humanize_table_label(page_number: int, headers: list[str]) -> str:
@@ -913,10 +946,10 @@ async def detect_document_structures(
                 continue
             if not is_plausible_kv_label(pair.raw_label):
                 continue
+            if not _looks_like_reliable_kv_label(pair):
+                continue
 
             slug = _slugify(pair.raw_label)
-            if _kv_slug_looks_like_prose(slug):
-                continue
             if is_internal_form_name(slug) or is_internal_form_name(f"kv_{slug}"):
                 continue
 
