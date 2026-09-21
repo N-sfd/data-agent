@@ -48,14 +48,29 @@ def pages_artifacts_reusable(document: Any) -> bool:
     )
 
 
+def persisted_discovery_is_fresh(document: Any) -> bool:
+    """True when cached discovery may be served without re-running.
+
+    Missing version keys (legacy rows) are treated as reusable so reopen
+    stays fast; an explicit mismatched discovery version forces refresh.
+    """
+
+    provenance = getattr(document, "ingestion_provenance", None) or {}
+    fingerprint = provenance.get("content_fingerprint")
+    if fingerprint and fingerprint != document_content_fingerprint(document):
+        return False
+    stored = provenance.get("discovery_processor_version")
+    if stored is None:
+        return True
+    return stored == DISCOVERY_PROCESSOR_VERSION
+
+
 def discovery_artifacts_reusable(document: Any) -> bool:
+    """Strict gate for skipping rediscovery inside processing jobs."""
+
     if not pages_artifacts_reusable(document):
         return False
-    provenance = getattr(document, "ingestion_provenance", None) or {}
-    return (
-        provenance.get("discovery_processor_version")
-        == DISCOVERY_PROCESSOR_VERSION
-    )
+    return persisted_discovery_is_fresh(document)
 
 
 def extraction_artifacts_reusable(document: Any) -> bool:

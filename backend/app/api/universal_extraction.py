@@ -42,7 +42,7 @@ from app.services.detected_target_store import (
 )
 from app.services.ingestion_provenance import merge_provenance
 from app.services.processing_versions import (
-    discovery_artifacts_reusable,
+    persisted_discovery_is_fresh,
     processing_versions_payload,
 )
 from app.services.target_result_store import (
@@ -203,11 +203,15 @@ async def discover_schema(
             "Run page extraction before schema discovery.",
         )
 
-    if not force and discovery_artifacts_reusable(document):
+    if not force:
         cached = load_document_targets(
             database=database, document_id=document_id
         )
-        if cached is not None and cached.targets:
+        if (
+            cached is not None
+            and cached.targets
+            and persisted_discovery_is_fresh(document)
+        ):
             return cached
 
     pages = list(

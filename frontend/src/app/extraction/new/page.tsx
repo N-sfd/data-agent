@@ -527,11 +527,19 @@ function NewExtractionPageContent() {
       }
 
       try {
-        const detection = await detectStructures(
-          uploadedDocument.document_id,
-        );
-
-        setStructureDetection(detection);
+        // Skip structure detection when background processing already
+        // discovered schema — it duplicates work and adds latency.
+        if (
+          !(
+            uploadedDocument.prefer_background ||
+            uploadedDocument.processing_job_id
+          )
+        ) {
+          const detection = await detectStructures(
+            uploadedDocument.document_id,
+          );
+          setStructureDetection(detection);
+        }
       } catch {
         // Structure detection is a convenience layer on top of a
         // successful extraction — if it fails, the overview card
@@ -544,10 +552,21 @@ function NewExtractionPageContent() {
         uploadedDocument.processing_job_id
       ) {
         // Background job already discovered schema — hydrate UI.
-        try {
-          const targets = await getTargets(uploadedDocument.document_id);
+        // Brief retries cover commit lag; avoid a full rediscovery.
+        let targets = null;
+        for (let attempt = 0; attempt < 4; attempt += 1) {
+          try {
+            targets = await getTargets(uploadedDocument.document_id);
+            break;
+          } catch {
+            await new Promise((resolve) =>
+              setTimeout(resolve, 400 * (attempt + 1)),
+            );
+          }
+        }
+        if (targets) {
           setSchemaDiscovery(targets);
-        } catch {
+        } else {
           await runSchemaDiscovery(uploadedDocument.document_id);
         }
       } else {
@@ -896,7 +915,9 @@ function NewExtractionPageContent() {
                     documentFamilyConfidence={
                       schemaDiscovery?.document_family_confidence
                     }
-                    schemaDiscovering={schemaDiscovering || extracting}
+                    schemaDiscovering={schemaDiscovering}
+                    documentProcessing={extracting && !schemaDiscovering}
+                    pipelineStage={pipelineStage}
                     schemaDiscoveryError={schemaDiscoveryError}
                     onRetryDiscovery={() =>
                       document && runSchemaDiscovery(document.document_id)

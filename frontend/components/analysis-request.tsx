@@ -46,6 +46,9 @@ interface AnalysisRequestProps {
   documentFamilyConfidence?: number | null;
   schemaDiscovering?: boolean;
   schemaDiscoveryError?: string;
+  /** True while pages/OCR/indexing are still running (not schema discovery). */
+  documentProcessing?: boolean;
+  pipelineStage?: string | null;
   onRetryDiscovery?: () => void;
 
   onExtractTargets: (
@@ -79,6 +82,8 @@ export default function AnalysisRequest({
   documentFamilyConfidence = null,
   schemaDiscovering = false,
   schemaDiscoveryError = "",
+  documentProcessing = false,
+  pipelineStage = null,
   onRetryDiscovery,
   onExtractTargets,
   onAnalyze,
@@ -369,13 +374,23 @@ export default function AnalysisRequest({
       )}
 
       <div className="mt-5 space-y-4">
-        {schemaDiscovering ? (
+        {schemaDiscovering || documentProcessing ? (
           <div className="space-y-3 rounded-xl border border-border bg-surface-soft px-4 py-5">
             <div className="flex items-center gap-2 text-sm text-text-secondary">
               <Loader2 className="h-4 w-4 animate-spin text-primary" />
               {waking
                 ? "Waking processing service…"
-                : "Discovering fields, tables, and clauses in this document…"}
+                : schemaDiscovering
+                  ? "Discovering fields, tables, and clauses…"
+                  : pipelineStage === "rendering_ocr" ||
+                      pipelineStage === "running_ocr"
+                    ? "Reading pages and running OCR where needed…"
+                    : pipelineStage === "indexing"
+                      ? "Indexing page text…"
+                      : pipelineStage === "reading_document" ||
+                          pipelineStage === "queued"
+                        ? "Preparing document…"
+                        : "Processing document pages…"}
             </div>
             <div className="grid gap-2 sm:grid-cols-2">
               {Array.from({ length: 6 }).map((_, index) => (
@@ -468,7 +483,7 @@ export default function AnalysisRequest({
         )}
       </div>
 
-      {!schemaDiscovering && !schemaDiscoveryError && (
+      {!schemaDiscovering && !documentProcessing && !schemaDiscoveryError && (
         <div className="mt-3 flex flex-wrap items-center gap-2">
           <button
             type="button"
