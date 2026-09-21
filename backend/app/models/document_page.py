@@ -77,6 +77,13 @@ class DocumentPage(Base):
         nullable=True,
     )
 
+    # Word/line OCR geometry + confidence for scanned-layout association.
+    # Soft-migrated; older rows remain NULL.
+    ocr_layout_json: Mapped[dict | None] = mapped_column(
+        JSON,
+        nullable=True,
+    )
+
     has_tables: Mapped[bool] = mapped_column(
         Boolean,
         nullable=False,

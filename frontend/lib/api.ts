@@ -169,11 +169,19 @@ export async function apiFetch<T = unknown>(
     throw new ApiError(await extractErrorMessage(response), response.status);
   }
 
-  if (response.status === 204) {
+  const text = await response.text();
+
+  if (!text) {
     return undefined as T;
   }
 
-  return (await response.json()) as T;
+  const contentType = response.headers.get("content-type") ?? "";
+
+  if (contentType.includes("application/json")) {
+    return JSON.parse(text) as T;
+  }
+
+  return text as unknown as T;
 }
 
 /**

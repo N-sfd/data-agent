@@ -8,6 +8,7 @@ from app.core.config import get_settings
 from app.models.document import Document
 from app.models.document_metadata_field import DocumentMetadataField
 from app.models.document_page import DocumentPage
+from app.models.page_text_block import PageTextBlock
 from app.schemas.contract_analysis import MetadataFieldResult
 from app.schemas.universal_extraction import SourceEvidence
 from app.services.ai_context import build_page_context
@@ -21,7 +22,13 @@ from app.services.contract_field_schema import (
 )
 from app.services.deterministic_extractor import source_evidence
 from app.services.generic_entity_extractor import MONEY_PATTERN
-from app.services.generic_label_extractor import extract_labeled_value
+from app.services.generic_label_extractor import (
+    LayoutBlock,
+    extract_labeled_value,
+    extract_labeled_value_from_layout,
+    normalize_label,
+)
+from app.services.label_rejection import reject_as_field_value
 from app.services.source_validator import validate_source_value
 
 
@@ -53,8 +60,12 @@ def _normalize_code(field_key: str, raw_value: str) -> str:
     if pattern is None:
         return raw_value
 
-    match = pattern.search(raw_value)
-
+    stripped = raw_value.strip()
+    # Only normalize when the whole candidate is already the identifier.
+    # Never silently carve an ID out of contaminated narrative OCR.
+    match = pattern.fullmatch(stripped) or pattern.fullmatch(
+        stripped.replace(" ", "")
+    )
     if match:
         return match.group(0)
 
@@ -114,21 +125,67 @@ def _normalize_field_value(
     return raw_value
 
 
+def _load_blocks_by_page_id(
+    *,
+    database: Session,
+    pages: list[DocumentPage],
+) -> dict[int, list[LayoutBlock]]:
+    page_ids = [page.id for page in pages]
+    if not page_ids:
+        return {}
+
+    rows = database.scalars(
+        select(PageTextBlock).where(
+            PageTextBlock.document_page_id.in_(page_ids)
+        )
+    )
+
+    blocks_by_page_id: dict[int, list[LayoutBlock]] = {}
+    for row in rows:
+        blocks_by_page_id.setdefault(row.document_page_id, []).append(
+            LayoutBlock(
+                text=row.text,
+                x0=row.x0,
+                y0=row.y0,
+                x1=row.x1,
+                y1=row.y1,
+            )
+        )
+
+    return blocks_by_page_id
+
+
 def _try_deterministic(
     *,
     field: FieldSpec,
     pages: list[DocumentPage],
     document_name: str,
+    known_labels: frozenset[str] | None = None,
+    blocks_by_page_id: dict[int, list[LayoutBlock]] | None = None,
 ) -> MetadataFieldResult | None:
     for page in pages:
         text = page.final_text or ""
 
-        raw_value = extract_labeled_value(
-            text=text,
+        raw_value = extract_labeled_value_from_layout(
+            blocks=(blocks_by_page_id or {}).get(page.id, []),
             requested_label=field.label,
+            known_labels=known_labels,
         )
+        is_scanned = bool(
+            getattr(page, "is_scanned", False)
+            or getattr(page, "requires_ocr", False)
+            or getattr(page, "ocr_layout_json", None)
+        )
+        if not raw_value and not is_scanned:
+            raw_value = extract_labeled_value(
+                text=text,
+                requested_label=field.label,
+                known_labels=known_labels,
+            )
 
         if not raw_value:
+            continue
+        if reject_as_field_value(raw_value, field_key=field.key):
             continue
 
         value = _normalize_field_value(field, raw_value)
@@ -205,6 +262,9 @@ async def _resolve_with_ai(
         value = str(raw_field.get("value", ""))
         source_text = raw_field.get("source_text", "")
 
+        if reject_as_field_value(value, field_key=spec.key):
+            continue
+
         if not validate_source_value(
             value=value,
             source_text=source_text,
@@ -254,11 +314,21 @@ async def extract_contract_metadata(
         extra_field_specs or []
     )
 
+    known_labels = frozenset(
+        normalize_label(spec.label).lower() for spec in all_field_specs
+    )
+
+    blocks_by_page_id = _load_blocks_by_page_id(
+        database=database, pages=pages
+    )
+
     for field in all_field_specs:
         match = _try_deterministic(
             field=field,
             pages=pages,
             document_name=document.original_filename,
+            known_labels=known_labels,
+            blocks_by_page_id=blocks_by_page_id,
         )
 
         if match:

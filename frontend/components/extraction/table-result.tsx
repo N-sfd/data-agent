@@ -57,6 +57,10 @@ export default function TableResult({ table, onViewSource }: TableResultProps) {
             <span className="ml-2 text-xs font-medium text-text-teal">
               · Source evidence
             </span>
+            <span className="ml-2 text-xs font-medium text-text-muted">
+              · {table.rows.length} row{table.rows.length === 1 ? "" : "s"} ×{" "}
+              {table.headers.length} column{table.headers.length === 1 ? "" : "s"}
+            </span>
           </p>
           <p className="mt-1 text-xs text-text-secondary">
             {table.source_reference || `Verified against page ${table.page_number}`}

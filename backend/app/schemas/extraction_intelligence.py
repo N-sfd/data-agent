@@ -33,10 +33,41 @@ class ConfidenceSignals(BaseModel):
     ai_fallback: bool = False
 
 
+class ConfidenceComponents(BaseModel):
+    """Separated confidence facets for auditability.
+
+    OCR confidence ≠ extraction correctness. A validation-failed value
+    must never surface a high *final* score even if OCR was sure.
+    """
+
+    ocr: float | None = None
+    extraction: float | None = None
+    validation: float | None = None
+    final: float
+
+
 class ConfidenceDetail(BaseModel):
     score: float
     band: Literal["high", "medium", "low"]
     signals: ConfidenceSignals
+    components: ConfidenceComponents | None = None
+
+
+class FieldEvidence(BaseModel):
+    """Internal multi-evidence payload for a scalar extraction."""
+
+    field: str
+    value: str | None = None
+    raw_ocr: str | None = None
+    normalized_value: str | None = None
+    source_page: int | None = None
+    source_bbox: list[float] | None = None
+    extraction_method: str | None = None
+    ocr_confidence: float | None = None
+    layout_confidence: float | None = None
+    validation_status: str | None = None
+    review_status: str | None = None
+    confidence_components: ConfidenceComponents | None = None
 
 
 class ValidationCheck(BaseModel):

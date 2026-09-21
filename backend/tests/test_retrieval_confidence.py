@@ -119,6 +119,9 @@ def test_explain_confidence_uses_structured_signals() -> None:
     assert explained.signals.source_grounded is True
     assert explained.signals.ai_fallback is False
     assert explained.signals.ambiguity is False
+    assert explained.components is not None
+    assert explained.components.final == explained.score
+    assert explained.components.validation == 1.0
     payload = explained.model_dump()
     assert set(payload["signals"].keys()) == {
         "exact_label_match",
@@ -130,6 +133,7 @@ def test_explain_confidence_uses_structured_signals() -> None:
         "ambiguity",
         "ai_fallback",
     }
+    assert "components" in payload
 
 
 def test_ai_method_starts_lower_than_native_evidence() -> None:
@@ -151,6 +155,7 @@ def test_validation_result_is_first_class() -> None:
     assert [check.type for check in result.checks] == [
         "data_type",
         "format",
+        "label_rejection",
         "source_presence",
     ]
     assert all(check.status == "passed" for check in result.checks)

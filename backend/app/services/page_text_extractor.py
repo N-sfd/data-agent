@@ -119,6 +119,8 @@ class PageExtractionData:
     ocr_error: str | None
 
     blocks: list[TextBlockData]
+    ocr_layout: dict | None = None
+    preprocess_applied: list[str] | None = None
 
 
 def convert_blocks(
@@ -223,6 +225,8 @@ def extract_page(
     ocr_attempted = False
     ocr_succeeded = False
     ocr_error: str | None = None
+    ocr_layout_payload: dict | None = None
+    preprocess_tags: list[str] = []
 
     final_text = native_text
     final_blocks = native_block_data
@@ -392,6 +396,51 @@ def extract_page(
                 error_type=ocr_error[:120],
             )
 
+        # Additive word/line geometry for layout association. Does not
+        # replace final_text from the stable MuPDF/pytesseract string path.
+        if ocr_succeeded and (final_text or "").strip():
+            try:
+                from app.services.image_preprocess import preprocess_scan_image
+                from app.services.ocr_word_layer import extract_ocr_layout
+
+                layout_dpi = min(
+                    _bounded_ocr_dpi(page, settings.ocr_dpi),
+                    220,
+                )
+                pixmap = page.get_pixmap(dpi=layout_dpi)
+                png_bytes = pixmap.tobytes("png")
+                prepared = preprocess_scan_image(png_bytes)
+                preprocess_tags = list(prepared.applied)
+                if prepared.skipped_reason:
+                    preprocess_tags.append(f"skip:{prepared.skipped_reason}")
+                layout = extract_ocr_layout(
+                    prepared.image_bytes,
+                    language=settings.ocr_language,
+                    timeout_seconds=min(
+                        45, int(settings.ocr_page_timeout_seconds or 45)
+                    ),
+                )
+                if layout is not None and layout.words:
+                    ocr_layout_payload = layout.to_json()
+                    ocr_layout_payload["preprocess"] = preprocess_tags
+                    log_event(
+                        "ocr_word_layout",
+                        stage="rendering_ocr",
+                        status="ok",
+                        page=page_number,
+                        word_count=len(layout.words),
+                        line_count=len(layout.lines),
+                        mean_conf=layout.mean_word_confidence,
+                    )
+            except Exception as exc:
+                log_event(
+                    "ocr_word_layout",
+                    stage="rendering_ocr",
+                    status="error",
+                    page=page_number,
+                    error_category=type(exc).__name__,
+                )
+
         _release_native_memory()
 
     log_event(
@@ -422,4 +471,6 @@ def extract_page(
         ocr_succeeded=ocr_succeeded,
         ocr_error=ocr_error,
         blocks=final_blocks,
+        ocr_layout=ocr_layout_payload,
+        preprocess_applied=preprocess_tags or None,
     )

@@ -348,6 +348,30 @@ def process_fitz_pages(
                         page_number,
                     )
 
+                # Scanned pages: reconstruct table geometry from OCR
+                # word coordinates when native table extract is empty.
+                if (
+                    not page_tables
+                    and extracted.ocr_layout
+                    and (
+                        extracted.extraction_method == "ocr"
+                        or extracted.detection.requires_ocr
+                    )
+                ):
+                    try:
+                        from app.services.scanned_accuracy import layout_from_json
+                        from app.services.scanned_form_layout import (
+                            reconstruct_table_from_lines,
+                        )
+
+                        layout = layout_from_json(extracted.ocr_layout)
+                        if layout is not None:
+                            reconstructed = reconstruct_table_from_lines(layout)
+                            if reconstructed is not None:
+                                page_tables = [reconstructed]
+                    except Exception:
+                        pass
+
                 page_record = DocumentPage(
                     document_id=document_record.id,
                     page_number=extracted.page_number,
@@ -359,6 +383,7 @@ def process_fitz_pages(
                         form_fields or None
                     ),
                     tables_json=page_tables or None,
+                    ocr_layout_json=extracted.ocr_layout,
                     has_tables=bool(page_tables),
                     has_form_fields=bool(form_fields),
                     is_scanned=(

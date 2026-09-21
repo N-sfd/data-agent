@@ -37,7 +37,9 @@ function isEmptyValue(value: unknown): boolean {
 
 function statusForScalar(scalar: ScalarTargetResult): FieldRowStatus {
   if (isEmptyValue(scalar.value)) return "empty";
-  if (!scalar.verified) return "validation_failed";
+  if (scalar.validation_status === "failed" || !scalar.verified) {
+    return "validation_failed";
+  }
   if (scalar.confidence_band === "low") return "low_confidence";
   return "extracted";
 }

@@ -13,6 +13,7 @@ from app.core.config import get_settings
 from app.core.errors import TARGET_NOT_FOUND, http_error
 from app.models.document import Document
 from app.models.document_page import DocumentPage
+from app.models.page_text_block import PageTextBlock
 from app.schemas.document_target import (
     DocumentTarget,
     ExtractTargetsResponse,
@@ -36,13 +37,24 @@ from app.services.confidence_engine import (
 from app.services.detected_target_store import load_document_targets
 from app.services.form_field_search import search_form_fields
 from app.services.generic_kv_scanner import is_internal_form_name
-from app.services.generic_label_extractor import extract_labeled_value
+from app.services.generic_label_extractor import (
+    LayoutBlock,
+    extract_labeled_value,
+    extract_labeled_value_from_layout,
+    normalize_label,
+)
 from app.services.page_retrieval import (
     build_retrieval_trace,
     pages_from_trace,
 )
 from app.services.result_validation import build_validation_result
 from app.services.review_routing import decide_review_for_scalar
+from app.services.label_rejection import reject_as_field_value
+from app.services.candidate_consensus import ExtractionCandidate, resolve_candidates
+from app.services.scanned_accuracy import (
+    layout_candidates_for_target,
+    maybe_targeted_second_pass,
+)
 from app.services.source_validator import validate_source_value
 
 settings = get_settings()
@@ -100,6 +112,28 @@ def _scalar_result(
     )
 
 
+def _load_blocks_by_page_id(
+    *,
+    database: Session,
+    pages: list[DocumentPage],
+) -> dict[int, list[LayoutBlock]]:
+    page_ids = [page.id for page in pages]
+    if not page_ids:
+        return {}
+
+    rows = database.scalars(
+        select(PageTextBlock).where(PageTextBlock.document_page_id.in_(page_ids))
+    )
+
+    blocks_by_page_id: dict[int, list[LayoutBlock]] = {}
+    for row in rows:
+        blocks_by_page_id.setdefault(row.document_page_id, []).append(
+            LayoutBlock(text=row.text, x0=row.x0, y0=row.y0, x1=row.x1, y1=row.y1)
+        )
+
+    return blocks_by_page_id
+
+
 def _with_retrieval_status(
     trace: RetrievalTrace,
     *,
@@ -136,6 +170,10 @@ def _resolve_scalar_from_source_examples(
         value = match.group("value").strip()
         if not value:
             continue
+        if reject_as_field_value(
+            value, value_type=target.value_type, field_key=target.key
+        ):
+            continue
 
         page_number = int(match.group("page"))
         page = page_lookup.get(page_number)
@@ -158,12 +196,17 @@ def _resolve_scalar_from_source_examples(
             page_text=page_text,
             source_presence_ok=True,
         )
+        # Wrong-but-confident is worse than blank: never promote a
+        # discovery-time candidate that fails validation (labels, mashups).
+        if validation.status == "failed":
+            continue
+
         confidence = explain_confidence(
             method="source_evidence",
             occurrence_count=target.occurrence_count,
             page=page,
             source_grounded=True,
-            validation_passed=validation.status == "passed",
+            validation_passed=True,
             exact_label_match=True,
         )
         return _scalar_result(
@@ -178,6 +221,11 @@ def _resolve_scalar_from_source_examples(
                 "page_number": page_number,
                 "source_text": snippet,
                 "source_reference": f"page {page_number}",
+                "raw_ocr": value,
+                "normalized_value": value,
+                "extraction_method": "source_evidence",
+                "validation_status": validation.status,
+                "review_status": "pending",
             },
             retrieval=_with_retrieval_status(
                 retrieval,
@@ -190,10 +238,71 @@ def _resolve_scalar_from_source_examples(
     return None
 
 
+def _needs_review_null_result(
+    *,
+    target: DocumentTarget,
+    page: DocumentPage | None,
+    page_number: int,
+    retrieval: RetrievalTrace,
+    reason: str,
+) -> ScalarTargetResult:
+    """Blank Needs Review — never surface a neighboring label as the value."""
+
+    validation = ValidationResult(
+        status="failed",
+        checks=[],
+        warnings=[reason],
+    )
+    confidence = explain_confidence(
+        method="layout_form_cell",
+        page=page,
+        source_grounded=False,
+        validation_passed=False,
+        match_exactness=0.0,
+        exact_label_match=False,
+        ocr_confidence=None,
+        layout_confidence=0.0,
+    )
+    return _scalar_result(
+        target=target,
+        value=None,
+        page_number=page_number,
+        page=page,
+        method="unresolved_value_region",
+        confidence=confidence,
+        validation=validation,
+        evidence={
+            "page_number": page_number,
+            "source_text": reason,
+            "source_reference": f"page {page_number}",
+            "raw_ocr": None,
+            "normalized_value": None,
+            "extraction_method": "unresolved_value_region",
+            "validation_status": "failed",
+            "review_status": "needs_review",
+            "field_evidence": {
+                "field": target.key,
+                "value": None,
+                "consensus_reason": reason,
+                "review_status": "needs_review",
+            },
+        },
+        retrieval=_with_retrieval_status(
+            retrieval,
+            deterministic_status="unresolved",
+            ai_fallback_required=False,
+        ),
+        verified=False,
+    )
+
+
 def _resolve_scalar_target(
     target: DocumentTarget,
     page_lookup: dict[int, DocumentPage],
     all_pages: list[DocumentPage],
+    known_labels: frozenset[str] | None = None,
+    blocks_by_page_id: dict[int, list[LayoutBlock]] | None = None,
+    pdf_path: Any = None,
 ) -> tuple[ScalarTargetResult | None, RetrievalTrace, bool]:
     """Return (result, retrieval_trace, escalate_to_ai).
 
@@ -220,15 +329,36 @@ def _resolve_scalar_target(
         max_pages=settings.ai_max_pages,
     )
 
-    plausible: list[tuple[Any, ...]] = []
+    candidates: list[ExtractionCandidate] = []
 
     for page in candidate_pages:
+        is_scanned = bool(
+            getattr(page, "is_scanned", False)
+            or getattr(page, "requires_ocr", False)
+            or getattr(page, "ocr_layout_json", None)
+        )
+        candidates.extend(
+            layout_candidates_for_target(
+                page=page,
+                requested_label=target.label,
+                value_type=target.value_type,
+                known_labels=known_labels,
+            )
+        )
+
         if page.form_fields_json:
             matches = search_form_fields(
                 form_fields=page.form_fields_json,
                 requested_concept=target.label,
             )
             for name, value, score in matches[:3]:
+                if reject_as_field_value(
+                    value,
+                    value_type=target.value_type,
+                    known_labels=known_labels,
+                    field_key=target.key,
+                ):
+                    continue
                 snippet = f"{name}: {value}"
                 verified = validate_source_value(
                     value=value,
@@ -236,91 +366,222 @@ def _resolve_scalar_target(
                     page_text=page.final_text or "",
                 )
                 if verified:
-                    plausible.append(
-                        ("form_field", page, value, snippet, score, len(matches))
+                    candidates.append(
+                        ExtractionCandidate(
+                            value=str(value),
+                            raw_ocr=str(value),
+                            method="form_field",
+                            layout_confidence=float(score),
+                            source_page=page.page_number,
+                        )
                     )
 
-        label_value = extract_labeled_value(
-            text=page.final_text or "",
+        layout_value = extract_labeled_value_from_layout(
+            blocks=(blocks_by_page_id or {}).get(page.id, []),
             requested_label=target.label,
+            known_labels=known_labels,
         )
-        if label_value:
+        if layout_value and not reject_as_field_value(
+            layout_value,
+            value_type=target.value_type,
+            known_labels=known_labels,
+            field_key=target.key,
+        ):
             verified = validate_source_value(
-                value=label_value,
-                source_text=label_value,
+                value=layout_value,
+                source_text=layout_value,
                 page_text=page.final_text or "",
             )
             if verified:
-                plausible.append(
-                    ("label_value", page, label_value, label_value, 0.9, 1)
+                candidates.append(
+                    ExtractionCandidate(
+                        value=layout_value,
+                        raw_ocr=layout_value,
+                        method="layout_proximity",
+                        layout_confidence=0.9,
+                        source_page=page.page_number,
+                    )
                 )
 
-    if not plausible:
-        retrieval = _with_retrieval_status(
-            retrieval,
-            deterministic_status="unresolved",
-            ai_fallback_required=True,
+        # Flattened-text proximity invents cross-cell mashups on scanned
+        # government forms. Prefer geometry; only fall back to text when
+        # the page has no layout and is not OCR-scanned.
+        if not is_scanned:
+            label_value = extract_labeled_value(
+                text=page.final_text or "",
+                requested_label=target.label,
+                known_labels=known_labels,
+            )
+            if label_value and not reject_as_field_value(
+                label_value,
+                value_type=target.value_type,
+                known_labels=known_labels,
+                field_key=target.key,
+            ):
+                verified = validate_source_value(
+                    value=label_value,
+                    source_text=label_value,
+                    page_text=page.final_text or "",
+                )
+                if verified:
+                    candidates.append(
+                        ExtractionCandidate(
+                            value=label_value,
+                            raw_ocr=label_value,
+                            method="label_value",
+                            layout_confidence=0.9,
+                            source_page=page.page_number,
+                        )
+                    )
+
+    consensus = resolve_candidates(
+        candidates,
+        value_type=target.value_type,
+        known_labels=known_labels,
+        field_key=target.key,
+    )
+
+    # Targeted second-pass OCR when layout hit exists but consensus is weak.
+    if (
+        consensus.decision != "auto_select"
+        and pdf_path is not None
+        and any(item.source_bbox for item in candidates)
+    ):
+        for item in candidates:
+            if not item.source_bbox or item.source_page is None:
+                continue
+            page = page_lookup.get(item.source_page)
+            if page is None:
+                continue
+            second = maybe_targeted_second_pass(
+                pdf_path=pdf_path,
+                page=page,
+                bbox=item.source_bbox,
+                language=getattr(page, "ocr_language", None) or "eng",
+            )
+            if second is not None:
+                candidates.append(second)
+                break
+        consensus = resolve_candidates(
+            candidates,
+            value_type=target.value_type,
+            known_labels=known_labels,
+            field_key=target.key,
         )
-        return None, retrieval, True
 
-    # Distinct values among strong candidates → escalate as ambiguous.
-    distinct_values = {
-        str(item[2]).strip().lower() for item in plausible if item[2] is not None
-    }
-    top_score = max(float(item[4]) for item in plausible)
-    strong = [
-        item
-        for item in plausible
-        if float(item[4]) >= max(0.7, top_score - 0.15)
-    ]
-    strong_values = {
-        str(item[2]).strip().lower() for item in strong if item[2] is not None
-    }
-
-    if len(strong_values) > 1 or (len(distinct_values) > 1 and len(strong) > 1):
-        retrieval = _with_retrieval_status(
-            retrieval,
-            deterministic_status="ambiguous",
-            ai_fallback_required=True,
+    if consensus.decision == "reject" or consensus.selected is None:
+        page_hint = candidate_pages[0] if candidate_pages else None
+        page_number = page_hint.page_number if page_hint else (
+            (target.page_numbers or [1])[0]
         )
-        return None, retrieval, True
+        reason = (
+            "conflicting candidates; value region could not be resolved confidently"
+            if consensus.decision == "needs_review"
+            else "value region could not be resolved confidently"
+        )
+        # Wrong-but-confident is worse than blank: do not escalate to AI
+        # with label-contaminated OCR context for unresolved form cells.
+        null_result = _needs_review_null_result(
+            target=target,
+            page=page_hint,
+            page_number=page_number,
+            retrieval=retrieval,
+            reason=reason,
+        )
+        return null_result, null_result.retrieval or retrieval, False
 
-    method, page, value, snippet, score, match_count = plausible[0]
+    selected = consensus.selected
+    page = page_lookup.get(selected.source_page or 0)
+    page_text = page.final_text if page else ""
+    snippet = selected.value
     validation = build_validation_result(
-        value=value,
+        value=selected.value,
         value_type=target.value_type,
         source_text=snippet,
-        page_text=page.final_text or "",
+        page_text=page_text or "",
         source_presence_ok=True,
     )
+    if validation.status == "failed" or reject_as_field_value(
+        selected.value,
+        value_type=target.value_type,
+        known_labels=known_labels,
+        field_key=target.key,
+    ):
+        null_result = _needs_review_null_result(
+            target=target,
+            page=page,
+            page_number=selected.source_page
+            or (page.page_number if page else 1),
+            retrieval=retrieval,
+            reason="candidate failed label/value validation",
+        )
+        return null_result, null_result.retrieval or retrieval, False
+
     confidence = explain_confidence(
-        method=method,
-        match_exactness=float(score),
+        method=selected.method,
+        match_exactness=float(selected.layout_confidence or 0.9),
         occurrence_count=target.occurrence_count,
         page=page,
         source_grounded=True,
         validation_passed=validation.status == "passed",
-        ambiguous_candidates=int(match_count),
-        exact_label_match=method in {"form_field", "label_value"} and float(score) >= 0.9,
+        ambiguous_candidates=len(consensus.candidates),
+        exact_label_match=selected.method.startswith("layout_form")
+        or selected.method in {"form_field", "label_value"},
+        ocr_confidence=selected.ocr_confidence,
+        layout_confidence=selected.layout_confidence,
     )
+    if consensus.decision == "needs_review" and confidence.score > 0.59:
+        # Surface as low/needs-review even when OCR chars were confident.
+        confidence = confidence.model_copy(
+            update={
+                "score": 0.59,
+                "band": "low",
+                "components": (
+                    confidence.components.model_copy(update={"final": 0.59})
+                    if confidence.components
+                    else None
+                ),
+                "signals": confidence.signals.model_copy(update={"ambiguity": True}),
+            }
+        )
+
+    evidence_payload = consensus.evidence_payload(field_key=target.key)
+    evidence_payload["validation_status"] = validation.status
+    bbox = selected.source_bbox
     retrieval = _with_retrieval_status(
         retrieval,
-        deterministic_status="resolved",
+        deterministic_status=(
+            "ambiguous" if consensus.decision == "needs_review" else "resolved"
+        ),
         ai_fallback_required=False,
     )
+
     return (
         _scalar_result(
             target=target,
-            value=value,
-            page_number=page.page_number,
+            value=selected.value,
+            page_number=selected.source_page or (page.page_number if page else 1),
             page=page,
-            method=method,
+            method=selected.method,
             confidence=confidence,
             validation=validation,
             evidence={
-                "page_number": page.page_number,
+                "page_number": selected.source_page
+                or (page.page_number if page else 1),
                 "source_text": snippet,
-                "source_reference": f"page {page.page_number}",
+                "source_reference": f"page {selected.source_page or '?'}",
+                "x0": bbox[0] if bbox and len(bbox) == 4 else None,
+                "y0": bbox[1] if bbox and len(bbox) == 4 else None,
+                "x1": bbox[2] if bbox and len(bbox) == 4 else None,
+                "y1": bbox[3] if bbox and len(bbox) == 4 else None,
+                "raw_ocr": selected.raw_ocr,
+                "normalized_value": consensus.normalized_value,
+                "extraction_method": selected.method,
+                "ocr_confidence": selected.ocr_confidence,
+                "layout_confidence": selected.layout_confidence,
+                "validation_status": validation.status,
+                "review_status": consensus.review_status,
+                "field_evidence": evidence_payload,
             },
             retrieval=retrieval,
             verified=True,
@@ -429,6 +690,10 @@ def _ai_scalar_from_value(
     retrieval: RetrievalTrace | None,
 ) -> ScalarTargetResult | None:
     if not value.verified:
+        return None
+    if reject_as_field_value(
+        value.value, value_type=target.value_type, field_key=target.key
+    ):
         return None
     ai_page = page_lookup.get(value.evidence.page_number)
     page_text = ai_page.final_text if ai_page else ""
@@ -687,6 +952,21 @@ async def extract_by_targets(
     )
     page_lookup = {page.page_number: page for page in all_pages}
 
+    known_labels = frozenset(
+        normalize_label(t.label).lower() for t in stored.targets
+    )
+    blocks_by_page_id = _load_blocks_by_page_id(database=database, pages=all_pages)
+
+    pdf_path = None
+    try:
+        from app.services.document_storage import ensure_local_copy
+
+        pdf_path = ensure_local_copy(
+            settings, stored_filename=document.stored_filename
+        )
+    except Exception:
+        pdf_path = None
+
     scalars: list[ScalarTargetResult] = []
     tables: list[TableTargetResult] = []
     warnings: list[str] = []
@@ -708,7 +988,12 @@ async def extract_by_targets(
                 continue
         else:
             resolved_scalar, retrieval, escalate = _resolve_scalar_target(
-                target, page_lookup, all_pages
+                target,
+                page_lookup,
+                all_pages,
+                known_labels=known_labels,
+                blocks_by_page_id=blocks_by_page_id,
+                pdf_path=pdf_path,
             )
             retrieval_by_key[target.key] = retrieval
             if resolved_scalar is not None:

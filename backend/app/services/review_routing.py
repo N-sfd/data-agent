@@ -61,6 +61,11 @@ def decide_review_for_scalar(
         if REASON_AI_ESCALATION not in reasons:
             reasons.append(REASON_AI_ESCALATION)
 
+    evidence = scalar.evidence
+    review_hint = getattr(evidence, "review_status", None) if evidence else None
+    if review_hint == "needs_review" and REASON_AMBIGUOUS not in reasons:
+        reasons.append(REASON_AMBIGUOUS)
+
     if not reasons and band == "medium":
         # Medium stays in queue for spot-check but is "ready_to_accept".
         decision_status: ReviewDecisionStatus = "ready_to_accept"

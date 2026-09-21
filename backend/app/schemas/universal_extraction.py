@@ -42,6 +42,16 @@ class SourceEvidence(BaseModel):
     x1: float | None = None
     y1: float | None = None
 
+    # Scanned accuracy / cleanup provenance (optional; additive).
+    raw_ocr: str | None = None
+    normalized_value: str | None = None
+    extraction_method: str | None = None
+    ocr_confidence: float | None = None
+    layout_confidence: float | None = None
+    validation_status: str | None = None
+    review_status: str | None = None
+    field_evidence: dict[str, Any] | None = None
+
 
 class ExtractedValue(BaseModel):
     label: str

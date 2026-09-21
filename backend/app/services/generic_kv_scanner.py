@@ -3,6 +3,7 @@ from dataclasses import dataclass
 from typing import Literal
 
 from app.models.document_page import DocumentPage
+from app.services.label_rejection import reject_as_field_value
 from app.services.request_interpreter import STOP_WORDS
 
 MAX_PAIRS_PER_PAGE = 40
@@ -372,6 +373,14 @@ def is_plausible_kv_label(label: str) -> bool:
     return True
 
 
+def _acceptable_pair_value(value: str) -> bool:
+    """Reject values that are clearly neighboring form labels."""
+
+    if not value or not str(value).strip():
+        return False
+    return reject_as_field_value(value) is None
+
+
 def _scan_form_fields(page: DocumentPage) -> list[ScannedPair]:
     pairs: list[ScannedPair] = []
     page_text = page.final_text or ""
@@ -380,6 +389,8 @@ def _scan_form_fields(page: DocumentPage) -> list[ScannedPair]:
             continue
         label_str = str(raw_label).strip()
         value_str = str(value).strip()
+        if not _acceptable_pair_value(value_str):
+            continue
         source_field_path: str | None = None
 
         # Raw XFA/AcroForm paths are never shown as targets. Prefer a
@@ -427,6 +438,8 @@ def _scan_two_column_tables(page: DocumentPage) -> list[ScannedPair]:
             label, value = str(values[0]).strip(), str(values[1]).strip()
             if not label or not value:
                 continue
+            if not _acceptable_pair_value(value):
+                continue
             if _NUMERIC_ONLY.match(label):
                 continue
             display = format_display_label(label)
@@ -456,6 +469,8 @@ def _scan_inline_regex(text: str) -> list[ScannedPair]:
             label, value = match.group(1).strip(), match.group(2).strip()
             if not label or not value or _looks_like_noise(label):
                 continue
+            if not _acceptable_pair_value(value):
+                continue
             # All-caps government form labels (SOLICITATION NO., DODAAC, ...)
             # are high-signal — keep them above the primary detection floor.
             boosted = confidence
@@ -479,6 +494,8 @@ def _scan_stacked_lines(text: str) -> list[ScannedPair]:
     for match in _STACKED_LABEL.finditer(text):
         label, value = match.group(1).strip(), match.group(2).strip()
         if not label or not value or _looks_like_noise(label):
+            continue
+        if not _acceptable_pair_value(value):
             continue
         if _ALL_CAPS.match(value):
             continue

@@ -6,6 +6,7 @@ from typing import Literal
 
 from app.models.document_page import DocumentPage
 from app.schemas.extraction_intelligence import (
+    ConfidenceComponents,
     ConfidenceDetail,
     ConfidenceSignals,
 )
@@ -17,6 +18,11 @@ _BASE_CONFIDENCE_BY_METHOD: dict[str, float] = {
     "form_field": 0.82,
     "label_value": 0.72,
     "layout_proximity": 0.68,
+    "layout_form_cell": 0.80,
+    "layout_form_cell_right": 0.82,
+    "layout_form_cell_below": 0.78,
+    "layout_inline_same_line": 0.76,
+    "targeted_crop_ocr": 0.74,
     "regex": 0.70,
     "ai": 0.55,
 }
@@ -30,11 +36,18 @@ _OCR_LOW_COVERAGE_PENALTY = 0.05
 _LOW_TEXT_COVERAGE_THRESHOLD = 0.3
 _SOURCE_GROUNDED_BONUS = 0.05
 _VALIDATION_PASSED_BONUS = 0.05
+_VALIDATION_FAILED_PENALTY = 0.20
 _AMBIGUITY_PENALTY = 0.15
 _EXACT_LABEL_BONUS = 0.05
 
 _MIN_CONFIDENCE = 0.05
 _MAX_CONFIDENCE = 0.99
+# A field that failed validation must never read as trustworthy — cap it
+# below the "medium" band threshold (0.60) regardless of how many other
+# signals (corroboration, exact label match, source grounding) push the
+# raw score up. The raw signals stay visible via ConfidenceSignals for
+# provenance; only the exposed final score is clamped.
+_MAX_CONFIDENCE_WHEN_VALIDATION_FAILED = 0.59
 
 
 def confidence_band(confidence: float) -> ConfidenceBand:
@@ -52,7 +65,9 @@ def _label_proximity(
 ) -> Literal["strong", "moderate", "weak", "none"]:
     if method in {"source_evidence", "form_field"} and match_exactness >= 0.9:
         return "strong"
-    if method == "label_value" or match_exactness >= 0.75:
+    if method.startswith("layout_form_cell") and match_exactness >= 0.85:
+        return "strong"
+    if method in {"label_value", "layout_inline_same_line"} or match_exactness >= 0.75:
         return "moderate"
     if method == "ai":
         return "weak"
@@ -71,13 +86,24 @@ def explain_confidence(
     validation_passed: bool = True,
     ambiguous_candidates: int = 0,
     exact_label_match: bool | None = None,
+    ocr_confidence: float | None = None,
+    layout_confidence: float | None = None,
 ) -> ConfidenceDetail:
     """Return score + band + inspectable boolean/enum signals."""
 
     exact = (
         exact_label_match
         if exact_label_match is not None
-        else method in {"source_evidence", "form_field", "label_value"}
+        else method
+        in {
+            "source_evidence",
+            "form_field",
+            "label_value",
+            "layout_form_cell",
+            "layout_form_cell_right",
+            "layout_form_cell_below",
+            "layout_inline_same_line",
+        }
         and match_exactness >= 0.95
     )
     native = bool(
@@ -108,14 +134,25 @@ def explain_confidence(
             ) < _LOW_TEXT_COVERAGE_THRESHOLD:
                 score -= _OCR_LOW_COVERAGE_PENALTY
 
+    if layout_confidence is not None:
+        # Blend layout association strength into the extraction score.
+        score = (score * 0.7) + (layout_confidence * 0.3)
+
     if source_grounded:
         score += _SOURCE_GROUNDED_BONUS
     if validation_passed:
         score += _VALIDATION_PASSED_BONUS
+    else:
+        score -= _VALIDATION_FAILED_PENALTY
     if ambiguity:
         score -= _AMBIGUITY_PENALTY
 
-    final = round(max(_MIN_CONFIDENCE, min(_MAX_CONFIDENCE, score)), 2)
+    max_confidence = (
+        _MAX_CONFIDENCE_WHEN_VALIDATION_FAILED
+        if not validation_passed
+        else _MAX_CONFIDENCE
+    )
+    final = round(max(_MIN_CONFIDENCE, min(max_confidence, score)), 2)
     signals = ConfidenceSignals(
         exact_label_match=exact,
         label_proximity=_label_proximity(
@@ -128,10 +165,28 @@ def explain_confidence(
         ambiguity=ambiguity,
         ai_fallback=ai_fallback,
     )
+    extraction_component = round(
+        max(
+            _MIN_CONFIDENCE,
+            min(
+                _MAX_CONFIDENCE,
+                _BASE_CONFIDENCE_BY_METHOD.get(method, 0.60)
+                + (layout_confidence or 0) * 0.2,
+            ),
+        ),
+        2,
+    )
+    components = ConfidenceComponents(
+        ocr=round(ocr_confidence, 2) if ocr_confidence is not None else None,
+        extraction=extraction_component,
+        validation=1.0 if validation_passed else 0.0,
+        final=final,
+    )
     return ConfidenceDetail(
         score=final,
         band=confidence_band(final),
         signals=signals,
+        components=components,
     )
 
 

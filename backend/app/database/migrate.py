@@ -39,6 +39,7 @@ def _column_ddl(column_type: str | dict[str, str], dialect_name: str) -> str:
 DOCUMENT_PAGE_COLUMNS: dict[str, str | dict[str, str]] = {
     "form_fields_json": "JSON",
     "tables_json": "JSON",
+    "ocr_layout_json": "JSON",
     "has_tables": {"sqlite": "BOOLEAN NOT NULL DEFAULT 0", "postgresql": "BOOLEAN NOT NULL DEFAULT false"},
     "has_form_fields": {"sqlite": "BOOLEAN NOT NULL DEFAULT 0", "postgresql": "BOOLEAN NOT NULL DEFAULT false"},
     "is_scanned": {"sqlite": "BOOLEAN NOT NULL DEFAULT 0", "postgresql": "BOOLEAN NOT NULL DEFAULT false"},
