@@ -447,3 +447,37 @@ def test_processing_reuse_timing_second_pass_faster() -> None:
         database.close()
     reopen_ms = int((time.perf_counter() - started) * 1000)
     assert reopen_ms < 5000, f"reopen gate took {reopen_ms}ms"
+
+
+def test_normalized_endpoint_matches_export_sources() -> None:
+    document_id = _upload()
+    database = SessionLocal()
+    try:
+        _seed_field(
+            database,
+            document_id,
+            key="contract_number",
+            label="Contract Number",
+            value="47QRCA25DSF07",
+        )
+        _seed_table(database, document_id)
+        database.commit()
+    finally:
+        database.close()
+
+    response = client.get(f"/api/documents/{document_id}/normalized")
+    assert response.status_code == 200, response.text
+    body = response.json()
+
+    assert body["document_id"] == document_id
+    assert body["fields"]["contract_number"] == "47QRCA25DSF07"
+    assert "clins" in body["tables"]
+    assert body["tables"]["clins"]["columns"] == ["clin", "description", "amount"]
+    assert body["tables"]["clins"]["rows"][0]["clin"] == "0001"
+
+    # Same source as the wide CSV — no independent re-derivation.
+    csv_response = client.get(f"/api/documents/{document_id}/export.csv")
+    assert csv_response.status_code == 200, csv_response.text
+    csv_lines = csv_response.text.strip().splitlines()
+    assert "contract_number" in csv_lines[0]
+    assert "47QRCA25DSF07" in csv_lines[1]

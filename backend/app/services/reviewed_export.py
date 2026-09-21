@@ -225,6 +225,49 @@ def build_fields_wide_csv(
     return buffer.getvalue()
 
 
+def build_normalized_document(
+    *,
+    document: Document,
+    fields: list[DocumentMetadataField],
+    tables: list[Any] | None = None,
+    authoritative_only: bool = False,
+) -> dict[str, Any]:
+    """The single normalized {fields, tables} record — CSV, XLSX, and the
+    UI all read from the same underlying rows this is built from, so this
+    endpoint is a thin reshape rather than a separate derivation."""
+
+    selected = (
+        [field for field in fields if is_authoritative(field)]
+        if authoritative_only
+        else list(fields)
+    )
+    field_map: dict[str, Any] = {}
+    for field in selected:
+        key = field.field_key or field.label
+        field_map[key] = field.value
+
+    table_map: dict[str, Any] = {}
+    for table in tables or []:
+        key = getattr(table, "target_key", None) or getattr(
+            table, "display_name", None
+        ) or "table"
+        columns = list(getattr(table, "columns_json", None) or [])
+        rows = list(getattr(table, "rows_json", None) or [])
+        table_map[key] = {
+            "display_name": getattr(table, "display_name", key),
+            "columns": columns,
+            "rows": rows,
+        }
+
+    return {
+        "document_id": document.id,
+        "document_filename": document.original_filename,
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "fields": field_map,
+        "tables": table_map,
+    }
+
+
 def _safe_sheet_title(name: str, used: set[str]) -> str:
     cleaned = "".join(
         ch if ch.isalnum() or ch in " -_" else "_" for ch in (name or "Sheet")

@@ -22,6 +22,7 @@ from app.services.reviewed_export import (
     build_export_csv,
     build_export_xlsx,
     build_fields_wide_csv,
+    build_normalized_document,
     build_oracle_payload_preview,
 )
 from app.models.document_extracted_table import DocumentExtractedTable
@@ -92,6 +93,39 @@ async def export_document_json(
     return build_document_export(
         document=document,
         fields=fields,
+        authoritative_only=authoritative_only,
+    )
+
+
+@router.get("/{document_id}/normalized")
+async def get_normalized_document(
+    document_id: str,
+    authoritative_only: bool = Query(False),
+    database: Session = Depends(get_database),
+    actor: ActorContext = Depends(require_permission("export.read")),
+) -> dict:
+    """The canonical {document_id, fields, tables} record — the same
+    source CSV/XLSX/UI already read from, reshaped for API consumers."""
+
+    if authoritative_only and not actor.has("export.authoritative"):
+        raise HTTPException(
+            status_code=403,
+            detail="Permission denied: export.authoritative",
+        )
+
+    document = _load_document_or_404(database, document_id)
+    fields = _load_fields(database, document_id)
+    tables = list(
+        database.scalars(
+            select(DocumentExtractedTable)
+            .where(DocumentExtractedTable.document_id == document_id)
+            .order_by(DocumentExtractedTable.id.asc())
+        )
+    )
+    return build_normalized_document(
+        document=document,
+        fields=fields,
+        tables=tables,
         authoritative_only=authoritative_only,
     )
 
