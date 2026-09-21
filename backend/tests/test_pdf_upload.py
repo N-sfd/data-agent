@@ -228,7 +228,10 @@ def test_use_existing_without_staged_file() -> None:
         },
     )
     assert resolved.status_code == 200, resolved.text
-    assert resolved.json()["document_id"] == original_id
+    body = resolved.json()
+    assert body["document_id"] == original_id
+    assert body["reused_existing"] is True
+    assert "Continuing with the existing document" in body["message"]
 
 
 def test_upload_anyway_without_staged_returns_expired() -> None:

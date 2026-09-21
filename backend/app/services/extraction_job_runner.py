@@ -18,6 +18,7 @@ from app.services.detected_target_store import (
 from app.services.document_extraction import (
     DocumentExtractionError,
     process_document_pages,
+    summarize_stored_pages,
 )
 from app.services.document_storage import (
     DocumentStorageError,
@@ -25,6 +26,7 @@ from app.services.document_storage import (
 )
 from app.services.ingestion_provenance import merge_provenance
 from app.services.processing_versions import (
+    can_reuse_pages_without_source,
     discovery_artifacts_reusable,
     pages_artifacts_reusable,
     processing_versions_payload,
@@ -136,44 +138,81 @@ async def run_processing_job(job_id: int) -> None:
 
         stage_timings: dict[str, int] = {}
         retrieval_started = time.perf_counter()
-        try:
-            file_path = await run_in_threadpool(
-                ensure_local_copy,
-                settings,
-                stored_filename=document.stored_filename,
-            )
-        except DocumentStorageError as exc:
-            _fail_job(job, database, exc)
-            return
-        stage_timings["source_retrieval_ms"] = int(
-            (time.perf_counter() - retrieval_started) * 1000
-        )
-
-        _append_stage(job, "rendering_ocr")
-        job.progress = 20
-        database.commit()
-
-        pages_started = time.perf_counter()
         force_pages = not pages_artifacts_reusable(document)
-        try:
-            result = await run_in_threadpool(
-                process_document_pages,
+        reused_pages_without_source = False
+
+        async def _load_from_stored_pages() -> None:
+            nonlocal force_pages, reused_pages_without_source
+            stage_timings["source_retrieval_ms"] = int(
+                (time.perf_counter() - retrieval_started) * 1000
+            )
+            _append_stage(job, "rendering_ocr")
+            job.progress = 20
+            database.commit()
+            pages_started = time.perf_counter()
+            summarize_stored_pages(
                 database=database,
                 document_record=document,
-                file_path=file_path,
-                settings=settings,
-                run_ocr=True,
-                page_start=None,
-                page_end=None,
-                force_reprocess=force_pages,
+                started_at=time.perf_counter(),
             )
-        except DocumentExtractionError as exc:
-            _fail_job(job, database, exc)
-            return
-        pages_ms = int((time.perf_counter() - pages_started) * 1000)
-        stage_timings["document_page_loading_ms"] = pages_ms
-        stage_timings["ocr_ms"] = 0 if not force_pages else pages_ms
-        stage_timings["pages_ocr_ms"] = pages_ms
+            pages_ms = int((time.perf_counter() - pages_started) * 1000)
+            stage_timings["document_page_loading_ms"] = pages_ms
+            stage_timings["ocr_ms"] = 0
+            stage_timings["pages_ocr_ms"] = pages_ms
+            force_pages = False
+            reused_pages_without_source = True
+
+        if (
+            not force_pages
+            and can_reuse_pages_without_source(
+                database, document, force_reprocess=False
+            )
+        ):
+            await _load_from_stored_pages()
+        else:
+            try:
+                file_path = await run_in_threadpool(
+                    ensure_local_copy,
+                    settings,
+                    stored_filename=document.stored_filename,
+                )
+            except DocumentStorageError as exc:
+                if can_reuse_pages_without_source(
+                    database, document, force_reprocess=False
+                ):
+                    await _load_from_stored_pages()
+                else:
+                    _fail_job(job, database, exc)
+                    return
+            else:
+                stage_timings["source_retrieval_ms"] = int(
+                    (time.perf_counter() - retrieval_started) * 1000
+                )
+
+                _append_stage(job, "rendering_ocr")
+                job.progress = 20
+                database.commit()
+
+                pages_started = time.perf_counter()
+                try:
+                    await run_in_threadpool(
+                        process_document_pages,
+                        database=database,
+                        document_record=document,
+                        file_path=file_path,
+                        settings=settings,
+                        run_ocr=True,
+                        page_start=None,
+                        page_end=None,
+                        force_reprocess=force_pages,
+                    )
+                except DocumentExtractionError as exc:
+                    _fail_job(job, database, exc)
+                    return
+                pages_ms = int((time.perf_counter() - pages_started) * 1000)
+                stage_timings["document_page_loading_ms"] = pages_ms
+                stage_timings["ocr_ms"] = 0 if not force_pages else pages_ms
+                stage_timings["pages_ocr_ms"] = pages_ms
 
         # Refresh after threadpool mutation.
         database.refresh(document)
@@ -181,7 +220,7 @@ async def run_processing_job(job_id: int) -> None:
             document,
             {
                 **processing_versions_payload(document=document),
-                "pages_reused": not force_pages,
+                "pages_reused": not force_pages or reused_pages_without_source,
             },
         )
 

@@ -30,6 +30,8 @@ export interface UploadedDocument {
   prefer_background?: boolean;
   processing_job_id?: number | null;
   ingestion_provenance?: Record<string, unknown> | null;
+  /** Open an existing doc without re-running page extraction. */
+  reused_existing?: boolean;
 }
 
 export type DuplicateResolution = "use_existing" | "upload_anyway";

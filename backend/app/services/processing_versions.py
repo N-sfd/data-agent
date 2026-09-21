@@ -48,6 +48,42 @@ def pages_artifacts_reusable(document: Any) -> bool:
     )
 
 
+def document_has_page_rows(database: Any, document_id: str) -> bool:
+    from sqlalchemy import func, select
+
+    from app.models.document_page import DocumentPage
+
+    count = database.scalar(
+        select(func.count())
+        .select_from(DocumentPage)
+        .where(DocumentPage.document_id == document_id)
+    )
+    return int(count or 0) > 0
+
+
+def can_reuse_pages_without_source(
+    database: Any, document: Any, *, force_reprocess: bool = False
+) -> bool:
+    """True when stored DocumentPage rows can be served without the PDF bytes.
+
+    Used when Render ephemeral disk wiped the original and remote backup is
+    absent — prefer durable page text over failing "Use existing".
+    """
+
+    if force_reprocess:
+        return False
+    if not document_has_page_rows(database, document.id):
+        return False
+    if pages_artifacts_reusable(document):
+        return True
+    # Legacy rows may lack processor version keys but still have page text.
+    provenance = getattr(document, "ingestion_provenance", None) or {}
+    fingerprint = provenance.get("content_fingerprint")
+    if fingerprint and fingerprint != document_content_fingerprint(document):
+        return False
+    return True
+
+
 def persisted_discovery_is_fresh(document: Any) -> bool:
     """True when cached discovery may be served without re-running.
 

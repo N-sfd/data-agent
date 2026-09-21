@@ -441,6 +441,102 @@ function NewExtractionPageContent() {
     setDiscoveryReused(false);
     setSourceRequest(null);
     setMobileSourceOpen(false);
+
+    // Duplicate → "Use existing": open the durable record. Do not re-run
+    // page extraction (original bytes may be gone from ephemeral disk).
+    if (uploadedDocument.reused_existing) {
+      setExtracting(true);
+      setPipelineStage("complete");
+      setPagesReused(true);
+      let fallThroughToExtract = false;
+      try {
+        const [pagesResult, targets, extractResults] = await Promise.all([
+          getDocumentPages(uploadedDocument.document_id),
+          getTargets(uploadedDocument.document_id).catch(() => null),
+          getExtractResults(uploadedDocument.document_id).catch(() => null),
+        ]);
+
+        if (pagesResult.length === 0) {
+          if (uploadedDocument.source_status === "missing") {
+            setWorkflowError(
+              "This document has no stored pages, and the original file is " +
+                "no longer available on the server. Please re-upload the document.",
+            );
+            return;
+          }
+          // File still available — continue into normal extraction below.
+          fallThroughToExtract = true;
+        } else {
+          setPages(pagesResult);
+          setExtraction({
+            document_id: uploadedDocument.document_id,
+            status: "completed",
+            total_document_pages:
+              pagesResult.length || uploadedDocument.page_count,
+            pages_requested:
+              pagesResult.length || uploadedDocument.page_count,
+            pages_processed:
+              pagesResult.length || uploadedDocument.page_count,
+            native_pages: pagesResult.length || uploadedDocument.page_count,
+            ocr_required_pages: 0,
+            ocr_completed_pages: 0,
+            failed_pages: 0,
+            page_numbers_processed: pagesResult.map((p) => p.page_number),
+            warnings: [],
+            page_text_chars: pagesResult.reduce(
+              (total, page) => total + (page.final_text?.length ?? 0),
+              0,
+            ),
+            completed_at: uploadedDocument.uploaded_at,
+          });
+
+          if (targets) {
+            setSchemaDiscovery(targets);
+            setDiscoveryReused(true);
+          } else {
+            await runSchemaDiscovery(uploadedDocument.document_id);
+          }
+
+          if (extractResults) {
+            setTargetResult(extractResults);
+          }
+
+          try {
+            const refreshed = await getDocument(uploadedDocument.document_id);
+            setDocument((current) =>
+              current
+                ? {
+                    ...current,
+                    ...refreshed,
+                    message: current.message,
+                    pipeline_log: current.pipeline_log,
+                    reused_existing: true,
+                  }
+                : refreshed,
+            );
+          } catch {
+            // Non-fatal — we already have the upload payload.
+          }
+          return;
+        }
+      } catch (error) {
+        setWorkflowError(
+          error instanceof Error
+            ? error.message
+            : "Unable to open the existing document.",
+        );
+        return;
+      } finally {
+        if (!fallThroughToExtract) {
+          setExtracting(false);
+          markExtractionCompleted();
+        }
+      }
+      if (!fallThroughToExtract) {
+        return;
+      }
+    }
+
     setExtracting(true);
     markProcessingStarted();
 
@@ -1061,17 +1157,21 @@ function NewExtractionPageContent() {
                         Extraction could not be completed
                       </p>
                       <p className="mt-1 text-sm leading-6 text-danger/80">
-                        The document was uploaded successfully, but page
-                        extraction failed.
+                        {workflowError.includes("no longer available") ||
+                        workflowError.includes("re-upload")
+                          ? workflowError
+                          : "The document was uploaded successfully, but page extraction failed."}
                       </p>
                       <div className="mt-3 flex flex-wrap items-center gap-3">
-                        <button
-                          type="button"
-                          onClick={() => handleUploadComplete(document)}
-                          className="btn-secondary text-sm"
-                        >
-                          Retry Extraction
-                        </button>
+                        {!workflowError.includes("re-upload") && (
+                          <button
+                            type="button"
+                            onClick={() => handleUploadComplete(document)}
+                            className="btn-secondary text-sm"
+                          >
+                            Retry Extraction
+                          </button>
+                        )}
                         <details className="text-xs text-danger/80">
                           <summary className="cursor-pointer select-none">
                             View Details

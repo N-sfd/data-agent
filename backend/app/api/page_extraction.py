@@ -1,4 +1,5 @@
 import base64
+import time
 from pathlib import Path
 
 import fitz
@@ -27,6 +28,7 @@ from app.schemas.page_extraction import (
 from app.services.document_extraction import (
     DocumentExtractionError,
     process_document_pages,
+    summarize_stored_pages,
 )
 from app.services.document_storage import (
     DocumentStorageError,
@@ -35,6 +37,7 @@ from app.services.document_storage import (
 from app.services.file_processors.image_processor import (
     _ensure_fitz_readable,
 )
+from app.services.processing_versions import can_reuse_pages_without_source
 from app.services.security_validation import RASTER_EXTENSIONS
 
 router = APIRouter()
@@ -69,6 +72,17 @@ async def extract_document_pages(
             ),
         )
 
+    if can_reuse_pages_without_source(
+        database, document, force_reprocess=request.force_reprocess
+    ):
+        result = await run_in_threadpool(
+            summarize_stored_pages,
+            database=database,
+            document_record=document,
+            started_at=time.monotonic(),
+        )
+        return DocumentExtractionSummary(**result)
+
     try:
         # Render's free-tier disk is wiped on every redeploy/idle
         # restart; restore the file from Supabase Storage first if the
@@ -79,6 +93,17 @@ async def extract_document_pages(
             stored_filename=document.stored_filename,
         )
     except DocumentStorageError as exc:
+        # Last resort: serve durable page rows when the PDF bytes are gone.
+        if can_reuse_pages_without_source(
+            database, document, force_reprocess=False
+        ):
+            result = await run_in_threadpool(
+                summarize_stored_pages,
+                database=database,
+                document_record=document,
+                started_at=time.monotonic(),
+            )
+            return DocumentExtractionSummary(**result)
         raise HTTPException(
             status_code=422,
             detail=str(exc),

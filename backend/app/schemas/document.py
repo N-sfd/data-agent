@@ -42,6 +42,9 @@ class UploadedDocumentResponse(BaseModel):
     prefer_background: bool = False
     processing_job_id: int | None = None
     ingestion_provenance: dict | None = None
+    # True when the client should open an existing document without
+    # re-running page extraction (duplicate → "Use existing").
+    reused_existing: bool = False
 
 
 class ResolveDuplicateRequest(BaseModel):

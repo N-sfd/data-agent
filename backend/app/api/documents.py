@@ -686,6 +686,7 @@ async def resolve_duplicate(
                 source_status=source_status_for(
                     settings, stored_filename=duplicate.stored_filename
                 ),
+                reused_existing=True,
             )
 
         raise HTTPException(
@@ -744,6 +745,7 @@ async def resolve_duplicate(
             source_status=source_status_for(
                 settings, stored_filename=duplicate.stored_filename
             ),
+            reused_existing=True,
         )
 
     log = ["Re-validated the staged file"]
