@@ -167,6 +167,12 @@ export interface ExtractionProgress {
   ocr_completed_pages: number;
 }
 
+export interface ProcessingStageEntry {
+  stage: string;
+  at: string;
+  duration_ms?: number;
+}
+
 export interface DetectedTable {
   key: string;
   label: string;
@@ -382,7 +388,18 @@ export interface ExtractionJob {
   progress: number;
   error_message: string | null;
   retry_count: number;
-  result: ExtractTargetsResult | null;
+  result: (ExtractTargetsResult & {
+    stage_history?: ProcessingStageEntry[];
+    stage_timings_ms?: Record<string, number>;
+    pages_reused?: boolean;
+    discovery_reused?: boolean;
+    partial?: boolean;
+    batches_completed?: number;
+    batches_total?: number;
+    targets_discovered?: number;
+    page_text_chars?: number;
+    warnings?: string[];
+  }) | null;
   created_at: string;
   started_at: string | null;
   completed_at: string | null;

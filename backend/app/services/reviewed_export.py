@@ -159,6 +159,144 @@ def build_export_csv(
     return buffer.getvalue()
 
 
+def build_fields_wide_csv(
+    fields: list[DocumentMetadataField],
+    *,
+    authoritative_only: bool = False,
+) -> str:
+    """Business-data CSV: one header row of field keys, one data row."""
+
+    selected = (
+        [field for field in fields if is_authoritative(field)]
+        if authoritative_only
+        else list(fields)
+    )
+    # Prefer stable keys; fall back to labels when key missing.
+    headers: list[str] = []
+    values: list[str] = []
+    for field in selected:
+        headers.append(field.field_key or field.label)
+        value = field.value
+        values.append("" if value is None else str(value))
+    buffer = io.StringIO()
+    writer = csv.writer(buffer)
+    writer.writerow(headers)
+    writer.writerow(values)
+    return buffer.getvalue()
+
+
+def _safe_sheet_title(name: str, used: set[str]) -> str:
+    cleaned = "".join(
+        ch if ch.isalnum() or ch in " -_" else "_" for ch in (name or "Sheet")
+    ).strip() or "Sheet"
+    cleaned = cleaned[:28]
+    candidate = cleaned
+    index = 2
+    while candidate.lower() in used:
+        candidate = f"{cleaned[:24]}_{index}"
+        index += 1
+    used.add(candidate.lower())
+    return candidate
+
+
+def build_export_xlsx(
+    *,
+    document: Document,
+    fields: list[DocumentMetadataField],
+    tables: list[Any] | None = None,
+    authoritative_only: bool = False,
+) -> bytes:
+    """Complete workbook: Document, Fields (wide), table sheets, Source Evidence."""
+
+    from openpyxl import Workbook
+
+    selected = (
+        [field for field in fields if is_authoritative(field)]
+        if authoritative_only
+        else list(fields)
+    )
+    workbook = Workbook()
+    used_titles: set[str] = set()
+
+    document_sheet = workbook.active
+    document_sheet.title = _safe_sheet_title("Document", used_titles)
+    document_sheet.append(["property", "value"])
+    document_sheet.append(["document_id", document.id])
+    document_sheet.append(["filename", document.original_filename])
+    document_sheet.append(["page_count", document.page_count])
+    document_sheet.append(
+        ["generated_at", datetime.now(timezone.utc).isoformat()]
+    )
+
+    fields_sheet = workbook.create_sheet(_safe_sheet_title("Fields", used_titles))
+    headers = [field.field_key or field.label for field in selected]
+    values = [
+        "" if field.value is None else str(field.value) for field in selected
+    ]
+    fields_sheet.append(headers)
+    fields_sheet.append(values)
+
+    for table in tables or []:
+        title = getattr(table, "display_name", None) or getattr(
+            table, "target_key", None
+        ) or "Table"
+        sheet = workbook.create_sheet(_safe_sheet_title(str(title), used_titles))
+        columns = list(getattr(table, "columns_json", None) or [])
+        rows = list(getattr(table, "rows_json", None) or [])
+        if not columns and rows and isinstance(rows[0], dict):
+            columns = list(rows[0].keys())
+        sheet.append([str(col) for col in columns])
+        for row in rows:
+            if isinstance(row, dict):
+                sheet.append([row.get(col, "") for col in columns])
+            elif isinstance(row, (list, tuple)):
+                sheet.append(list(row))
+            else:
+                sheet.append([str(row)])
+
+    evidence_sheet = workbook.create_sheet(
+        _safe_sheet_title("Source Evidence", used_titles)
+    )
+    evidence_sheet.append(
+        [
+            "field",
+            "field_key",
+            "raw_ocr",
+            "normalized_value",
+            "extracted_value",
+            "value",
+            "source_page",
+            "confidence",
+            "validation_status",
+            "review_status",
+            "extraction_method",
+        ]
+    )
+    for field in selected:
+        evidence = _evidence(field)
+        evidence_sheet.append(
+            [
+                field.label,
+                field.field_key,
+                evidence.get("raw_ocr") or evidence.get("source_text") or "",
+                evidence.get("normalized_value") or field.value or "",
+                extracted_value_for(field),
+                field.value,
+                source_page_for(field),
+                field.confidence,
+                validation_status_for(field),
+                field.review_status or "pending",
+                field.extraction_method
+                or evidence.get("extraction_method")
+                or "",
+            ]
+        )
+
+    buffer = io.BytesIO()
+    workbook.save(buffer)
+    return buffer.getvalue()
+
+
 def build_oracle_payload_preview(
     *,
     document: Document,

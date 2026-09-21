@@ -1,12 +1,19 @@
 import { useEffect, useState } from "react";
 
-import type { ExtractionProgress } from "@/types/document";
+import type {
+  ExtractionProgress,
+  ProcessingStageEntry,
+} from "@/types/document";
 
 interface ExtractionLiveProgressProps {
   progress: ExtractionProgress | null;
   elapsedSeconds: number;
   waking: boolean;
   pipelineStage?: string | null;
+  stageHistory?: ProcessingStageEntry[] | null;
+  stageTimingsMs?: Record<string, number> | null;
+  pagesReused?: boolean;
+  discoveryReused?: boolean;
 }
 
 const PIPELINE_STAGE_LABELS: Record<string, string> = {
@@ -19,6 +26,7 @@ const PIPELINE_STAGE_LABELS: Record<string, string> = {
   indexing: "Indexing",
   discovering_fields: "Discovering schema",
   extracting_data: "Extracting",
+  validating_results: "Validating",
   complete: "Complete",
 };
 
@@ -30,8 +38,23 @@ const PIPELINE_ORDER = [
   "Indexing",
   "Discovering schema",
   "Extracting",
+  "Validating",
   "Complete",
 ];
+
+const TIMING_LABELS: Record<string, string> = {
+  source_retrieval_ms: "Source retrieval",
+  document_page_loading_ms: "Document/page loading",
+  ocr_ms: "OCR",
+  pages_ocr_ms: "Pages + OCR",
+  indexing_ms: "Indexing",
+  table_detection_ms: "Table detection",
+  schema_discovery_ms: "Schema discovery",
+  discovery_ms: "Discovery",
+  extraction_ms: "Extraction",
+  validation_ms: "Validation",
+  db_writes_ms: "DB writes",
+};
 
 const ROTATING_MESSAGES = [
   "Reading page text...",
@@ -57,11 +80,20 @@ function formatElapsed(totalSeconds: number): string {
   return `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
 }
 
+function formatDurationMs(ms: number): string {
+  if (ms < 1000) return `${ms} ms`;
+  return `${(ms / 1000).toFixed(1)} s`;
+}
+
 export default function ExtractionLiveProgress({
   progress,
   elapsedSeconds,
   waking,
   pipelineStage = null,
+  stageHistory = null,
+  stageTimingsMs = null,
+  pagesReused = false,
+  discoveryReused = false,
 }: ExtractionLiveProgressProps) {
   const [messageIndex, setMessageIndex] = useState(0);
   const [activity, setActivity] = useState<ActivityEntry[]>([]);
@@ -120,6 +152,9 @@ export default function ExtractionLiveProgress({
   const hasPageTotal = Boolean(progress && progress.page_total > 0);
   const percent = progress ? Math.min(progress.percent, 100) : 0;
   const stillIdleSeconds = elapsedSeconds - lastChangedAt;
+  const timingEntries = Object.entries(stageTimingsMs ?? {}).filter(
+    ([, ms]) => typeof ms === "number" && ms >= 0,
+  );
 
   return (
     <div className="mt-5 space-y-5">
@@ -163,6 +198,16 @@ export default function ExtractionLiveProgress({
             Large contracts may take a minute or two.
           </p>
         )}
+
+        {(pagesReused || discoveryReused) && (
+          <p className="mt-1 text-xs font-medium text-success">
+            {pagesReused && discoveryReused
+              ? "Reusing persisted pages and schema"
+              : pagesReused
+                ? "Reusing persisted page/OCR artifacts"
+                : "Reusing persisted schema discovery"}
+          </p>
+        )}
       </div>
 
       <div>
@@ -201,6 +246,52 @@ export default function ExtractionLiveProgress({
           </span>
         )}
       </div>
+
+      {stageHistory && stageHistory.length > 0 && (
+        <div>
+          <p className="text-xs font-medium text-text-muted">
+            Processing stages
+          </p>
+          <ul className="mt-2 space-y-1">
+            {stageHistory.map((entry, index) => (
+              <li
+                key={`${entry.stage}-${entry.at}-${index}`}
+                className="flex justify-between gap-3 text-xs text-text-secondary"
+              >
+                <span>
+                  {PIPELINE_STAGE_LABELS[entry.stage] ?? entry.stage}
+                </span>
+                <span className="font-medium text-foreground tabular-nums">
+                  {typeof entry.duration_ms === "number"
+                    ? formatDurationMs(entry.duration_ms)
+                    : "—"}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {timingEntries.length > 0 && (
+        <div>
+          <p className="text-xs font-medium text-text-muted">
+            Stage timings
+          </p>
+          <ul className="mt-2 space-y-1">
+            {timingEntries.map(([key, ms]) => (
+              <li
+                key={key}
+                className="flex justify-between gap-3 text-xs text-text-secondary"
+              >
+                <span>{TIMING_LABELS[key] ?? key}</span>
+                <span className="font-medium text-foreground tabular-nums">
+                  {formatDurationMs(ms)}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
 
       <div className="rounded-xl bg-surface-soft px-3.5 py-2.5 text-xs text-text-secondary">
         {waking

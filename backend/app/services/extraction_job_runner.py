@@ -11,7 +11,10 @@ from app.models.document import Document
 from app.models.document_page import DocumentPage
 from app.models.extraction_job import ExtractionJob
 from app.services.ai_provider_factory import create_ai_provider, describe_ai_provider
-from app.services.detected_target_store import persist_document_targets
+from app.services.detected_target_store import (
+    load_document_targets,
+    persist_document_targets,
+)
 from app.services.document_extraction import (
     DocumentExtractionError,
     process_document_pages,
@@ -21,6 +24,11 @@ from app.services.document_storage import (
     ensure_local_copy,
 )
 from app.services.ingestion_provenance import merge_provenance
+from app.services.processing_versions import (
+    discovery_artifacts_reusable,
+    pages_artifacts_reusable,
+    processing_versions_payload,
+)
 from app.services.schema_discovery import discover_document_schema
 from app.services.target_extraction_service import extract_by_targets
 from app.services.target_result_store import persist_target_extraction_results
@@ -45,12 +53,25 @@ def _chunk(items: list[str], size: int) -> list[list[str]]:
 def _append_stage(job: ExtractionJob, stage: str) -> None:
     payload = dict(job.result_json or {})
     history = list(payload.get("stage_history") or [])
-    history.append(
-        {
-            "stage": stage,
-            "at": datetime.now(timezone.utc).isoformat(),
-        }
-    )
+    now = datetime.now(timezone.utc)
+    duration_ms = None
+    if history:
+        previous_at = history[-1].get("at")
+        if previous_at:
+            try:
+                previous = datetime.fromisoformat(str(previous_at))
+                if previous.tzinfo is None:
+                    previous = previous.replace(tzinfo=timezone.utc)
+                duration_ms = int((now - previous).total_seconds() * 1000)
+            except (TypeError, ValueError):
+                duration_ms = None
+    entry: dict = {
+        "stage": stage,
+        "at": now.isoformat(),
+    }
+    if duration_ms is not None:
+        entry["duration_ms"] = max(0, duration_ms)
+    history.append(entry)
     payload["stage_history"] = history
     if payload.get("warnings") is None:
         payload["warnings"] = []
@@ -113,6 +134,8 @@ async def run_processing_job(job_id: int) -> None:
         )
         database.commit()
 
+        stage_timings: dict[str, int] = {}
+        retrieval_started = time.perf_counter()
         try:
             file_path = await run_in_threadpool(
                 ensure_local_copy,
@@ -122,11 +145,16 @@ async def run_processing_job(job_id: int) -> None:
         except DocumentStorageError as exc:
             _fail_job(job, database, exc)
             return
+        stage_timings["source_retrieval_ms"] = int(
+            (time.perf_counter() - retrieval_started) * 1000
+        )
 
         _append_stage(job, "rendering_ocr")
         job.progress = 20
         database.commit()
 
+        pages_started = time.perf_counter()
+        force_pages = not pages_artifacts_reusable(document)
         try:
             result = await run_in_threadpool(
                 process_document_pages,
@@ -137,18 +165,33 @@ async def run_processing_job(job_id: int) -> None:
                 run_ocr=True,
                 page_start=None,
                 page_end=None,
-                force_reprocess=False,
+                force_reprocess=force_pages,
             )
         except DocumentExtractionError as exc:
             _fail_job(job, database, exc)
             return
+        pages_ms = int((time.perf_counter() - pages_started) * 1000)
+        stage_timings["document_page_loading_ms"] = pages_ms
+        stage_timings["ocr_ms"] = 0 if not force_pages else pages_ms
+        stage_timings["pages_ocr_ms"] = pages_ms
 
         # Refresh after threadpool mutation.
         database.refresh(document)
+        merge_provenance(
+            document,
+            {
+                **processing_versions_payload(document=document),
+                "pages_reused": not force_pages,
+            },
+        )
 
+        index_started = time.perf_counter()
         _append_stage(job, "indexing")
         job.progress = 60
         database.commit()
+        stage_timings["indexing_ms"] = int(
+            (time.perf_counter() - index_started) * 1000
+        )
 
         _append_stage(job, "discovering_fields")
         job.progress = 75
@@ -164,27 +207,55 @@ async def run_processing_job(job_id: int) -> None:
 
         page_text_chars = sum(len(page.final_text or "") for page in pages)
 
-        ai_provider = create_ai_provider(settings)
-        log_event(
-            "schema_discovery_start",
-            stage="discovering_fields",
-            provider=describe_ai_provider(ai_provider),
-            page_count=len(pages),
-            page_text_chars=page_text_chars,
+        discovery_started = time.perf_counter()
+        reused_discovery = False
+        existing = None
+        if discovery_artifacts_reusable(document):
+            existing = load_document_targets(
+                database=database, document_id=document.id
+            )
+        if existing is not None and existing.targets:
+            schema_result = existing
+            reused_discovery = True
+            target_count = len(schema_result.targets)
+            stage_timings["table_detection_ms"] = 0
+            stage_timings["schema_discovery_ms"] = int(
+                (time.perf_counter() - discovery_started) * 1000
+            )
+        else:
+            ai_provider = create_ai_provider(settings)
+            log_event(
+                "schema_discovery_start",
+                stage="discovering_fields",
+                provider=describe_ai_provider(ai_provider),
+                page_count=len(pages),
+                page_text_chars=page_text_chars,
+            )
+
+            try:
+                schema_result = await discover_document_schema(
+                    document=document,
+                    pages=pages,
+                    ai_provider=ai_provider,
+                )
+                db_write_started = time.perf_counter()
+                persist_document_targets(database=database, result=schema_result)
+                stage_timings["db_writes_ms"] = int(
+                    (time.perf_counter() - db_write_started) * 1000
+                )
+            except Exception as exc:  # noqa: BLE001 - surfaced via job status
+                _fail_job(job, database, exc)
+                return
+            target_count = len(schema_result.targets)
+            discovery_ms = int((time.perf_counter() - discovery_started) * 1000)
+            stage_timings["schema_discovery_ms"] = discovery_ms
+            # Table detection is part of schema discovery for this pipeline.
+            stage_timings["table_detection_ms"] = discovery_ms
+
+        stage_timings["discovery_ms"] = stage_timings.get(
+            "schema_discovery_ms", 0
         )
 
-        try:
-            schema_result = await discover_document_schema(
-                document=document,
-                pages=pages,
-                ai_provider=ai_provider,
-            )
-            persist_document_targets(database=database, result=schema_result)
-        except Exception as exc:  # noqa: BLE001 - surfaced via job status
-            _fail_job(job, database, exc)
-            return
-
-        target_count = len(schema_result.targets)
         empty_warning = None
         if page_text_chars == 0 or target_count == 0:
             empty_warning = EMPTY_STRUCTURES_WARNING
@@ -192,11 +263,15 @@ async def run_processing_job(job_id: int) -> None:
         merge_provenance(
             document,
             {
+                **processing_versions_payload(document=document),
                 "page_text_chars": page_text_chars,
                 "targets_discovered": target_count,
                 "empty_extraction_warning": empty_warning,
                 "processing_mode": "background",
                 "processing_job_id": job.id,
+                "discovery_reused": reused_discovery,
+                "pages_reused": not force_pages,
+                "stage_timings_ms": stage_timings,
             },
         )
 
@@ -214,6 +289,9 @@ async def run_processing_job(job_id: int) -> None:
         payload["warnings"] = warnings
         payload["page_text_chars"] = page_text_chars
         payload["targets_discovered"] = target_count
+        payload["stage_timings_ms"] = stage_timings
+        payload["pages_reused"] = not force_pages
+        payload["discovery_reused"] = reused_discovery
         job.result_json = payload
 
         job.status = "complete"
@@ -229,6 +307,9 @@ async def run_processing_job(job_id: int) -> None:
             target_count=target_count,
             page_text_chars=page_text_chars,
             pages_processed=result.get("pages_processed"),
+            pages_reused=not force_pages,
+            discovery_reused=reused_discovery,
+            **{f"timing_{key}": value for key, value in stage_timings.items()},
         )
 
     finally:
@@ -278,8 +359,14 @@ async def run_extraction_job(
         tables: list[dict] = []
         unresolved: list[str] = []
         warnings: list[str] = []
+        stage_timings: dict[str, int] = {
+            "extraction_ms": 0,
+            "validation_ms": 0,
+            "db_writes_ms": 0,
+        }
 
         for index, batch in enumerate(batches):
+            extract_started = time.perf_counter()
             try:
                 batch_result = await extract_by_targets(
                     database=database,
@@ -291,6 +378,9 @@ async def run_extraction_job(
             except Exception as exc:  # noqa: BLE001 - surfaced via job status
                 _fail_job(job, database, exc)
                 return
+            stage_timings["extraction_ms"] += int(
+                (time.perf_counter() - extract_started) * 1000
+            )
 
             scalars.extend(
                 scalar.model_dump(mode="json")
@@ -302,11 +392,42 @@ async def run_extraction_job(
             unresolved.extend(batch_result.unresolved_targets)
             warnings.extend(batch_result.warnings)
 
+            # Partial persist so reopen/UI can show completed batches while
+            # long documents continue extracting.
+            db_started = time.perf_counter()
+            persist_target_extraction_results(
+                database=database,
+                document_id=document.id,
+                scalars=batch_result.scalars,
+                tables=batch_result.tables,
+                extraction_job_id=job.id,
+            )
+            stage_timings["db_writes_ms"] += int(
+                (time.perf_counter() - db_started) * 1000
+            )
+
+            history = list((job.result_json or {}).get("stage_history") or [])
+            job.result_json = {
+                "document_id": document.id,
+                "scalars": scalars,
+                "tables": tables,
+                "unresolved_targets": unresolved,
+                "warnings": warnings,
+                "stage_history": history,
+                "stage_timings_ms": stage_timings,
+                "partial": index + 1 < len(batches),
+                "batches_completed": index + 1,
+                "batches_total": len(batches),
+            }
             job.progress = round((index + 1) / len(batches) * 80)
             database.commit()
 
+        validate_started = time.perf_counter()
         _append_stage(job, "validating_results")
         database.commit()
+        stage_timings["validation_ms"] = int(
+            (time.perf_counter() - validate_started) * 1000
+        )
 
         history = list((job.result_json or {}).get("stage_history") or [])
         job.result_json = {
@@ -316,16 +437,23 @@ async def run_extraction_job(
             "unresolved_targets": unresolved,
             "warnings": warnings,
             "stage_history": history,
+            "stage_timings_ms": stage_timings,
+            "partial": False,
+            "batches_completed": len(batches),
+            "batches_total": len(batches),
         }
 
-        persist_target_extraction_results(
-            database=database,
-            document_id=document.id,
-            scalars=[
-                ScalarTargetResult.model_validate(item) for item in scalars
-            ],
-            tables=[TableTargetResult.model_validate(item) for item in tables],
-            extraction_job_id=job.id,
+        from app.services.processing_versions import processing_versions_payload
+
+        merge_provenance(
+            document,
+            {
+                **processing_versions_payload(document=document),
+                "extraction_job_id": job.id,
+                "scalars_extracted": len(scalars),
+                "tables_extracted": len(tables),
+                "stage_timings_ms": stage_timings,
+            },
         )
 
         job.status = "complete"
@@ -341,6 +469,7 @@ async def run_extraction_job(
             scalar_count=len(scalars),
             table_count=len(tables),
             unresolved_count=len(unresolved),
+            **{f"timing_{key}": value for key, value in stage_timings.items()},
         )
 
     finally:

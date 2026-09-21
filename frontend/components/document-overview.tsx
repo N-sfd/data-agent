@@ -9,6 +9,7 @@ import type {
   ContractAnalysisResult,
   ExtractionProgress,
   ExtractionSummary,
+  ProcessingStageEntry,
   StructureDetectionResult,
   UploadedDocument,
 } from "@/types/document";
@@ -23,6 +24,10 @@ interface DocumentOverviewProps {
   elapsedSeconds: number;
   waking: boolean;
   pipelineStage?: string | null;
+  stageHistory?: ProcessingStageEntry[] | null;
+  stageTimingsMs?: Record<string, number> | null;
+  pagesReused?: boolean;
+  discoveryReused?: boolean;
   onOpenProcessingDetails: () => void;
   onViewResults?: () => void;
   onReplaceDocument?: () => void;
@@ -38,6 +43,10 @@ export default function DocumentOverview({
   elapsedSeconds,
   waking,
   pipelineStage = null,
+  stageHistory = null,
+  stageTimingsMs = null,
+  pagesReused = false,
+  discoveryReused = false,
   onOpenProcessingDetails,
   onViewResults,
   onReplaceDocument,
@@ -114,6 +123,10 @@ export default function DocumentOverview({
           elapsedSeconds={elapsedSeconds}
           waking={waking}
           pipelineStage={pipelineStage}
+          stageHistory={stageHistory}
+          stageTimingsMs={stageTimingsMs}
+          pagesReused={pagesReused}
+          discoveryReused={discoveryReused}
           onOpenDetails={onOpenProcessingDetails}
         />
       </div>

@@ -138,14 +138,26 @@ def test_export_csv_uses_effective_reviewed_value() -> None:
     finally:
         database.close()
 
+    # Default: wide business CSV (field keys as headers).
     response = client.get(f"/api/documents/{document_id}/export.csv")
     assert response.status_code == 200, response.text
     assert "text/csv" in response.headers["content-type"]
     lines = response.text.strip().splitlines()
-    assert lines[0].startswith("field,value,extracted_value,review_status")
+    assert lines[0] == "total_amount"
     assert "$125,000" in lines[1]
-    assert "$120,000" in lines[1]
-    assert "edited" in lines[1]
+
+    # Legacy long format still available.
+    long_response = client.get(
+        f"/api/documents/{document_id}/export.csv?format=long"
+    )
+    assert long_response.status_code == 200, long_response.text
+    long_lines = long_response.text.strip().splitlines()
+    assert long_lines[0].startswith(
+        "field,value,extracted_value,review_status"
+    )
+    assert "$125,000" in long_lines[1]
+    assert "$120,000" in long_lines[1]
+    assert "edited" in long_lines[1]
 
 
 def test_oracle_payload_excludes_pending_and_rejected() -> None:

@@ -4,6 +4,7 @@ import ExtractionLiveProgress from "@/components/extraction-live-progress";
 import type {
   ExtractionProgress,
   ExtractionSummary,
+  ProcessingStageEntry,
   UploadedDocument,
 } from "@/types/document";
 
@@ -15,6 +16,10 @@ interface DocumentStatusSummaryProps {
   elapsedSeconds: number;
   waking: boolean;
   pipelineStage?: string | null;
+  stageHistory?: ProcessingStageEntry[] | null;
+  stageTimingsMs?: Record<string, number> | null;
+  pagesReused?: boolean;
+  discoveryReused?: boolean;
   onOpenDetails: () => void;
 }
 
@@ -32,6 +37,10 @@ export default function DocumentStatusSummary({
   elapsedSeconds,
   waking,
   pipelineStage = null,
+  stageHistory = null,
+  stageTimingsMs = null,
+  pagesReused = false,
+  discoveryReused = false,
   onOpenDetails,
 }: DocumentStatusSummaryProps) {
   if (extracting) {
@@ -41,6 +50,10 @@ export default function DocumentStatusSummary({
         elapsedSeconds={elapsedSeconds}
         waking={waking}
         pipelineStage={pipelineStage}
+        stageHistory={stageHistory}
+        stageTimingsMs={stageTimingsMs}
+        pagesReused={pagesReused}
+        discoveryReused={discoveryReused}
       />
     );
   }
@@ -52,6 +65,10 @@ export default function DocumentStatusSummary({
       "string"
         ? document.ingestion_provenance.empty_extraction_warning
         : null;
+    const timings =
+      (document.ingestion_provenance?.stage_timings_ms as
+        | Record<string, number>
+        | undefined) ?? stageTimingsMs;
 
     return (
       <div className="rounded-xl bg-success/10 px-3 py-3">
@@ -64,10 +81,21 @@ export default function DocumentStatusSummary({
           pages
           {checksPassed > 0 &&
             ` · ${checksPassed} check${checksPassed === 1 ? "" : "s"}`}
+          {(pagesReused ||
+            document.ingestion_provenance?.pages_reused === true) &&
+            " · pages reused"}
         </p>
         {emptyWarning && (
           <p className="mt-2 text-xs text-amber-700 dark:text-amber-300">
             {emptyWarning}
+          </p>
+        )}
+        {timings && Object.keys(timings).length > 0 && (
+          <p className="mt-2 text-[11px] text-success/80">
+            {Object.entries(timings)
+              .slice(0, 4)
+              .map(([key, ms]) => `${key.replace(/_ms$/, "")}: ${ms}ms`)
+              .join(" · ")}
           </p>
         )}
 

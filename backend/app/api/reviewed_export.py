@@ -19,8 +19,11 @@ from app.models.integration_audit_log import IntegrationAuditLog
 from app.services.reviewed_export import (
     build_document_export,
     build_export_csv,
+    build_export_xlsx,
+    build_fields_wide_csv,
     build_oracle_payload_preview,
 )
+from app.models.document_extracted_table import DocumentExtractedTable
 
 router = APIRouter()
 
@@ -84,10 +87,14 @@ async def export_document_json(
 async def export_document_csv(
     document_id: str,
     authoritative_only: bool = Query(False),
+    format: str = Query(
+        "wide",
+        description="wide = field columns as headers (business); long = field/value rows (legacy).",
+    ),
     database: Session = Depends(get_database),
     actor: ActorContext = Depends(require_permission("export.read")),
 ) -> Response:
-    """Business CSV — primary ``value`` column is the effective reviewed value."""
+    """Business CSV — wide dataset by default (field names as columns)."""
 
     if authoritative_only and not actor.has("export.authoritative"):
         raise HTTPException(
@@ -102,11 +109,63 @@ async def export_document_csv(
             status_code=404,
             detail="No metadata fields found for this document.",
         )
-    csv_body = build_export_csv(fields, authoritative_only=authoritative_only)
-    filename = f"{document.original_filename.rsplit('.', 1)[0]}-export.csv"
+    if format == "long":
+        csv_body = build_export_csv(fields, authoritative_only=authoritative_only)
+    else:
+        csv_body = build_fields_wide_csv(
+            fields, authoritative_only=authoritative_only
+        )
+    filename = f"{document.original_filename.rsplit('.', 1)[0]}-fields.csv"
     return Response(
         content=csv_body,
         media_type="text/csv; charset=utf-8",
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"',
+        },
+    )
+
+
+@router.get("/{document_id}/export.xlsx")
+async def export_document_xlsx(
+    document_id: str,
+    authoritative_only: bool = Query(False),
+    database: Session = Depends(get_database),
+    actor: ActorContext = Depends(require_permission("export.read")),
+) -> Response:
+    """Complete Excel workbook: Document, Fields, tables, Source Evidence."""
+
+    if authoritative_only and not actor.has("export.authoritative"):
+        raise HTTPException(
+            status_code=403,
+            detail="Permission denied: export.authoritative",
+        )
+
+    document = _load_document_or_404(database, document_id)
+    fields = _load_fields(database, document_id)
+    if not fields:
+        raise HTTPException(
+            status_code=404,
+            detail="No metadata fields found for this document.",
+        )
+    tables = list(
+        database.scalars(
+            select(DocumentExtractedTable)
+            .where(DocumentExtractedTable.document_id == document_id)
+            .order_by(DocumentExtractedTable.id.asc())
+        )
+    )
+    body = build_export_xlsx(
+        document=document,
+        fields=fields,
+        tables=tables,
+        authoritative_only=authoritative_only,
+    )
+    filename = f"{document.original_filename.rsplit('.', 1)[0]}-export.xlsx"
+    return Response(
+        content=body,
+        media_type=(
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        ),
         headers={
             "Content-Disposition": f'attachment; filename="{filename}"',
         },

@@ -51,6 +51,7 @@ import type {
   ExtractionModel,
   ExtractionProgress,
   ExtractionSummary,
+  ProcessingStageEntry,
   RelationshipAction,
   StructureDetectionResult,
   StructuredContractOutput,
@@ -97,6 +98,15 @@ function NewExtractionPageContent() {
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const [waking, setWaking] = useState(false);
   const [pipelineStage, setPipelineStage] = useState<string | null>(null);
+  const [stageHistory, setStageHistory] = useState<
+    ProcessingStageEntry[] | null
+  >(null);
+  const [stageTimingsMs, setStageTimingsMs] = useState<Record<
+    string,
+    number
+  > | null>(null);
+  const [pagesReused, setPagesReused] = useState(false);
+  const [discoveryReused, setDiscoveryReused] = useState(false);
   const [targetExtractionJob, setTargetExtractionJob] =
     useState<ExtractionJob | null>(null);
 
@@ -413,6 +423,10 @@ function NewExtractionPageContent() {
     setElapsedSeconds(0);
     setWaking(false);
     setPipelineStage("uploaded");
+    setStageHistory(null);
+    setStageTimingsMs(null);
+    setPagesReused(false);
+    setDiscoveryReused(false);
     setSourceRequest(null);
     setMobileSourceOpen(false);
     setExtracting(true);
@@ -428,6 +442,24 @@ function NewExtractionPageContent() {
           uploadedDocument.processing_job_id,
           (job) => {
             setPipelineStage(job.stage || job.status);
+            const result = job.result as {
+              stage_history?: ProcessingStageEntry[];
+              stage_timings_ms?: Record<string, number>;
+              pages_reused?: boolean;
+              discovery_reused?: boolean;
+            } | null;
+            if (result?.stage_history) {
+              setStageHistory(result.stage_history);
+            }
+            if (result?.stage_timings_ms) {
+              setStageTimingsMs(result.stage_timings_ms);
+            }
+            if (typeof result?.pages_reused === "boolean") {
+              setPagesReused(result.pages_reused);
+            }
+            if (typeof result?.discovery_reused === "boolean") {
+              setDiscoveryReused(result.discovery_reused);
+            }
             if (typeof job.progress === "number") {
               setProgress({
                 document_id: uploadedDocument.document_id,
@@ -592,7 +624,36 @@ function NewExtractionPageContent() {
       const result = await extractTargetsViaJob(
         document.document_id,
         targetIds,
-        (job) => setTargetExtractionJob(job),
+        (job) => {
+          setTargetExtractionJob(job);
+          const partial = job.result;
+          if (
+            partial &&
+            Array.isArray(partial.scalars) &&
+            (partial.scalars.length > 0 || (partial.tables?.length ?? 0) > 0)
+          ) {
+            setTargetResult({
+              document_id: document.document_id,
+              scalars: partial.scalars,
+              tables: partial.tables ?? [],
+              unresolved_targets: partial.unresolved_targets ?? [],
+              warnings: [
+                ...(partial.warnings ?? []),
+                ...(partial.partial
+                  ? [
+                      `Showing partial results (${partial.batches_completed ?? 0}/${partial.batches_total ?? "?"} batches).`,
+                    ]
+                  : []),
+              ],
+            });
+          }
+          if (partial?.stage_history) {
+            setStageHistory(partial.stage_history);
+          }
+          if (partial?.stage_timings_ms) {
+            setStageTimingsMs(partial.stage_timings_ms);
+          }
+        },
         () => setWaking(true),
       );
 
@@ -779,6 +840,10 @@ function NewExtractionPageContent() {
                     elapsedSeconds={elapsedSeconds}
                     waking={waking}
                     pipelineStage={pipelineStage}
+                    stageHistory={stageHistory}
+                    stageTimingsMs={stageTimingsMs}
+                    pagesReused={pagesReused}
+                    discoveryReused={discoveryReused}
                     onOpenProcessingDetails={() => setProcessingDrawerOpen(true)}
                     onReplaceDocument={() => {
                       setDocument(null);
@@ -1125,6 +1190,10 @@ function NewExtractionPageContent() {
           waking={waking}
           pipelineStage={pipelineStage}
           schemaTargetCount={schemaDiscovery?.targets?.length ?? null}
+          stageHistory={stageHistory}
+          stageTimingsMs={stageTimingsMs}
+          pagesReused={pagesReused}
+          discoveryReused={discoveryReused}
         />
       )}
     </>

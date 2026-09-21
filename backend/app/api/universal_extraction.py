@@ -2,6 +2,7 @@ from fastapi import (
     APIRouter,
     Depends,
     HTTPException,
+    Query,
 )
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -38,6 +39,11 @@ from app.services.detected_target_store import (
     load_document_targets,
     persist_document_targets,
     rename_custom_target,
+)
+from app.services.ingestion_provenance import merge_provenance
+from app.services.processing_versions import (
+    discovery_artifacts_reusable,
+    processing_versions_payload,
 )
 from app.services.target_result_store import (
     load_persisted_extract_results,
@@ -178,6 +184,10 @@ def _load_document_or_404(database: Session, document_id: str) -> Document:
 )
 async def discover_schema(
     document_id: str,
+    force: bool = Query(
+        False,
+        description="Force rediscovery even when persisted targets exist.",
+    ),
     database: Session = Depends(get_database),
 ) -> DiscoverSchemaResponse:
 
@@ -192,6 +202,13 @@ async def discover_schema(
             STRUCTURE_DETECTION_FAILED,
             "Run page extraction before schema discovery.",
         )
+
+    if not force and discovery_artifacts_reusable(document):
+        cached = load_document_targets(
+            database=database, document_id=document_id
+        )
+        if cached is not None and cached.targets:
+            return cached
 
     pages = list(
         database.scalars(
@@ -217,6 +234,15 @@ async def discover_schema(
         ) from exc
 
     persist_document_targets(database=database, result=result)
+    merge_provenance(
+        document,
+        {
+            **processing_versions_payload(document=document),
+            "targets_discovered": len(result.targets),
+            "discovery_reused": False,
+        },
+    )
+    database.commit()
 
     return result
 

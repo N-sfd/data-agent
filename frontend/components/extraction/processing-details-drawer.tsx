@@ -8,6 +8,7 @@ import ProcessingStatus from "@/components/processing-status";
 import type {
   ExtractionProgress,
   ExtractionSummary,
+  ProcessingStageEntry,
   UploadedDocument,
 } from "@/types/document";
 
@@ -23,6 +24,10 @@ interface ProcessingDetailsDrawerProps {
   waking: boolean;
   pipelineStage?: string | null;
   schemaTargetCount?: number | null;
+  stageHistory?: ProcessingStageEntry[] | null;
+  stageTimingsMs?: Record<string, number> | null;
+  pagesReused?: boolean;
+  discoveryReused?: boolean;
 }
 
 // Everything that used to sit permanently in the right column — the
@@ -41,6 +46,10 @@ export default function ProcessingDetailsDrawer({
   waking,
   pipelineStage = null,
   schemaTargetCount = null,
+  stageHistory = null,
+  stageTimingsMs = null,
+  pagesReused = false,
+  discoveryReused = false,
 }: ProcessingDetailsDrawerProps) {
   if (!open) {
     return null;
@@ -75,6 +84,10 @@ export default function ProcessingDetailsDrawer({
             elapsedSeconds={elapsedSeconds}
             waking={waking}
             pipelineStage={pipelineStage}
+            stageHistory={stageHistory}
+            stageTimingsMs={stageTimingsMs}
+            pagesReused={pagesReused}
+            discoveryReused={discoveryReused}
           />
 
           <IngestionChecklist steps={document.pipeline_log ?? []} />

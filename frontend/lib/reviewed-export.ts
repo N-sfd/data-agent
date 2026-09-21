@@ -162,6 +162,26 @@ export async function downloadDocumentExportCsv(
   downloadBlob(text, filename, "text/csv;charset=utf-8;");
 }
 
+export async function downloadDocumentExportXlsx(
+  documentId: string,
+  filename: string,
+  options?: { authoritativeOnly?: boolean },
+): Promise<void> {
+  const query = options?.authoritativeOnly ? "?authoritative_only=true" : "";
+  const response = await fetch(
+    apiUrl(`/api/documents/${documentId}/export.xlsx${query}`),
+  );
+  if (!response.ok) {
+    throw new Error(`Export Excel failed (${response.status})`);
+  }
+  const blob = await response.blob();
+  downloadBlob(
+    blob,
+    filename.endsWith(".xlsx") ? filename : `${filename}.xlsx`,
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  );
+}
+
 export async function getOraclePayloadPreview(
   documentId: string,
 ): Promise<OraclePayloadPreview> {

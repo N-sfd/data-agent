@@ -10,15 +10,17 @@ import {
   type FieldRowStatus,
 } from "@/components/extraction/field-row";
 import FieldsTable from "@/components/extraction/fields-table";
+import FieldsDatasetTable from "@/components/extraction/fields-dataset-table";
 import ResultSummaryBar from "@/components/extraction/result-summary-bar";
 import TableResult from "@/components/extraction/table-result";
 import ValidationIssuesPanel from "@/components/extraction/validation-issues-panel";
 import type { SourceViewRequest } from "@/components/source-verification-panel";
 import {
-  downloadReviewedCsv,
+  downloadDocumentExportXlsx,
   downloadReviewedJson,
   scalarToExportField,
 } from "@/lib/reviewed-export";
+import { downloadBlob } from "@/lib/export";
 import {
   listTargetCorrections,
   markTargetVerified,
@@ -399,7 +401,31 @@ export default function TargetResults({
     const fields = allRows
       .filter((row) => row.scalar)
       .map((row) => scalarToExportField(row.scalar!, row.correction));
-    downloadReviewedCsv(`${result.document_id}-fields.csv`, fields);
+    // Wide business CSV: field keys as headers, one data row.
+    const headers = fields.map((field) => field.field_key || field.field);
+    const values = fields.map((field) => field.value ?? "");
+    const escape = (cell: string) => {
+      if (/[",\n]/.test(cell)) return `"${cell.replace(/"/g, '""')}"`;
+      return cell;
+    };
+    const csv = `${headers.map(escape).join(",")}\n${values.map((v) => escape(String(v))).join(",")}\n`;
+    downloadBlob(
+      csv,
+      `${result.document_id}-fields.csv`,
+      "text/csv;charset=utf-8;",
+    );
+  }
+
+  async function exportFieldsXlsx() {
+    if (!documentId) return;
+    try {
+      await downloadDocumentExportXlsx(
+        documentId,
+        `${result.document_id}-export.xlsx`,
+      );
+    } catch {
+      // Non-fatal if metadata fields were not persisted yet.
+    }
   }
 
   return (
@@ -525,6 +551,16 @@ export default function TargetResults({
                   >
                     Download CSV
                   </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      void exportFieldsXlsx();
+                      setExportMenuOpen(false);
+                    }}
+                    className="block w-full rounded-md px-3 py-1.5 text-left text-xs text-foreground hover:bg-surface-soft"
+                  >
+                    Export Excel (.xlsx)
+                  </button>
                 </div>
               )}
             </div>
@@ -574,8 +610,12 @@ export default function TargetResults({
         id="fields-section"
         className={["space-y-6", activeTab === "fields" ? "" : "hidden"].join(" ")}
       >
+        <FieldsDatasetTable
+          rows={filteredRows.length > 0 ? filteredRows : fieldRows}
+          selectedId={selectedResultId}
+        />
         <FieldsTable
-          title="Fields"
+          title="Field details & review"
           rows={fieldRows}
           selectedId={selectedResultId}
           onViewSource={onViewSource}

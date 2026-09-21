@@ -4,6 +4,7 @@ import ExtractionLiveProgress from "@/components/extraction-live-progress";
 import type {
   ExtractionProgress,
   ExtractionSummary,
+  ProcessingStageEntry,
   UploadedDocument,
 } from "@/types/document";
 
@@ -16,6 +17,10 @@ interface ExtractionStatusPanelProps {
   elapsedSeconds?: number;
   waking?: boolean;
   pipelineStage?: string | null;
+  stageHistory?: ProcessingStageEntry[] | null;
+  stageTimingsMs?: Record<string, number> | null;
+  pagesReused?: boolean;
+  discoveryReused?: boolean;
 }
 
 const WORKFLOW_STEPS = [
@@ -35,6 +40,10 @@ export default function ExtractionStatusPanel({
   elapsedSeconds = 0,
   waking = false,
   pipelineStage = null,
+  stageHistory = null,
+  stageTimingsMs = null,
+  pagesReused = false,
+  discoveryReused = false,
 }: ExtractionStatusPanelProps) {
   const currentStep = !document
     ? 0
@@ -88,6 +97,10 @@ export default function ExtractionStatusPanel({
           elapsedSeconds={elapsedSeconds}
           waking={waking}
           pipelineStage={pipelineStage}
+          stageHistory={stageHistory}
+          stageTimingsMs={stageTimingsMs}
+          pagesReused={pagesReused}
+          discoveryReused={discoveryReused}
         />
       )}
 
