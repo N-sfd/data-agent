@@ -17,26 +17,26 @@ interface ExtractionLiveProgressProps {
 }
 
 const PIPELINE_STAGE_LABELS: Record<string, string> = {
-  uploaded: "Uploaded",
-  queued: "Queued",
-  reading_document: "Reading document",
-  processing_document: "Reading document",
-  rendering_ocr: "Rendering/OCR",
-  running_ocr: "Rendering/OCR",
-  indexing: "Indexing",
-  discovering_fields: "Discovering schema",
+  uploaded: "Uploading",
+  queued: "Reading pages",
+  reading_document: "Reading pages",
+  processing_document: "Reading pages",
+  rendering_ocr: "OCR",
+  running_ocr: "OCR",
+  indexing: "Detecting structure",
+  detecting_structure: "Detecting structure",
+  discovering_fields: "Discovering fields",
   extracting_data: "Extracting",
   validating_results: "Validating",
   complete: "Complete",
 };
 
 const PIPELINE_ORDER = [
-  "Uploaded",
-  "Queued",
-  "Reading document",
-  "Rendering/OCR",
-  "Indexing",
-  "Discovering schema",
+  "Uploading",
+  "Reading pages",
+  "OCR",
+  "Detecting structure",
+  "Discovering fields",
   "Extracting",
   "Validating",
   "Complete",
@@ -44,15 +44,15 @@ const PIPELINE_ORDER = [
 
 const TIMING_LABELS: Record<string, string> = {
   source_retrieval_ms: "Source retrieval",
-  document_page_loading_ms: "Document/page loading",
+  document_page_loading_ms: "Reading pages",
   ocr_ms: "OCR",
   pages_ocr_ms: "Pages + OCR",
-  indexing_ms: "Indexing",
-  table_detection_ms: "Table detection",
-  schema_discovery_ms: "Schema discovery",
-  discovery_ms: "Discovery",
-  extraction_ms: "Extraction",
-  validation_ms: "Validation",
+  indexing_ms: "Detecting structure",
+  table_detection_ms: "Detecting structure",
+  schema_discovery_ms: "Discovering fields",
+  discovery_ms: "Discovering fields",
+  extraction_ms: "Extracting",
+  validation_ms: "Validating",
   db_writes_ms: "DB writes",
 };
 
@@ -295,7 +295,7 @@ export default function ExtractionLiveProgress({
 
       <div className="rounded-xl bg-surface-soft px-3.5 py-2.5 text-xs text-text-secondary">
         {waking
-          ? "Waking processing service..."
+          ? "Connecting to processing service…"
           : stillIdleSeconds > SLOW_THRESHOLD_SECONDS
             ? "This is taking longer than usual. The backend is still processing the document — you can keep this page open."
             : stillIdleSeconds > STILL_WORKING_THRESHOLD_SECONDS

@@ -97,40 +97,131 @@ export default function DocumentUploader({
     getWarmupStatus(),
   );
 
-  // True when the user already clicked Upload and we are waiting on health.
+  // True once a file is selected and we intend to upload as soon as healthy.
   const uploadWhenReadyRef = useRef(false);
   const uploadingRef = useRef(false);
+  const selectedFileRef = useRef<File | null>(null);
 
   useEffect(() => {
     startBackendWarmup().catch(() => {
-      // Background only — explicit upload awaits ensureBackendHealthy.
+      // Background only — selection awaits shared readiness.
     });
     return subscribeWarmupStatus(setWarmupStatus);
   }, []);
 
-  const onDrop = useCallback((acceptedFiles: File[]) => {
-    setError("");
+  const performUpload = useCallback(
+    async (file: File) => {
+      if (uploadingRef.current) return;
+      uploadingRef.current = true;
+      uploadWhenReadyRef.current = false;
 
-    const file = acceptedFiles[0];
+      setError("");
+      setStage("uploading");
+      setUploadFraction(0);
+      markUploadStarted();
 
-    if (!file) return;
+      try {
+        const result = await uploadFileWithProgress<UploadedDocument>(
+          "/api/documents/upload",
+          file,
+          setUploadFraction,
+        );
 
-    const extension = file.name
-      .toLowerCase()
-      .slice(file.name.lastIndexOf("."));
+        markUploadCompleted();
 
-    if (!ACCEPTED_EXTENSIONS.includes(extension)) {
-      setError(
-        "Please select a supported business document (PDF, Office, text, or image).",
-      );
-      return;
-    }
+        if (result.status === "portfolio_pending" && result.embedded_files) {
+          setPendingPortfolio({
+            documentId: result.document_id,
+            files: result.embedded_files,
+          });
+          setStage("file_selected");
+          return;
+        }
 
-    setSelectedFile(file);
-    setStage("file_selected");
-    setUploadFraction(0);
-    uploadWhenReadyRef.current = false;
-  }, []);
+        if (result.duplicate && result.existing_document) {
+          setPendingDuplicate({
+            documentId: result.document_id,
+            originalFilename: result.original_filename,
+            existingDocument: result.existing_document,
+          });
+          setStage("file_selected");
+          return;
+        }
+
+        setStage("upload_complete");
+        onUploadComplete(result);
+      } catch (uploadError) {
+        setStage("failed");
+        setError(
+          uploadError instanceof Error
+            ? uploadError.message
+            : "Unable to upload the document.",
+        );
+      } finally {
+        uploadingRef.current = false;
+      }
+    },
+    [onUploadComplete],
+  );
+
+  const queueUploadForFile = useCallback(
+    (file: File) => {
+      selectedFileRef.current = file;
+      uploadWhenReadyRef.current = true;
+      setError("");
+
+      if (getWarmupStatus() === "healthy") {
+        void performUpload(file);
+        return;
+      }
+
+      // Backend still waking — keep file, show connecting, join shared warm-up.
+      setStage("service_starting");
+      void ensureBackendHealthy()
+        .then(() => {
+          const pending = selectedFileRef.current;
+          if (!uploadWhenReadyRef.current || !pending || uploadingRef.current) {
+            return;
+          }
+          return performUpload(pending);
+        })
+        .catch((readyError: unknown) => {
+          if (!uploadWhenReadyRef.current) return;
+          uploadWhenReadyRef.current = false;
+          setStage("failed");
+          setError(
+            readyError instanceof Error
+              ? readyError.message
+              : "Processing service is not ready yet.",
+          );
+        });
+    },
+    [performUpload],
+  );
+
+  const onDrop = useCallback(
+    (acceptedFiles: File[]) => {
+      const file = acceptedFiles[0];
+      if (!file) return;
+
+      const extension = file.name
+        .toLowerCase()
+        .slice(file.name.lastIndexOf("."));
+
+      if (!ACCEPTED_EXTENSIONS.includes(extension)) {
+        setError(
+          "Please select a supported business document (PDF, Office, text, or image).",
+        );
+        return;
+      }
+
+      setSelectedFile(file);
+      setUploadFraction(0);
+      // Auto-start: warm → upload now; cold → wait for /health then upload.
+      queueUploadForFile(file);
+    },
+    [queueUploadForFile],
+  );
 
   const {
     getRootProps,
@@ -163,102 +254,6 @@ export default function DocumentUploader({
     multiple: false,
     maxFiles: 1,
   });
-
-  async function performUpload(file: File) {
-    if (uploadingRef.current) return;
-    uploadingRef.current = true;
-    uploadWhenReadyRef.current = false;
-
-    setError("");
-    setStage("uploading");
-    setUploadFraction(0);
-    markUploadStarted();
-
-    try {
-      const result = await uploadFileWithProgress<UploadedDocument>(
-        "/api/documents/upload",
-        file,
-        setUploadFraction,
-      );
-
-      markUploadCompleted();
-
-      if (result.status === "portfolio_pending" && result.embedded_files) {
-        setPendingPortfolio({
-          documentId: result.document_id,
-          files: result.embedded_files,
-        });
-        setStage("file_selected");
-        return;
-      }
-
-      if (result.duplicate && result.existing_document) {
-        setPendingDuplicate({
-          documentId: result.document_id,
-          originalFilename: result.original_filename,
-          existingDocument: result.existing_document,
-        });
-        setStage("file_selected");
-        return;
-      }
-
-      setStage("upload_complete");
-      onUploadComplete(result);
-    } catch (uploadError) {
-      setStage("failed");
-      setError(
-        uploadError instanceof Error
-          ? uploadError.message
-          : "Unable to upload the document.",
-      );
-    } finally {
-      uploadingRef.current = false;
-    }
-  }
-
-  async function uploadDocument() {
-    if (!selectedFile || uploadingRef.current) return;
-
-    setError("");
-
-    if (getWarmupStatus() === "healthy") {
-      await performUpload(selectedFile);
-      return;
-    }
-
-    // Keep the file; show connecting — do not start a second health storm.
-    uploadWhenReadyRef.current = true;
-    setStage("service_starting");
-
-    try {
-      await ensureBackendHealthy();
-      if (!uploadWhenReadyRef.current || !selectedFile) return;
-      await performUpload(selectedFile);
-    } catch (readyError) {
-      uploadWhenReadyRef.current = false;
-      setStage("failed");
-      setError(
-        readyError instanceof Error
-          ? readyError.message
-          : "Processing service is not ready yet.",
-      );
-    }
-  }
-
-  // If warm-up finishes after the user already clicked Upload, continue.
-  useEffect(() => {
-    if (
-      warmupStatus === "healthy" &&
-      uploadWhenReadyRef.current &&
-      selectedFile &&
-      !uploadingRef.current &&
-      stage === "service_starting"
-    ) {
-      void performUpload(selectedFile);
-    }
-    // performUpload closes over selectedFile/stage intentionally via refs.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [warmupStatus, selectedFile, stage]);
 
   async function handleDuplicateResolution(
     action: "use_existing" | "upload_anyway",
@@ -374,10 +369,16 @@ export default function DocumentUploader({
 
   function clearFile() {
     uploadWhenReadyRef.current = false;
+    selectedFileRef.current = null;
     setSelectedFile(null);
     setStage("idle");
     setUploadFraction(0);
     setError("");
+  }
+
+  function retryUpload() {
+    if (!selectedFile || uploadingRef.current) return;
+    queueUploadForFile(selectedFile);
   }
 
   const busy = stage === "service_starting" || stage === "uploading";
@@ -523,25 +524,23 @@ export default function DocumentUploader({
             </div>
           )}
 
-          {stage !== "uploading" &&
-            stage !== "upload_complete" &&
-            stage !== "service_starting" && (
+          {stage === "failed" && (
             <div className="mt-5 flex flex-wrap gap-3">
               <button
                 type="button"
-                onClick={() => void uploadDocument()}
+                onClick={retryUpload}
                 disabled={busy}
                 className="btn-primary disabled:cursor-not-allowed disabled:opacity-60"
               >
                 <UploadCloud className="h-4 w-4" />
-                Upload document
+                Retry upload
               </button>
             </div>
           )}
 
           {stage === "service_starting" && (
             <p className="mt-4 text-xs text-text-muted">
-              This wait is for the API host to wake — the PDF has not been
+              This wait is for the API host to wake — the document has not been
               uploaded or processed yet.
             </p>
           )}

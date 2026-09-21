@@ -389,18 +389,21 @@ export default function AnalysisRequest({
             <div className="flex items-center gap-2 text-sm text-text-secondary">
               <Loader2 className="h-4 w-4 animate-spin text-primary" />
               {waking
-                ? "Waking processing service…"
+                ? "Connecting to processing service…"
                 : schemaDiscovering
-                  ? "Discovering fields, tables, and clauses…"
+                  ? "Discovering fields…"
                   : pipelineStage === "rendering_ocr" ||
                       pipelineStage === "running_ocr"
-                    ? "Reading pages and running OCR where needed…"
-                    : pipelineStage === "indexing"
-                      ? "Indexing page text…"
+                    ? "OCR…"
+                    : pipelineStage === "indexing" ||
+                        pipelineStage === "detecting_structure"
+                      ? "Detecting structure…"
                       : pipelineStage === "reading_document" ||
                           pipelineStage === "queued"
-                        ? "Preparing document…"
-                        : "Processing document pages…"}
+                        ? "Reading pages…"
+                        : pipelineStage === "discovering_fields"
+                          ? "Discovering fields…"
+                          : "Processing document pages…"}
             </div>
             <div className="grid gap-2 sm:grid-cols-2">
               {Array.from({ length: 6 }).map((_, index) => (

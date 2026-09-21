@@ -84,7 +84,7 @@ describe("DocumentUploader", () => {
     });
   });
 
-  it("starts background warm-up on mount and uploads immediately when already healthy", async () => {
+  it("starts background warm-up on mount and auto-uploads when already healthy", async () => {
     const uploadResult = deferred<unknown>();
     uploadFileWithProgressMock.mockReturnValue(uploadResult.promise);
     const onUploadComplete = vi.fn();
@@ -94,12 +94,12 @@ describe("DocumentUploader", () => {
     await waitFor(() => expect(startBackendWarmupMock).toHaveBeenCalledTimes(1));
 
     await selectFile();
-    fireEvent.click(screen.getByRole("button", { name: /upload document/i }));
 
     await waitFor(() =>
       expect(screen.getByText(/uploading document/i)).toBeInTheDocument(),
     );
     expect(screen.queryByText(/connecting to processing service/i)).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /upload document/i })).not.toBeInTheDocument();
     expect(ensureBackendHealthyMock).not.toHaveBeenCalled();
 
     act(() => {
@@ -128,8 +128,6 @@ describe("DocumentUploader", () => {
     const file = await selectFile("cold-start.pdf");
     expect(screen.getByText(/file ready/i)).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: /upload document/i }));
-
     await waitFor(() =>
       expect(
         screen.getByText(/connecting to processing service/i),
@@ -140,6 +138,7 @@ describe("DocumentUploader", () => {
     ).toBeInTheDocument();
     expect(screen.getByText("cold-start.pdf")).toBeInTheDocument();
     expect(uploadFileWithProgressMock).not.toHaveBeenCalled();
+    expect(screen.queryByRole("button", { name: /upload document/i })).not.toBeInTheDocument();
 
     getWarmupStatusMock.mockReturnValue("healthy");
     act(() => {
@@ -163,18 +162,25 @@ describe("DocumentUploader", () => {
 
   it("surfaces a failed upload and lets the user retry from the same selected file", async () => {
     uploadFileWithProgressMock.mockRejectedValueOnce(new Error("Server exploded."));
+    uploadFileWithProgressMock.mockResolvedValueOnce({
+      document_id: "doc-3",
+      original_filename: "contract.pdf",
+      status: "completed",
+    });
     const onUploadComplete = vi.fn();
 
     render(<DocumentUploader onUploadComplete={onUploadComplete} />);
     await waitFor(() => expect(startBackendWarmupMock).toHaveBeenCalledTimes(1));
 
     await selectFile();
-    fireEvent.click(screen.getByRole("button", { name: /upload document/i }));
 
     await waitFor(() => expect(screen.getByText("Server exploded.")).toBeInTheDocument());
     expect(onUploadComplete).not.toHaveBeenCalled();
-    expect(
-      screen.getByRole("button", { name: /upload document/i }),
-    ).not.toBeDisabled();
+
+    const retry = screen.getByRole("button", { name: /retry upload/i });
+    expect(retry).not.toBeDisabled();
+    fireEvent.click(retry);
+
+    await waitFor(() => expect(onUploadComplete).toHaveBeenCalledTimes(1));
   });
 });

@@ -122,10 +122,10 @@ function NewExtractionPageContent() {
   const universalResultRef = useRef<HTMLDivElement | null>(null);
   const targetResultRef = useRef<HTMLDivElement | null>(null);
 
-  // Overlap Render cold-start with browsing/file pick — do not wait for Upload.
+  // Overlap Render cold-start with browsing/file pick — upload auto-starts when healthy.
   useEffect(() => {
     startBackendWarmup().catch(() => {
-      // Background only; uploader awaits readiness on explicit upload.
+      // Background only; uploader awaits readiness and auto-uploads the selected file.
     });
   }, []);
 
@@ -974,7 +974,7 @@ function NewExtractionPageContent() {
                         <div className="mt-4 flex items-center gap-2 rounded-xl border border-primary/15 bg-primary/5 px-3.5 py-2.5 text-xs text-text-secondary">
                           <span className="h-2 w-2 animate-pulse rounded-full bg-primary" />
                           {waking
-                            ? "Waking processing service... this can take up to a minute after idle."
+                            ? "Connecting to processing service… this can take up to a minute after idle."
                             : ANALYZE_STAGE_MESSAGES[analyzeStageIndex]}
                         </div>
                       )}

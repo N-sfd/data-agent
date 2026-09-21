@@ -81,6 +81,7 @@ export function markUploadStarted() {
 
 export function markUploadCompleted() {
   mark("upload completed", "uploadCompletedAt");
+  logWarmupSummary("after upload");
 }
 
 export function markProcessingStarted() {
@@ -89,6 +90,27 @@ export function markProcessingStarted() {
 
 export function markExtractionCompleted() {
   mark("extraction completed", "extractionCompletedAt");
+  logWarmupSummary("after extraction");
+}
+
+function logWarmupSummary(when: string) {
+  if (typeof console === "undefined" || !console.info) return;
+  const t = timings;
+  const opened = t.pageOpenedAt;
+  if (opened == null) return;
+  const delta = (at: number | null) =>
+    at == null ? "—" : `${at - opened}ms`;
+  console.info(
+    `[data-agent timing summary ${when}]`,
+    `page→healthy=${delta(t.healthyAt)}`,
+    `page→uploadStart=${delta(t.uploadStartedAt)}`,
+    `page→uploadDone=${delta(t.uploadCompletedAt)}`,
+    `healthy→uploadStart=${
+      t.healthyAt != null && t.uploadStartedAt != null
+        ? `${t.uploadStartedAt - t.healthyAt}ms`
+        : "—"
+    }`,
+  );
 }
 
 export function subscribeWarmupStatus(listener: StatusListener): () => void {
@@ -135,6 +157,7 @@ async function runWarmupLoop(): Promise<void> {
     if (ok) {
       mark("backend healthy", "healthyAt");
       setStatus("healthy");
+      logWarmupSummary("backend healthy");
       return;
     }
 
@@ -147,7 +170,7 @@ async function runWarmupLoop(): Promise<void> {
 
   setStatus("failed");
   throw new Error(
-    "Processing service did not become ready in time. Your file is still selected — try Upload again in a moment.",
+    "Processing service did not become ready in time. Your file is still selected — retry in a moment.",
   );
 }
 
