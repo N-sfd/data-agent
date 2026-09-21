@@ -82,6 +82,12 @@ def _append_stage(job: ExtractionJob, stage: str) -> None:
 
 
 def _fail_job(job: ExtractionJob, database, exc: Exception) -> None:
+    # Discard any partial writes from the failed stage (e.g. a
+    # delete-then-insert of discovered targets that threw mid-loop) before
+    # committing the failure itself — otherwise the partial rows survive
+    # and a later "Use Existing" reload sees a non-empty but incomplete
+    # target set and wrongly treats it as a finished, reusable result.
+    database.rollback()
     job.status = "failed"
     job.error_message = str(exc)
     job.completed_at = datetime.now(timezone.utc)
@@ -345,7 +351,7 @@ async def run_processing_job(job_id: int) -> None:
             duration_ms=int((time.perf_counter() - started) * 1000),
             target_count=target_count,
             page_text_chars=page_text_chars,
-            pages_processed=result.get("pages_processed"),
+            pages_processed=len(pages),
             pages_reused=not force_pages,
             discovery_reused=reused_discovery,
             **{f"timing_{key}": value for key, value in stage_timings.items()},
