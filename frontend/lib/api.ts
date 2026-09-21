@@ -184,14 +184,17 @@ export async function apiFetch<T = unknown>(
   return text as unknown as T;
 }
 
+import { ensureBackendHealthy } from "@/lib/backend-warmup";
+
 /**
  * Ping the backend health endpoint before uploads or long-running work.
- * Render free-tier cold starts can take 30-90s; retries surface wake-up UI.
+ * Uses the shared warm-up loop (gentle backoff, long per-attempt timeout)
+ * so callers do not each start aggressive /health polling.
  */
 export async function wakeBackend(
-  onRetry?: (attempt: number, total: number) => void,
+  _onRetry?: (attempt: number, total: number) => void,
 ): Promise<void> {
-  await apiFetch("/health", { cache: "no-store" }, onRetry);
+  await ensureBackendHealthy();
 }
 
 // A few quick attempts rather than a single shot — Render's free tier is

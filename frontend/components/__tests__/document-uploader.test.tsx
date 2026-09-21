@@ -3,12 +3,29 @@ import { describe, expect, it, vi, beforeEach } from "vitest";
 
 import DocumentUploader from "@/components/document-uploader";
 
-const { wakeBackendMock } = vi.hoisted(() => ({
-  wakeBackendMock: vi.fn(),
+const {
+  startBackendWarmupMock,
+  ensureBackendHealthyMock,
+  getWarmupStatusMock,
+  subscribeWarmupStatusMock,
+} = vi.hoisted(() => ({
+  startBackendWarmupMock: vi.fn(),
+  ensureBackendHealthyMock: vi.fn(),
+  getWarmupStatusMock: vi.fn(),
+  subscribeWarmupStatusMock: vi.fn(),
+}));
+
+vi.mock("@/lib/backend-warmup", () => ({
+  startBackendWarmup: startBackendWarmupMock,
+  ensureBackendHealthy: ensureBackendHealthyMock,
+  getWarmupStatus: getWarmupStatusMock,
+  subscribeWarmupStatus: subscribeWarmupStatusMock,
+  markUploadStarted: vi.fn(),
+  markUploadCompleted: vi.fn(),
 }));
 
 vi.mock("@/lib/api", () => ({
-  wakeBackend: wakeBackendMock,
+  wakeBackend: vi.fn(),
 }));
 
 const { uploadFileWithProgressMock } = vi.hoisted(() => ({
@@ -45,32 +62,45 @@ function deferred<T>() {
 }
 
 describe("DocumentUploader", () => {
+  let statusListener: ((status: string) => void) | null = null;
+
   beforeEach(() => {
-    wakeBackendMock.mockReset();
+    statusListener = null;
+    startBackendWarmupMock.mockReset();
+    ensureBackendHealthyMock.mockReset();
+    getWarmupStatusMock.mockReset();
+    subscribeWarmupStatusMock.mockReset();
     uploadFileWithProgressMock.mockReset();
+
+    startBackendWarmupMock.mockResolvedValue(undefined);
+    ensureBackendHealthyMock.mockResolvedValue(undefined);
+    getWarmupStatusMock.mockReturnValue("healthy");
+    subscribeWarmupStatusMock.mockImplementation((listener: (s: string) => void) => {
+      statusListener = listener;
+      listener(getWarmupStatusMock());
+      return () => {
+        statusListener = null;
+      };
+    });
   });
 
-  it("uploads immediately, without a service_starting stage, once pre-warm has already resolved", async () => {
-    wakeBackendMock.mockResolvedValue(undefined);
+  it("starts background warm-up on mount and uploads immediately when already healthy", async () => {
     const uploadResult = deferred<unknown>();
     uploadFileWithProgressMock.mockReturnValue(uploadResult.promise);
     const onUploadComplete = vi.fn();
 
     render(<DocumentUploader onUploadComplete={onUploadComplete} />);
 
-    // Let the mount-time pre-warm resolve before the user does anything.
-    await waitFor(() => expect(wakeBackendMock).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(startBackendWarmupMock).toHaveBeenCalledTimes(1));
 
     await selectFile();
     fireEvent.click(screen.getByRole("button", { name: /upload document/i }));
 
     await waitFor(() =>
-      expect(screen.getByRole("button", { name: /uploading/i })).toBeInTheDocument(),
+      expect(screen.getByText(/uploading document/i)).toBeInTheDocument(),
     );
-    expect(screen.queryByText(/preparing/i)).not.toBeInTheDocument();
-    // Only the one mount-time pre-warm call — clicking Upload after it
-    // already resolved must not trigger a second /health hit.
-    expect(wakeBackendMock).toHaveBeenCalledTimes(1);
+    expect(screen.queryByText(/connecting to processing service/i)).not.toBeInTheDocument();
+    expect(ensureBackendHealthyMock).not.toHaveBeenCalled();
 
     act(() => {
       uploadResult.resolve({
@@ -83,9 +113,12 @@ describe("DocumentUploader", () => {
     await waitFor(() => expect(onUploadComplete).toHaveBeenCalledTimes(1));
   });
 
-  it("shows service_starting (no fake percentage) while cold, then auto-uploads the already-selected file once ready", async () => {
-    const prewarm = deferred<void>();
-    wakeBackendMock.mockReturnValueOnce(prewarm.promise);
+  it("keeps the selected file while connecting, then auto-uploads when healthy", async () => {
+    getWarmupStatusMock.mockReturnValue("warming");
+    const ready = deferred<void>();
+    ensureBackendHealthyMock.mockReturnValue(ready.promise);
+    startBackendWarmupMock.mockReturnValue(ready.promise);
+
     const uploadResult = deferred<unknown>();
     uploadFileWithProgressMock.mockReturnValue(uploadResult.promise);
     const onUploadComplete = vi.fn();
@@ -93,20 +126,26 @@ describe("DocumentUploader", () => {
     render(<DocumentUploader onUploadComplete={onUploadComplete} />);
 
     const file = await selectFile("cold-start.pdf");
+    expect(screen.getByText(/file ready/i)).toBeInTheDocument();
+
     fireEvent.click(screen.getByRole("button", { name: /upload document/i }));
 
-    // Still cold: the uploader must say the service is starting, not
-    // show any percentage, and must not have asked the user to reselect.
     await waitFor(() =>
-      expect(screen.getByText(/preparing processing service/i)).toBeInTheDocument(),
+      expect(
+        screen.getByText(/connecting to processing service/i),
+      ).toBeInTheDocument(),
     );
-    expect(screen.queryByText(/%/)).not.toBeInTheDocument();
+    expect(
+      screen.getByText(/your file is ready and will upload automatically/i),
+    ).toBeInTheDocument();
     expect(screen.getByText("cold-start.pdf")).toBeInTheDocument();
     expect(uploadFileWithProgressMock).not.toHaveBeenCalled();
 
-    // Backend finishes waking — upload should fire automatically with
-    // the same File, no re-selection required.
-    act(() => prewarm.resolve());
+    getWarmupStatusMock.mockReturnValue("healthy");
+    act(() => {
+      statusListener?.("healthy");
+      ready.resolve();
+    });
 
     await waitFor(() => expect(uploadFileWithProgressMock).toHaveBeenCalledTimes(1));
     expect(uploadFileWithProgressMock.mock.calls[0][1]).toBe(file);
@@ -123,12 +162,11 @@ describe("DocumentUploader", () => {
   });
 
   it("surfaces a failed upload and lets the user retry from the same selected file", async () => {
-    wakeBackendMock.mockResolvedValue(undefined);
     uploadFileWithProgressMock.mockRejectedValueOnce(new Error("Server exploded."));
     const onUploadComplete = vi.fn();
 
     render(<DocumentUploader onUploadComplete={onUploadComplete} />);
-    await waitFor(() => expect(wakeBackendMock).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(startBackendWarmupMock).toHaveBeenCalledTimes(1));
 
     await selectFile();
     fireEvent.click(screen.getByRole("button", { name: /upload document/i }));

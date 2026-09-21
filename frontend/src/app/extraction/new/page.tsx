@@ -23,6 +23,11 @@ import DocumentUploader from "@/components/document-uploader";
 import BackendStatusBanner from "@/components/backend-status-banner";
 import ImportSourceTabs from "@/components/import-source-tabs";
 import {
+  markExtractionCompleted,
+  markProcessingStarted,
+  startBackendWarmup,
+} from "@/lib/backend-warmup";
+import {
   analyzeContract,
   confirmRelationship,
   createCustomTarget,
@@ -116,6 +121,13 @@ function NewExtractionPageContent() {
   const resultsWorkspaceRef = useRef<HTMLDivElement | null>(null);
   const universalResultRef = useRef<HTMLDivElement | null>(null);
   const targetResultRef = useRef<HTMLDivElement | null>(null);
+
+  // Overlap Render cold-start with browsing/file pick — do not wait for Upload.
+  useEffect(() => {
+    startBackendWarmup().catch(() => {
+      // Background only; uploader awaits readiness on explicit upload.
+    });
+  }, []);
 
   const [processingDrawerOpen, setProcessingDrawerOpen] = useState(false);
   const [sourceRequest, setSourceRequest] =
@@ -430,6 +442,7 @@ function NewExtractionPageContent() {
     setSourceRequest(null);
     setMobileSourceOpen(false);
     setExtracting(true);
+    markProcessingStarted();
 
     try {
       if (
@@ -678,6 +691,7 @@ function NewExtractionPageContent() {
 
       setTargetResult(result);
       setTargetResultDurationMs(Date.now() - startedAt);
+      markExtractionCompleted();
 
       const first = result?.scalars?.[0];
       if (first) {

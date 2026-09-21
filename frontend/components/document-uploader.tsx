@@ -12,7 +12,15 @@ import {
 
 import DuplicateDialog from "@/components/duplicate-dialog";
 import PortfolioPicker from "@/components/portfolio-picker";
-import { wakeBackend } from "@/lib/api";
+import {
+  ensureBackendHealthy,
+  getWarmupStatus,
+  markUploadCompleted,
+  markUploadStarted,
+  startBackendWarmup,
+  subscribeWarmupStatus,
+  type WarmupStatus,
+} from "@/lib/backend-warmup";
 import { resolveDuplicate, selectPortfolioFile } from "@/lib/documents";
 import { uploadFileWithProgress } from "@/lib/upload";
 import { formatBytes } from "@/lib/format";
@@ -45,10 +53,8 @@ const ACCEPTED_EXTENSIONS = [
 ];
 
 /**
- * Explicit upload lifecycle. "queued"/"processing"/"complete" are not
- * represented here — this component unmounts the instant onUploadComplete
- * fires, handing off to extraction/new/page.tsx's already-real (non-fake)
- * processing progress (extraction-live-progress.tsx).
+ * Explicit upload lifecycle. Processing progress after upload is owned by
+ * extraction/new/page.tsx — this component only covers file + service readiness.
  */
 type UploadStage =
   | "idle"
@@ -87,23 +93,19 @@ export default function DocumentUploader({
     useState<PendingPortfolio | null>(null);
   const [selectingPortfolioFile, setSelectingPortfolioFile] =
     useState(false);
+  const [warmupStatus, setWarmupStatus] = useState<WarmupStatus>(() =>
+    getWarmupStatus(),
+  );
 
-  // Pre-warm: fire once when this page mounts, independent of file
-  // selection, so the backend may already be awake by the time the user
-  // picks a document. serviceReadyRef (not state) avoids a stale-closure
-  // read inside ensureServiceReady after an `await`.
-  const serviceReadyRef = useRef(false);
-  const prewarmRef = useRef<Promise<void> | null>(null);
+  // True when the user already clicked Upload and we are waiting on health.
+  const uploadWhenReadyRef = useRef(false);
+  const uploadingRef = useRef(false);
 
   useEffect(() => {
-    prewarmRef.current = wakeBackend()
-      .then(() => {
-        serviceReadyRef.current = true;
-      })
-      .catch(() => {
-        // Swallow here — the user may never upload this session. An
-        // actual upload attempt below gets its own fresh wake sequence.
-      });
+    startBackendWarmup().catch(() => {
+      // Background only — explicit upload awaits ensureBackendHealthy.
+    });
+    return subscribeWarmupStatus(setWarmupStatus);
   }, []);
 
   const onDrop = useCallback((acceptedFiles: File[]) => {
@@ -127,6 +129,7 @@ export default function DocumentUploader({
     setSelectedFile(file);
     setStage("file_selected");
     setUploadFraction(0);
+    uploadWhenReadyRef.current = false;
   }, []);
 
   const {
@@ -161,39 +164,24 @@ export default function DocumentUploader({
     maxFiles: 1,
   });
 
-  async function ensureServiceReady() {
-    if (serviceReadyRef.current) return;
-
-    setStage("service_starting");
-
-    if (prewarmRef.current) {
-      await prewarmRef.current;
-    }
-
-    if (serviceReadyRef.current) return;
-
-    // Pre-warm hadn't started, was still running, or failed — the user
-    // has now explicitly asked to upload, so make one more attempt.
-    await wakeBackend();
-    serviceReadyRef.current = true;
-  }
-
-  async function uploadDocument() {
-    if (!selectedFile) return;
+  async function performUpload(file: File) {
+    if (uploadingRef.current) return;
+    uploadingRef.current = true;
+    uploadWhenReadyRef.current = false;
 
     setError("");
+    setStage("uploading");
+    setUploadFraction(0);
+    markUploadStarted();
 
     try {
-      await ensureServiceReady();
-
-      setStage("uploading");
-      setUploadFraction(0);
-
       const result = await uploadFileWithProgress<UploadedDocument>(
         "/api/documents/upload",
-        selectedFile,
+        file,
         setUploadFraction,
       );
+
+      markUploadCompleted();
 
       if (result.status === "portfolio_pending" && result.embedded_files) {
         setPendingPortfolio({
@@ -223,8 +211,54 @@ export default function DocumentUploader({
           ? uploadError.message
           : "Unable to upload the document.",
       );
+    } finally {
+      uploadingRef.current = false;
     }
   }
+
+  async function uploadDocument() {
+    if (!selectedFile || uploadingRef.current) return;
+
+    setError("");
+
+    if (getWarmupStatus() === "healthy") {
+      await performUpload(selectedFile);
+      return;
+    }
+
+    // Keep the file; show connecting — do not start a second health storm.
+    uploadWhenReadyRef.current = true;
+    setStage("service_starting");
+
+    try {
+      await ensureBackendHealthy();
+      if (!uploadWhenReadyRef.current || !selectedFile) return;
+      await performUpload(selectedFile);
+    } catch (readyError) {
+      uploadWhenReadyRef.current = false;
+      setStage("failed");
+      setError(
+        readyError instanceof Error
+          ? readyError.message
+          : "Processing service is not ready yet.",
+      );
+    }
+  }
+
+  // If warm-up finishes after the user already clicked Upload, continue.
+  useEffect(() => {
+    if (
+      warmupStatus === "healthy" &&
+      uploadWhenReadyRef.current &&
+      selectedFile &&
+      !uploadingRef.current &&
+      stage === "service_starting"
+    ) {
+      void performUpload(selectedFile);
+    }
+    // performUpload closes over selectedFile/stage intentionally via refs.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [warmupStatus, selectedFile, stage]);
 
   async function handleDuplicateResolution(
     action: "use_existing" | "upload_anyway",
@@ -258,8 +292,6 @@ export default function DocumentUploader({
             ? resolveError.message
             : "Unable to resolve the duplicate upload.";
 
-        // Staged temp file expired (common on multi-instance hosts).
-        // Re-upload the selected file with allow_duplicate=true.
         if (
           action === "upload_anyway" &&
           selectedFile &&
@@ -277,8 +309,6 @@ export default function DocumentUploader({
           return;
         }
 
-        // use_existing with missing stage still works when existing id is sent;
-        // if that fails, surface the error.
         throw resolveError instanceof Error
           ? resolveError
           : new Error(message);
@@ -343,6 +373,7 @@ export default function DocumentUploader({
   }
 
   function clearFile() {
+    uploadWhenReadyRef.current = false;
     setSelectedFile(null);
     setStage("idle");
     setUploadFraction(0);
@@ -351,6 +382,7 @@ export default function DocumentUploader({
 
   const busy = stage === "service_starting" || stage === "uploading";
   const percent = Math.round(uploadFraction * 100);
+  const serviceReady = warmupStatus === "healthy";
 
   return (
     <div className="editorial-card p-8">
@@ -398,6 +430,17 @@ export default function DocumentUploader({
             <span className="font-medium text-text-secondary">PDF</span>{" "}
             (full source) · Office / text (native extract) · Images (OCR)
           </p>
+
+          {warmupStatus === "warming" && (
+            <p className="mt-4 text-xs text-text-muted">
+              Connecting to processing service in the background…
+            </p>
+          )}
+          {serviceReady && (
+            <p className="mt-4 text-xs font-medium text-success">
+              Processing service ready
+            </p>
+          )}
         </div>
       ) : (
         <div className="rounded-2xl border border-border bg-surface-soft/50 p-5">
@@ -428,81 +471,80 @@ export default function DocumentUploader({
             )}
           </div>
 
-          {stage === "service_starting" && (
-            <div className="mt-5">
-              <p className="text-sm font-medium text-foreground">
-                Preparing processing service…
-              </p>
-              <p className="mt-1 text-xs text-text-muted">
-                The document is ready and will upload automatically once
-                the service is available — this can take up to 90 seconds
-                on the free tier.
-              </p>
-              <div className="progress-violet mt-3">
-                <div className="progress-violet-fill w-1/3 animate-[indeterminate_1.4s_ease-in-out_infinite]" />
-              </div>
-            </div>
-          )}
+          <ul className="mt-5 space-y-2 text-sm">
+            <li className="flex items-center gap-2 text-success">
+              <CheckCircle2 className="h-4 w-4 shrink-0" />
+              File ready
+            </li>
+
+            {stage === "service_starting" && (
+              <li className="flex items-start gap-2 text-text-secondary">
+                <Loader2 className="mt-0.5 h-4 w-4 shrink-0 animate-spin text-primary" />
+                <span>
+                  <span className="font-medium text-foreground">
+                    Connecting to processing service…
+                  </span>
+                  <span className="mt-1 block text-xs text-text-muted">
+                    Processing service is starting. Your file is ready and will
+                    upload automatically.
+                  </span>
+                </span>
+              </li>
+            )}
+
+            {serviceReady && stage !== "service_starting" && (
+              <li className="flex items-center gap-2 text-success">
+                <CheckCircle2 className="h-4 w-4 shrink-0" />
+                Processing service ready
+              </li>
+            )}
+
+            {stage === "uploading" && (
+              <li className="flex items-center gap-2 text-foreground">
+                <Loader2 className="h-4 w-4 shrink-0 animate-spin text-primary" />
+                Uploading document… {percent}%
+              </li>
+            )}
+
+            {stage === "upload_complete" && (
+              <li className="flex items-center gap-2 text-success">
+                <CheckCircle2 className="h-4 w-4 shrink-0" />
+                Uploaded
+              </li>
+            )}
+          </ul>
 
           {stage === "uploading" && (
-            <div className="mt-5">
-              <div className="mb-2 flex items-center justify-between text-xs">
-                <span className="text-text-secondary">
-                  Uploading document…
-                </span>
-                <span className="font-medium text-foreground">
-                  {percent}%
-                </span>
-              </div>
-              <div className="progress-violet">
-                <div
-                  className="progress-violet-fill"
-                  style={{ width: `${percent}%` }}
-                />
-              </div>
+            <div className="progress-violet mt-3">
+              <div
+                className="progress-violet-fill"
+                style={{ width: `${percent}%` }}
+              />
             </div>
           )}
 
-          {stage === "upload_complete" && (
-            <div className="mt-5">
-              <div className="flex items-center gap-2 text-sm font-medium text-success">
-                <CheckCircle2 className="h-4 w-4" />
-                Document uploaded
-              </div>
-              <p className="mt-1 text-xs text-text-secondary">
-                Processing started
-              </p>
-            </div>
-          )}
-
-          <button
-            type="button"
-            onClick={uploadDocument}
-            disabled={busy || stage === "upload_complete"}
-            className="btn-primary mt-5 w-full disabled:cursor-not-allowed disabled:opacity-60"
-          >
-            {stage === "service_starting" ? (
-              <>
-                <Loader2 className="h-4 w-4 animate-spin" />
-                Starting service…
-              </>
-            ) : stage === "uploading" ? (
-              <>
-                <Loader2 className="h-4 w-4 animate-spin" />
-                Uploading…
-              </>
-            ) : stage === "upload_complete" ? (
-              <>
-                <CheckCircle2 className="h-4 w-4" />
-                Uploaded
-              </>
-            ) : (
-              <>
+          {stage !== "uploading" &&
+            stage !== "upload_complete" &&
+            stage !== "service_starting" && (
+            <div className="mt-5 flex flex-wrap gap-3">
+              <button
+                type="button"
+                onClick={() => void uploadDocument()}
+                disabled={busy}
+                className="btn-primary disabled:cursor-not-allowed disabled:opacity-60"
+              >
                 <UploadCloud className="h-4 w-4" />
                 Upload document
-              </>
-            )}
-          </button>
+              </button>
+            </div>
+          )}
+
+          {stage === "service_starting" && (
+            <p className="mt-4 text-xs text-text-muted">
+              This wait is for the API host to wake — the PDF has not been
+              uploaded or processed yet.
+            </p>
+          )}
         </div>
       )}
 
