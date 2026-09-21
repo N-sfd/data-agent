@@ -25,6 +25,7 @@ from app.services.generic_kv_scanner import (
 from app.services.generic_label_extractor import (
     extract_labeled_value,
 )
+from app.services.table_quality import assess_table_candidate
 
 DETECTION_PAGE_LIMIT = 40
 
@@ -788,19 +789,38 @@ async def detect_document_structures(
             headers = [
                 str(header) for header in (table.get("headers") or [])
             ]
+            rows = list(table.get("rows") or [])
+            quality = assess_table_candidate(
+                headers=headers,
+                rows=rows,
+                page_text=page_text,
+            )
+            if quality.table_acceptance_status != "accepted":
+                # Raw geometry is only a candidate — do not surface prose
+                # / one-row segmentation artifacts as selectable tables.
+                continue
+
             key, label, confidence, evidence = _label_from_headers(
                 headers=headers,
                 surrounding_text=page_text,
                 page_number=page.page_number,
                 index=index,
             )
+            evidence = [
+                *evidence,
+                (
+                    f"table_quality accepted "
+                    f"(structure={quality.table_structure_score:.2f}, "
+                    f"prose={quality.prose_probability:.2f})"
+                ),
+            ]
             detected.append(
                 _target(
                     key=key,
                     label=label,
                     extraction_type="table",
                     pages=[page.page_number],
-                    confidence=confidence,
+                    confidence=min(confidence, 0.95),
                     evidence=evidence,
                     columns=headers,
                 )

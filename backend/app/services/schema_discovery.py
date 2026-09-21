@@ -255,11 +255,18 @@ async def discover_document_schema(
             target.extraction_type == "table"
             and target.key not in KNOWN_TEMPLATE_KEYS
             and target.key.startswith("table_p")
-            and target.confidence >= 0.7
-            and target.columns
         ):
-            # Keep document-specific unlabeled tables with real columns.
-            primary_targets.append(target)
+            # Only quality-gated unlabeled tables become selectable.
+            if (
+                target.confidence >= 0.7
+                and target.columns
+                and any(
+                    "table_quality accepted" in (e or "").lower()
+                    for e in (target.evidence or [])
+                )
+            ):
+                primary_targets.append(target)
+            continue
 
     targets = [
         _map_detected_target(target, document_id=document.id)

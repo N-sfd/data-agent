@@ -10,7 +10,7 @@ from typing import Any
 
 # Bump when pipeline semantics change in a way that requires reprocessing.
 PAGES_PROCESSOR_VERSION = "pages-v1"
-DISCOVERY_PROCESSOR_VERSION = "discovery-v2"
+DISCOVERY_PROCESSOR_VERSION = "discovery-v3"
 EXTRACTION_PROCESSOR_VERSION = "extraction-v3"
 
 

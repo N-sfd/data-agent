@@ -51,7 +51,7 @@ export function buildFieldRows(
 ): FieldRow[] {
   const resolved: FieldRow[] = scalars.map((scalar) => ({
     id: scalar.normalized_key,
-    label: scalar.normalized_key,
+    label: scalar.target || scalar.normalized_key,
     status: statusForScalar(scalar),
     value: scalar.value,
     confidence: scalar.confidence,

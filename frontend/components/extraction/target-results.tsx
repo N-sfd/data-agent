@@ -11,6 +11,7 @@ import {
 } from "@/components/extraction/field-row";
 import FieldsTable from "@/components/extraction/fields-table";
 import FieldsDatasetTable from "@/components/extraction/fields-dataset-table";
+import SelectedFieldsReviewTable from "@/components/extraction/selected-fields-review-table";
 import ResultSummaryBar from "@/components/extraction/result-summary-bar";
 import TableResult from "@/components/extraction/table-result";
 import ValidationIssuesPanel from "@/components/extraction/validation-issues-panel";
@@ -610,37 +611,63 @@ export default function TargetResults({
         id="fields-section"
         className={["space-y-6", activeTab === "fields" ? "" : "hidden"].join(" ")}
       >
-        <FieldsDatasetTable
-          rows={filteredRows.length > 0 ? filteredRows : fieldRows}
-          selectedId={selectedResultId}
-        />
-        <FieldsTable
-          title="Field details & review"
-          rows={fieldRows}
-          selectedId={selectedResultId}
-          onViewSource={onViewSource}
-          onSaveCorrection={documentId ? handleSaveCorrection : undefined}
-          onMarkVerified={documentId ? handleMarkVerified : undefined}
-          onReject={documentId ? handleReject : undefined}
-        />
-        <FieldsTable
-          title="Identifiers & codes"
-          rows={identifierRows}
-          selectedId={selectedResultId}
-          onViewSource={onViewSource}
-          onSaveCorrection={documentId ? handleSaveCorrection : undefined}
-          onMarkVerified={documentId ? handleMarkVerified : undefined}
-          onReject={documentId ? handleReject : undefined}
-        />
-        <FieldsTable
-          title="Contacts"
-          rows={contactRows}
-          selectedId={selectedResultId}
-          onViewSource={onViewSource}
-          onSaveCorrection={documentId ? handleSaveCorrection : undefined}
-          onMarkVerified={documentId ? handleMarkVerified : undefined}
-          onReject={documentId ? handleReject : undefined}
-        />
+        <div>
+          <h3 className="mb-2 text-sm font-semibold text-foreground">
+            Selected fields
+          </h3>
+          <SelectedFieldsReviewTable
+            rows={filteredRows.length > 0 ? filteredRows : allRows}
+            selectedId={selectedResultId}
+            onViewSource={onViewSource}
+          />
+        </div>
+
+        <details className="rounded-xl border border-border bg-surface">
+          <summary className="cursor-pointer list-none px-4 py-3 text-sm font-semibold text-foreground">
+            Business dataset layout (export preview)
+          </summary>
+          <div className="border-t border-border p-3">
+            <FieldsDatasetTable
+              rows={filteredRows.length > 0 ? filteredRows : allRows}
+              selectedId={selectedResultId}
+            />
+          </div>
+        </details>
+
+        <details className="rounded-xl border border-border bg-surface">
+          <summary className="cursor-pointer list-none px-4 py-3 text-sm font-semibold text-foreground">
+            Field details & review actions
+          </summary>
+          <div className="space-y-4 border-t border-border p-3">
+            <FieldsTable
+              title="Fields"
+              rows={fieldRows}
+              selectedId={selectedResultId}
+              onViewSource={onViewSource}
+              onSaveCorrection={documentId ? handleSaveCorrection : undefined}
+              onMarkVerified={documentId ? handleMarkVerified : undefined}
+              onReject={documentId ? handleReject : undefined}
+            />
+            <FieldsTable
+              title="Identifiers & codes"
+              rows={identifierRows}
+              selectedId={selectedResultId}
+              onViewSource={onViewSource}
+              onSaveCorrection={documentId ? handleSaveCorrection : undefined}
+              onMarkVerified={documentId ? handleMarkVerified : undefined}
+              onReject={documentId ? handleReject : undefined}
+            />
+            <FieldsTable
+              title="Contacts"
+              rows={contactRows}
+              selectedId={selectedResultId}
+              onViewSource={onViewSource}
+              onSaveCorrection={documentId ? handleSaveCorrection : undefined}
+              onMarkVerified={documentId ? handleMarkVerified : undefined}
+              onReject={documentId ? handleReject : undefined}
+            />
+          </div>
+        </details>
       </div>
 
       {activeTab === "tables" && dataTables.length > 0 && (

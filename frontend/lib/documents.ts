@@ -558,10 +558,16 @@ export async function extractTargets(
       onRetry,
     );
 
-    merged.scalars.push(...result.scalars);
-    merged.tables.push(...result.tables);
-    merged.unresolved_targets.push(...result.unresolved_targets);
-    merged.warnings.push(...result.warnings);
+    if (!result || typeof result !== "object") {
+      merged.warnings.push("A target batch returned an empty response.");
+      merged.unresolved_targets.push(...batch);
+      continue;
+    }
+
+    merged.scalars.push(...(result.scalars ?? []));
+    merged.tables.push(...(result.tables ?? []));
+    merged.unresolved_targets.push(...(result.unresolved_targets ?? []));
+    merged.warnings.push(...(result.warnings ?? []));
   }
 
   return merged;
@@ -668,12 +674,39 @@ export async function extractTargetsViaJob(
   onStageChange?: (job: ExtractionJob) => void,
   onRetry?: (attempt: number, total: number) => void,
 ): Promise<ExtractTargetsResult> {
-  let job = await startExtractionJob(documentId, targetIds, onRetry);
+  const empty: ExtractTargetsResult = {
+    document_id: documentId,
+    scalars: [],
+    tables: [],
+    unresolved_targets: [...targetIds],
+    warnings: ["Extraction returned no usable result payload."],
+  };
+
+  // Deduplicate / drop empties so stale UI IDs cannot crash rendering.
+  const cleanIds = Array.from(
+    new Set(targetIds.filter((id) => typeof id === "string" && id.trim())),
+  );
+  if (cleanIds.length === 0) {
+    return {
+      ...empty,
+      unresolved_targets: [],
+      warnings: ["No valid target IDs were selected."],
+    };
+  }
+
+  let job = await startExtractionJob(documentId, cleanIds, onRetry);
+  if (!job || typeof job.id !== "number") {
+    throw new Error("Failed to start extraction job.");
+  }
   onStageChange?.(job);
 
   while (job.status === "queued" || job.status === "processing") {
     await new Promise((resolve) => setTimeout(resolve, JOB_POLL_INTERVAL_MS));
-    job = await getExtractionJob(job.id, onRetry);
+    const next = await getExtractionJob(job.id, onRetry);
+    if (!next) {
+      throw new Error("Lost contact with the extraction job.");
+    }
+    job = next;
     onStageChange?.(job);
   }
 
@@ -681,11 +714,23 @@ export async function extractTargetsViaJob(
     throw new Error(job.error_message ?? "Extraction failed.");
   }
 
-  if (!job.result) {
-    throw new Error("Extraction completed without a result.");
+  const raw = job.result;
+  if (!raw || typeof raw !== "object") {
+    return empty;
   }
 
-  return job.result;
+  // Normalize so callers never see undefined arrays (large selections
+  // previously crashed when partial payloads omitted keys).
+  return {
+    document_id:
+      typeof raw.document_id === "string" ? raw.document_id : documentId,
+    scalars: Array.isArray(raw.scalars) ? raw.scalars : [],
+    tables: Array.isArray(raw.tables) ? raw.tables : [],
+    unresolved_targets: Array.isArray(raw.unresolved_targets)
+      ? raw.unresolved_targets
+      : [],
+    warnings: Array.isArray(raw.warnings) ? raw.warnings : [],
+  };
 }
 
 export async function selectPortfolioFile(

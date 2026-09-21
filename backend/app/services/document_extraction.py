@@ -368,7 +368,18 @@ def process_fitz_pages(
                         if layout is not None:
                             reconstructed = reconstruct_table_from_lines(layout)
                             if reconstructed is not None:
-                                page_tables = [reconstructed]
+                                from app.services.table_quality import (
+                                    is_accepted_table,
+                                )
+
+                                headers = list(
+                                    reconstructed.get("headers") or []
+                                )
+                                rows = list(reconstructed.get("rows") or [])
+                                if is_accepted_table(
+                                    headers=headers, rows=rows
+                                ):
+                                    page_tables = [reconstructed]
                     except Exception:
                         pass
 

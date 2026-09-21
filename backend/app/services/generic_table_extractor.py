@@ -2,6 +2,8 @@ from uuid import uuid4
 
 import pdfplumber
 
+from app.services.table_quality import is_accepted_table
+
 
 def clean_cell(
     value: object,
@@ -111,7 +113,7 @@ def extract_page_tables(
                 if any(row.values()):
                     rows.append(row)
 
-            if rows:
+            if rows and is_accepted_table(headers=headers, rows=rows):
 
                 tables.append(
                     {

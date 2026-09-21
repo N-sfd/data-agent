@@ -679,7 +679,7 @@ function NewExtractionPageContent() {
       setTargetResult(result);
       setTargetResultDurationMs(Date.now() - startedAt);
 
-      const first = result.scalars[0];
+      const first = result?.scalars?.[0];
       if (first) {
         setSourceRequest({
           id: first.normalized_key,
@@ -699,7 +699,15 @@ function NewExtractionPageContent() {
         });
       });
 
-      return result;
+      return (
+        result ?? {
+          document_id: document.document_id,
+          scalars: [],
+          tables: [],
+          unresolved_targets: targetIds,
+          warnings: ["Extraction returned an empty result."],
+        }
+      );
     } finally {
       setWaking(false);
       setTargetExtractionJob(null);
@@ -906,7 +914,11 @@ function NewExtractionPageContent() {
                     targets={(schemaDiscovery?.targets ?? []).filter(
                       (target) =>
                         target.source !== "template" &&
-                        target.source_examples.length > 0,
+                        target.source_examples.length > 0 &&
+                        target.target_type !== "clause" &&
+                        target.target_type !== "section" &&
+                        target.target_type !== "obligation" &&
+                        !target.key.startsWith("table_p"),
                     )}
                     documentFamily={schemaDiscovery?.document_family}
                     documentFamilyLabel={
@@ -1144,7 +1156,11 @@ function NewExtractionPageContent() {
                     targets={(schemaDiscovery?.targets ?? []).filter(
                       (target) =>
                         target.source !== "template" &&
-                        target.source_examples.length > 0,
+                        target.source_examples.length > 0 &&
+                        target.target_type !== "clause" &&
+                        target.target_type !== "section" &&
+                        target.target_type !== "obligation" &&
+                        !target.key.startsWith("table_p"),
                     )}
                     documentId={document.document_id}
                     documentName={document.original_filename}

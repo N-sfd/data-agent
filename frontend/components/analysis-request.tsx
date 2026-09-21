@@ -257,6 +257,16 @@ export default function AnalysisRequest({
 
     try {
       const result = await onExtractTargets(targetIds);
+      if (
+        !result ||
+        !Array.isArray(result.scalars) ||
+        !Array.isArray(result.tables)
+      ) {
+        setExtractError(
+          "Extraction finished without a usable result. Try a smaller selection.",
+        );
+        return;
+      }
       if (result.scalars.length === 0 && result.tables.length === 0) {
         setNoMatch(true);
       }
