@@ -200,10 +200,10 @@ export function startBackendWarmup(): Promise<void> {
 /** Await readiness — joins the shared warm-up; does not start a second poll storm. */
 export async function ensureBackendHealthy(): Promise<void> {
   if (status === "healthy") return;
-  await startBackendWarmup();
-  if (status !== "healthy") {
-    // Loop finished as failed; allow one fresh retry cycle on explicit upload.
-    inflight = null;
+  try {
+    await startBackendWarmup();
+  } catch {
+    // First cycle failed; allow one fresh retry (inflight cleared in finally).
     await startBackendWarmup();
   }
 }
