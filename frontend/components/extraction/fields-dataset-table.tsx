@@ -50,7 +50,7 @@ export default function FieldsDatasetTable({
                   onClick={() => onSelectRow?.(row)}
                   title={row.label}
                 >
-                  {row.key || row.label}
+                  {row.id || row.label}
                 </button>
               </th>
             ))}
