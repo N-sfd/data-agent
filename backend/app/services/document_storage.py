@@ -318,9 +318,9 @@ def ensure_local_copy(
 
     if data is None:
         raise DocumentStorageError(
-            "The original file for this document is no longer available "
-            "on the server and was never backed up to remote storage. "
-            "Please re-upload the document.",
+            "Source file unavailable — re-upload required for source "
+            "verification. Previously extracted data for this document is "
+            "still available.",
             error_type="MissingOriginal",
         )
 
