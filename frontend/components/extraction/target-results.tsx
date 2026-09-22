@@ -191,6 +191,7 @@ export default function TargetResults({
   const [onlyMissing, setOnlyMissing] = useState(false);
   const [workbookTab, setWorkbookTab] = useState<WorkbookTab>("all");
   const [exportMenuOpen, setExportMenuOpen] = useState(false);
+  const [exportError, setExportError] = useState<string | null>(null);
   const exportMenuRef = useRef<HTMLDivElement | null>(null);
   const [corrections, setCorrections] = useState<Map<string, TargetCorrection>>(
     new Map(),
@@ -461,13 +462,18 @@ export default function TargetResults({
 
   async function exportFieldsXlsx() {
     if (!documentId) return;
+    setExportError(null);
     try {
       await downloadDocumentExportXlsx(
         documentId,
         `${result.document_id}-export.xlsx`,
       );
-    } catch {
-      // Non-fatal if metadata fields were not persisted yet.
+    } catch (error) {
+      setExportError(
+        error instanceof Error
+          ? error.message
+          : "Export Excel failed. Please retry.",
+      );
     }
   }
 
@@ -551,6 +557,11 @@ export default function TargetResults({
             Export Complete Excel
             <ChevronDown className="h-4 w-4" />
           </button>
+          {exportError && (
+            <p className="absolute right-0 top-full z-10 mt-1 w-64 rounded-lg border border-danger/20 bg-danger/5 px-3 py-2 text-xs text-danger">
+              {exportError}
+            </p>
+          )}
           {exportMenuOpen && (
             <div className="absolute right-0 top-full z-10 mt-1 w-52 rounded-lg border border-border bg-surface p-1 shadow-lg">
               <button

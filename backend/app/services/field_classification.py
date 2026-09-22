@@ -122,7 +122,15 @@ def is_narrative_or_section_field(
     if is_auto_kv_key(key_text):
         if len(value_text) >= _LONG_VALUE_CHARS:
             return True
-        if looks_like_narrative_fragment(value_text):
+        # looks_like_narrative_fragment() treats "no value given" as
+        # rejectable by design (it's normally checking a *proposed field
+        # value*, where blank is unsafe to accept) — but here an absent
+        # `value` just means the caller didn't have one to check, not
+        # that the field is narrative. Only run the check when there's
+        # actual text, so callers that don't pass `value` (most schema
+        # discovery call sites — this classifies the *label/key* shape,
+        # not a value) don't get every kv_ field rerouted to "section".
+        if value_text and looks_like_narrative_fragment(value_text):
             return True
         slug = key_text[3:]
         if _SOW_KV_SLUG.match(slug) and (len(value_text) >= 40 or not value_text):

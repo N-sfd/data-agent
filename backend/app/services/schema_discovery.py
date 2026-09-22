@@ -92,6 +92,7 @@ def _enrich_document_target(target: DocumentTarget) -> DocumentTarget:
         if is_narrative_or_section_field(
             key=target.key,
             label=target.label,
+            value=_sample_value_from_evidence(target.source_examples),
             field_group=target.group,
         ):
             target.selectable = False
