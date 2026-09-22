@@ -696,7 +696,21 @@ export async function extractTargetsViaJob(
 
   let job = await startExtractionJob(documentId, cleanIds, onRetry);
   if (!job || typeof job.id !== "number") {
-    throw new Error("Failed to start extraction job.");
+    // A resolved-but-invalid `job` here means the POST got an ok (2xx)
+    // response whose body wasn't the expected ExtractionJob JSON — most
+    // often a non-JSON page (proxy/cold-start interstitial) that apiFetch
+    // returns as a raw string. Surface what was actually received instead
+    // of a dead-end message, so the next occurrence is diagnosable from
+    // the on-screen error alone.
+    const raw: unknown = job;
+    const received =
+      typeof raw === "string"
+        ? raw.slice(0, 200)
+        : JSON.stringify(raw)?.slice(0, 200);
+    throw new Error(
+      `Failed to start extraction job. Unexpected response from the ` +
+        `server${received ? `: ${received}` : "."}`,
+    );
   }
   onStageChange?.(job);
 
