@@ -553,11 +553,40 @@ _DANGLING_TRAILING_WORDS = frozenset(
     }
 )
 
+# A numbered/lettered clause or SOW subsection heading ("B.1 General",
+# "C.1 Scope", "D.1 Background") is shaped just like a short form label —
+# 1-3 words, no dangling connector — so the checks above let it through.
+# It isn't a business field though: it's a section marker whose "value"
+# is really the body text that follows it, not a filled-in answer. Gate
+# on the label's remaining text (after stripping any leading numbering)
+# matching common SOW/PWS/clause heading vocabulary.
+_SECTION_HEADING_LEADER = re.compile(
+    r"^\s*(?:[A-Z]|\d{1,2})(?:\.\d{1,2})?\.?\s+"
+)
+_SECTION_HEADING_WORDS = frozenset(
+    {
+        "general", "authority", "background", "scope", "purpose",
+        "applicability", "definitions", "references", "overview",
+        "introduction", "objective", "objectives", "requirements",
+        "responsibilities", "summary", "policy", "procedures",
+        "total solution", "period of performance", "abbreviations",
+        "acronyms", "applicable documents", "description", "discussion",
+    }
+)
+
+
+def _looks_like_section_heading(label: str) -> bool:
+    stripped = _SECTION_HEADING_LEADER.sub("", label).strip().lower()
+    return stripped in _SECTION_HEADING_WORDS
+
 
 def _looks_like_reliable_kv_label(pair: ScannedPair) -> bool:
     label = pair.raw_label.strip()
 
     if looks_like_narrative_fragment(label):
+        return False
+
+    if _looks_like_section_heading(label):
         return False
 
     if pair.method in _LOW_CONFIDENCE_KV_METHODS:
