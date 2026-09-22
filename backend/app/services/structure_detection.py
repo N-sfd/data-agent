@@ -998,7 +998,7 @@ async def detect_document_structures(
                     _target(
                         key=f"section_{slug}",
                         label=pair.raw_label,
-                        extraction_type="section",
+                        extraction_type="clause",
                         pages=[page.page_number],
                         confidence=pair.confidence,
                         evidence=[

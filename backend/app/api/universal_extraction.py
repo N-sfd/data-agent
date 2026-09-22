@@ -231,6 +231,11 @@ async def discover_schema(
             ai_provider=ai_provider,
         )
     except Exception as exc:
+        import logging
+
+        logging.getLogger(__name__).exception(
+            "discover-schema failed for document %s", document_id
+        )
         raise http_error(
             500,
             STRUCTURE_DETECTION_FAILED,
