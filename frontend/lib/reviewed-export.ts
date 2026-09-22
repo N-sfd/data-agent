@@ -1,4 +1,4 @@
-import { apiFetch, apiUrl } from "@/lib/api";
+import { apiFetch, fetchWithRetry } from "@/lib/api";
 import { downloadBlob, downloadCsv, downloadJson, toCsv } from "@/lib/export";
 import type { ScalarTargetResult, TargetCorrection } from "@/types/document";
 
@@ -152,11 +152,31 @@ export async function downloadDocumentExportCsv(
   options?: { authoritativeOnly?: boolean },
 ): Promise<void> {
   const query = options?.authoritativeOnly ? "?authoritative_only=true" : "";
-  const response = await fetch(
-    apiUrl(`/api/documents/${documentId}/export.csv${query}`),
+  const response = await fetchWithRetry(
+    `/api/documents/${documentId}/export.csv${query}`,
+    undefined,
   );
   if (!response.ok) {
     throw new Error(`Export CSV failed (${response.status})`);
+  }
+  const text = await response.text();
+  downloadBlob(text, filename, "text/csv;charset=utf-8;");
+}
+
+export async function downloadDocumentExportLineItemsCsv(
+  documentId: string,
+  filename: string,
+  options?: { tableKey?: string },
+): Promise<void> {
+  const query = options?.tableKey
+    ? `?table_key=${encodeURIComponent(options.tableKey)}`
+    : "";
+  const response = await fetchWithRetry(
+    `/api/documents/${documentId}/export/line-items.csv${query}`,
+    undefined,
+  );
+  if (!response.ok) {
+    throw new Error(`Export Line Items CSV failed (${response.status})`);
   }
   const text = await response.text();
   downloadBlob(text, filename, "text/csv;charset=utf-8;");
@@ -168,8 +188,9 @@ export async function downloadDocumentExportXlsx(
   options?: { authoritativeOnly?: boolean },
 ): Promise<void> {
   const query = options?.authoritativeOnly ? "?authoritative_only=true" : "";
-  const response = await fetch(
-    apiUrl(`/api/documents/${documentId}/export.xlsx${query}`),
+  const response = await fetchWithRetry(
+    `/api/documents/${documentId}/export.xlsx${query}`,
+    undefined,
   );
   if (!response.ok) {
     throw new Error(`Export Excel failed (${response.status})`);

@@ -70,6 +70,44 @@ def canonical_display_name(label: str) -> str:
     return cleaned
 
 
+# Internal candidate-key prefixes that must never reach a display surface.
+_INTERNAL_KEY_PREFIXES = ("kv_", "custom_", "section_", "table_", "field_")
+
+# Short tokens that read better upper-cased than title-cased in a
+# last-resort humanized label ("PR Number", not "Pr Number").
+_ACRONYM_WORDS = frozenset(
+    {
+        "pr", "id", "uei", "ueid", "cage", "naics", "psc", "sow", "pws",
+        "clin", "duns", "ssn", "ein", "po", "rfq", "rfp", "far", "dfars",
+    }
+)
+
+
+def humanize_field_key(key: str | None) -> str:
+    """Last-resort display text for a field with no resolved label.
+
+    Never surfaces an internal discovery candidate key (``kv_pr_number``,
+    ``custom_notes``, ...) verbatim — strips the internal prefix and
+    title-cases the remaining slug instead of showing the raw key.
+    """
+
+    text = (key or "").strip()
+    if not text:
+        return "Untitled Field"
+    lowered = text.lower()
+    for prefix in _INTERNAL_KEY_PREFIXES:
+        if lowered.startswith(prefix):
+            text = text[len(prefix):]
+            break
+    words = [word for word in re.split(r"[_\s]+", text) if word]
+    if not words:
+        return "Untitled Field"
+    return " ".join(
+        word.upper() if word.lower() in _ACRONYM_WORDS else word.capitalize()
+        for word in words
+    )
+
+
 def assign_discovery_group(
     *,
     label: str,

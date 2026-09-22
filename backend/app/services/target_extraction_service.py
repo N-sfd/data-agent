@@ -714,6 +714,7 @@ def _ai_scalar_from_value(
     value: Any,
     page_lookup: dict[int, DocumentPage],
     retrieval: RetrievalTrace | None,
+    outline: list[SectionBoundary] | None = None,
 ) -> ScalarTargetResult | None:
     if not value.verified:
         return None
@@ -747,6 +748,21 @@ def _ai_scalar_from_value(
             else "unresolved",
             ai_fallback_required=True,
         )
+    evidence = value.evidence
+    if getattr(evidence, "section", None) is None:
+        # The AI provider never resolves a section of its own — thread the
+        # same document-wide outline the deterministic path uses so an
+        # AI-fallback field doesn't fall back to a blank "—" Section.
+        evidence = evidence.model_copy(
+            update={
+                "section": section_for_value(
+                    outline,
+                    page_number=value.evidence.page_number,
+                    page_text=page_text,
+                    value=str(value.value) if value.value is not None else None,
+                )
+            }
+        )
     return _scalar_result(
         target=target,
         value=value.value,
@@ -755,7 +771,7 @@ def _ai_scalar_from_value(
         method="ai",
         confidence=confidence,
         validation=validation,
-        evidence=value.evidence,
+        evidence=evidence,
         retrieval=trace,
         verified=True,
     )
@@ -769,6 +785,7 @@ async def _run_batched_scalar_ai_fallback(
     page_lookup: dict[int, DocumentPage],
     document_name: str,
     ai_provider: AIProvider,
+    outline: list[SectionBoundary] | None = None,
 ) -> tuple[list[ScalarTargetResult], list[str]]:
     if not targets:
         return [], []
@@ -844,6 +861,7 @@ async def _run_batched_scalar_ai_fallback(
             value=value,
             page_lookup=page_lookup,
             retrieval=retrieval_by_key.get(matched.key),
+            outline=outline,
         )
         if scalar is None:
             continue
@@ -863,6 +881,7 @@ async def _run_per_target_ai_fallback(
     document_name: str,
     ai_provider: AIProvider,
     semaphore: asyncio.Semaphore,
+    outline: list[SectionBoundary] | None = None,
 ) -> tuple[TableTargetResult | ScalarTargetResult | None, list[str]]:
     async with semaphore:
         trace = retrieval or build_retrieval_trace(
@@ -935,6 +954,7 @@ async def _run_per_target_ai_fallback(
                 value=value,
                 page_lookup=page_lookup,
                 retrieval=trace,
+                outline=outline,
             )
             if scalar is not None:
                 return scalar, warnings
@@ -1068,6 +1088,7 @@ async def extract_by_targets(
             page_lookup=page_lookup,
             document_name=document.original_filename,
             ai_provider=ai_provider,
+            outline=outline,
         )
         scalars.extend(batched_scalars)
         warnings.extend(batch_warnings)
@@ -1084,6 +1105,7 @@ async def extract_by_targets(
                     document_name=document.original_filename,
                     ai_provider=ai_provider,
                     semaphore=semaphore,
+                    outline=outline,
                 )
                 for target in per_target
             ]

@@ -151,3 +151,91 @@ def test_ucf_section_heading_and_form_noise_are_not_discovered_as_fields() -> No
     assert "kv_clin" not in keys
     assert "kv_government" not in keys
     assert "contract_number" in keys
+
+
+def test_value_repeated_across_unrelated_sow_headings_is_not_promoted() -> None:
+    """P0 regression: a value that keeps showing up next to SOW/PWS topic
+    headings in flattened page text (a column/reading-order artifact, not
+    a real label:value pair) must not be promoted N times as N different
+    business fields — "Firm Fixed Price" attached to "Accident
+    Prevention", "Airfield Operations", and "Asset Management" alike."""
+
+    text = (
+        "ACCIDENT PREVENTION\n"
+        "Firm Fixed Price\n"
+        "\n"
+        "AIRFIELD OPERATIONS\n"
+        "Firm Fixed Price\n"
+        "\n"
+        "ASSET MANAGEMENT\n"
+        "Firm Fixed Price\n"
+        "\n"
+        "Pricing Arrangement:  Firm Fixed Price\n"
+        "Contract Number: 47QRCA25DSF07\n"
+    )
+
+    detection = asyncio.run(_detect(text))
+    all_detected = detection.detected_targets + detection.possible_targets
+    keys = {target.key for target in all_detected}
+
+    assert "kv_accident_prevention" not in keys
+    assert "kv_airfield_operations" not in keys
+    assert "kv_asset_management" not in keys
+
+    schema = asyncio.run(_discover(text))
+    business_keys = {target.key for target in schema.targets}
+    assert "kv_accident_prevention" not in business_keys
+    assert "kv_airfield_operations" not in business_keys
+    assert "kv_asset_management" not in business_keys
+    # The single genuine label:value pair (inline, real structure) survives.
+    assert "kv_pricing_arrangement" in business_keys
+    assert "contract_number" in business_keys
+
+
+def test_line_item_columns_are_not_flattened_into_document_fields() -> None:
+    """P0 regression: a CLIN/line-item table's own column values ("Unit
+    Price", "Amount", "Quantity") must not leak into document-level
+    business fields just because the same text also appears, unlabeled,
+    in the page's flattened text next to the table."""
+
+    text = (
+        "SECTION B - SUPPLIES OR SERVICES AND PRICES\n"
+        "CLIN\n0001\nDESCRIPTION\nEngineering Services\nQTY\n1\nUNIT\nLOT\n"
+        "UNIT PRICE\n$94,469.80\nAMOUNT\n$94,469.80\n"
+        "CLIN\n0002\nDESCRIPTION\nSupport Services\nQTY\n12\nUNIT\nMO\n"
+        "UNIT PRICE\n$5,000.00\nAMOUNT\n$60,000.00\n"
+        "Contract Number: 47QRCA25DSF07\n"
+    )
+    tables = [
+        {
+            "headers": ["CLIN", "Description", "Qty", "Unit", "Unit Price", "Amount"],
+            "rows": [
+                {
+                    "CLIN": "0001",
+                    "Description": "Engineering Services",
+                    "Qty": "1",
+                    "Unit": "LOT",
+                    "Unit Price": "$94,469.80",
+                    "Amount": "$94,469.80",
+                },
+                {
+                    "CLIN": "0002",
+                    "Description": "Support Services",
+                    "Qty": "12",
+                    "Unit": "MO",
+                    "Unit Price": "$5,000.00",
+                    "Amount": "$60,000.00",
+                },
+            ],
+        }
+    ]
+
+    schema = asyncio.run(_discover(text, tables))
+    keys = {target.key for target in schema.targets}
+
+    assert "amount" not in keys
+    assert "kv_unit_price" not in keys
+    assert "kv_quantity" not in keys
+    assert "contract_number" in keys
+    # The real line-item data still exists, just as a table, not scalars.
+    assert any(target.target_type == "table" for target in schema.targets)

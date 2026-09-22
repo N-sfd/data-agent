@@ -146,10 +146,15 @@ def _needs_review_fields(
 
 
 def _append_audit_sheet(sheet: Any, fields: list[DocumentMetadataField], *, page_text_by_number: dict[int, str] | None) -> None:
+    # Section is intentionally left out of this default audit view —
+    # assignment isn't reliable enough yet and a mostly-blank column adds
+    # clutter without adding information. The data isn't discarded: it's
+    # still read from evidence_json via section_for() and included in the
+    # Source Evidence sheet; this can come back here as an optional
+    # column once section detection is reliable across document types.
     sheet.append(
         [
             "PDF Page",
-            "Section",
             "Field / Label",
             "Extracted Value",
             "Field Type",
@@ -162,7 +167,6 @@ def _append_audit_sheet(sheet: Any, fields: list[DocumentMetadataField], *, page
         sheet.append(
             [
                 source_page_for(field),
-                section_for(field, page_text_by_number=page_text_by_number),
                 field.label or field.field_key or "",
                 "" if field.value is None else str(field.value),
                 field.field_group or "field",
@@ -297,22 +301,70 @@ def build_fields_wide_csv(
     *,
     authoritative_only: bool = False,
 ) -> str:
-    """Business-data CSV: one header row of field keys, one data row."""
+    """Primary business-data CSV: one header row of human field names, one
+    data row of values — an integration-ready record, not an audit dump.
+    Headers are the display label (never a raw kv_/custom_ candidate key)."""
 
     selected = _select_fields(
         fields, authoritative_only=authoritative_only, business_only=True
     )
-    # Prefer stable keys; fall back to labels when key missing.
     headers: list[str] = []
     values: list[str] = []
     for field in selected:
-        headers.append(field.field_key or field.label)
+        headers.append(field.label or field.field_key or "")
         value = field.value
         values.append("" if value is None else str(value))
     buffer = io.StringIO()
     writer = csv.writer(buffer)
     writer.writerow(headers)
     writer.writerow(values)
+    return buffer.getvalue()
+
+
+def build_line_items_csv(
+    tables: list[Any],
+    *,
+    table_key: str | None = None,
+) -> str:
+    """One line-item table as its own rectangular CSV — real repeating
+    rows (one CLIN/line item per row), never flattened into document-level
+    columns. Defaults to the table with the most rows when the document
+    has more than one and the caller didn't ask for a specific one."""
+
+    if not tables:
+        return ""
+
+    if table_key:
+        selected = next(
+            (
+                table
+                for table in tables
+                if getattr(table, "target_key", None) == table_key
+            ),
+            None,
+        )
+        if selected is None:
+            return ""
+    else:
+        selected = max(
+            tables, key=lambda table: len(getattr(table, "rows_json", None) or [])
+        )
+
+    columns = list(getattr(selected, "columns_json", None) or [])
+    rows = list(getattr(selected, "rows_json", None) or [])
+    if not columns and rows and isinstance(rows[0], dict):
+        columns = list(rows[0].keys())
+
+    buffer = io.StringIO()
+    writer = csv.writer(buffer)
+    writer.writerow([str(col) for col in columns])
+    for row in rows:
+        if isinstance(row, dict):
+            writer.writerow([row.get(col, "") for col in columns])
+        elif isinstance(row, (list, tuple)):
+            writer.writerow(list(row))
+        else:
+            writer.writerow([row])
     return buffer.getvalue()
 
 
@@ -332,7 +384,11 @@ def build_normalized_document(
     )
     field_map: dict[str, Any] = {}
     for field in selected:
-        key = field.field_key or field.label
+        # Cosmetic only: the stored field_key keeps its raw kv_ prefix for
+        # stable internal lookups, but this record is a public API/export
+        # surface, so its keys use the canonical (prefix-stripped) name.
+        raw_key = field.field_key or field.label or ""
+        key = raw_key[3:] if raw_key.lower().startswith("kv_") else raw_key
         field_map[key] = field.value
 
     table_map: dict[str, Any] = {}

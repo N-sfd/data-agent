@@ -55,7 +55,7 @@ function unreachableBackendMessage(): string {
   );
 }
 
-async function fetchWithRetry(
+export async function fetchWithRetry(
   path: string,
   init: RequestInit | undefined,
   onRetry?: (attempt: number, total: number) => void,

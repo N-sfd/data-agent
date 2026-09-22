@@ -41,12 +41,17 @@ export default function FieldsWorkbookGrid({
           <tr className="bg-[#1e3a5f] text-white">
             {[
               "PDF Page",
-              "Section",
               "Field / Label",
               "Extracted Value",
               "Field Type",
               "Confidence",
               "Status",
+              // Section is intentionally omitted here — assignment isn't
+              // reliable enough yet and a mostly-blank column just adds
+              // clutter. The data isn't gone: it's still recorded per
+              // field (see evidence.section / row.evidence?.section) and
+              // can come back as an optional column/filter once section
+              // detection is reliable across document types.
             ].map((heading) => (
               <th
                 key={heading}
@@ -100,11 +105,6 @@ export default function FieldsWorkbookGrid({
               >
                 <td className="whitespace-nowrap border-r border-border/60 px-3 py-2 tabular-nums text-text-secondary">
                   {page ?? "—"}
-                </td>
-                <td className="max-w-[10rem] border-r border-border/60 px-3 py-2 text-text-secondary">
-                  <span className="line-clamp-2">
-                    {row.evidence?.section || "—"}
-                  </span>
                 </td>
                 <td className="max-w-[16rem] border-r border-border/60 px-3 py-2 font-medium text-foreground">
                   <span className="line-clamp-2">{row.label}</span>

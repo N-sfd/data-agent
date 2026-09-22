@@ -22,6 +22,7 @@ from app.services.reviewed_export import (
     build_export_csv,
     build_export_xlsx,
     build_fields_wide_csv,
+    build_line_items_csv,
     build_normalized_document,
     build_oracle_payload_preview,
 )
@@ -168,6 +169,49 @@ async def export_document_csv(
             fields, authoritative_only=authoritative_only
         )
     filename = f"{document.original_filename.rsplit('.', 1)[0]}-fields.csv"
+    return Response(
+        content=csv_body,
+        media_type="text/csv; charset=utf-8",
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"',
+        },
+    )
+
+
+@router.get("/{document_id}/export/line-items.csv")
+async def export_line_items_csv(
+    document_id: str,
+    table_key: str | None = Query(
+        None,
+        description="Which detected table to export; defaults to the "
+        "table with the most rows when the document has several.",
+    ),
+    database: Session = Depends(get_database),
+    actor: ActorContext = Depends(require_permission("export.read")),
+) -> Response:
+    """One line-item/CLIN table as its own rectangular CSV — real
+    repeating rows, never document-level columns."""
+
+    document = _load_document_or_404(database, document_id)
+    tables = list(
+        database.scalars(
+            select(DocumentExtractedTable)
+            .where(DocumentExtractedTable.document_id == document_id)
+            .order_by(DocumentExtractedTable.id.asc())
+        )
+    )
+    if not tables:
+        raise HTTPException(
+            status_code=404,
+            detail="No line-item tables found for this document.",
+        )
+    csv_body = build_line_items_csv(tables, table_key=table_key)
+    if not csv_body:
+        raise HTTPException(
+            status_code=404,
+            detail=f"No table found for table_key={table_key!r}.",
+        )
+    filename = f"{document.original_filename.rsplit('.', 1)[0]}-line-items.csv"
     return Response(
         content=csv_body,
         media_type="text/csv; charset=utf-8",

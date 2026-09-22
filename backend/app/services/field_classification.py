@@ -11,7 +11,10 @@ import re
 from typing import Any
 
 from app.services.document_outline import UCF_SECTIONS
-from app.services.label_rejection import looks_like_narrative_fragment
+from app.services.label_rejection import (
+    looks_like_narrative_fragment,
+    looks_like_paragraph_reference_value,
+)
 
 # Canonical keys for the Key Contract Fields horizontal record.
 KEY_CONTRACT_FIELD_KEYS: tuple[str, ...] = (
@@ -55,6 +58,16 @@ _KEY_CONTRACT_LABEL_HINTS = re.compile(
 _KV_PREFIX = re.compile(r"^kv_", re.IGNORECASE)
 _SECTION_KEY = re.compile(
     r"^(section|clause|article|sow|pws)_",
+    re.IGNORECASE,
+)
+# Structural/reference token anywhere in a kv_ slug ("pws_section_11_para",
+# "section_10_para", "para", "appendix_2f") — the discovery scanner names a
+# candidate after the label text it found, so a slug carrying one of these
+# tokens is naming a section/paragraph/clause pointer, not a business
+# field, regardless of how short or numeric-looking its value is.
+_STRUCTURAL_KEY_TOKEN = re.compile(
+    r"(?:^|_)(section|subsection|para|paragraph|clause|article|appendix|"
+    r"exhibit|attachment|part|toc)(?:_|\d|$)",
     re.IGNORECASE,
 )
 _SECTION_HEADING_LEADER = re.compile(
@@ -129,6 +142,12 @@ def is_narrative_or_section_field(
     if is_auto_kv_key(key_text):
         if len(value_text) >= _LONG_VALUE_CHARS:
             return True
+        slug = key_text[3:]
+        # The candidate's own name says what it is: a scanner only slugs
+        # "section"/"para"/"appendix"/... into the key when that word was
+        # part of the label text it matched next to the value.
+        if _STRUCTURAL_KEY_TOKEN.search(slug):
+            return True
         # looks_like_narrative_fragment() treats "no value given" as
         # rejectable by design (it's normally checking a *proposed field
         # value*, where blank is unsafe to accept) — but here an absent
@@ -139,7 +158,8 @@ def is_narrative_or_section_field(
         # not a value) don't get every kv_ field rerouted to "section".
         if value_text and looks_like_narrative_fragment(value_text):
             return True
-        slug = key_text[3:]
+        if value_text and looks_like_paragraph_reference_value(value_text):
+            return True
         if _SOW_KV_SLUG.match(slug) and (len(value_text) >= 40 or not value_text):
             return True
         return False

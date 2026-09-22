@@ -24,6 +24,7 @@ import {
   type WorkbookTab,
 } from "@/components/extraction/workbook-classify";
 import {
+  downloadDocumentExportLineItemsCsv,
   downloadDocumentExportXlsx,
   downloadReviewedJson,
   scalarToExportField,
@@ -256,8 +257,11 @@ export default function TargetResults({
   }, [result.unresolved_targets, targets]);
 
   const allRows = useMemo(
-    () => buildFieldRows(result.scalars, meaningfulMissing, corrections),
-    [result.scalars, meaningfulMissing, corrections],
+    () => buildFieldRows(result.scalars, meaningfulMissing, corrections, labelByKey),
+    // labelByKey is rebuilt from `targets` every render but is
+    // value-equivalent when `targets` hasn't changed.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [result.scalars, meaningfulMissing, corrections, targets],
   );
 
   const confidenceCounts = useMemo(() => {
@@ -445,8 +449,9 @@ export default function TargetResults({
     const fields = workbookRows.all
       .filter((row) => row.scalar)
       .map((row) => scalarToExportField(row.scalar!, row.correction));
-    // Wide business CSV: field keys as headers, one data row.
-    const headers = fields.map((field) => field.field_key || field.field);
+    // Wide business CSV: human field names as headers, one data row —
+    // never the raw internal field_key (e.g. "kv_pricing_arrangement").
+    const headers = fields.map((field) => field.field || field.field_key || "");
     const values = fields.map((field) => field.value ?? "");
     const escape = (cell: string) => {
       if (/[",\n]/.test(cell)) return `"${cell.replace(/"/g, '""')}"`;
@@ -473,6 +478,23 @@ export default function TargetResults({
         error instanceof Error
           ? error.message
           : "Export Excel failed. Please retry.",
+      );
+    }
+  }
+
+  async function exportLineItemsCsv() {
+    if (!documentId) return;
+    setExportError(null);
+    try {
+      await downloadDocumentExportLineItemsCsv(
+        documentId,
+        `${result.document_id}-line-items.csv`,
+      );
+    } catch (error) {
+      setExportError(
+        error instanceof Error
+          ? error.message
+          : "Export Line Items CSV failed. Please retry.",
       );
     }
   }
@@ -582,8 +604,20 @@ export default function TargetResults({
                 }}
                 className="block w-full rounded-md px-3 py-2 text-left text-xs text-foreground hover:bg-surface-soft"
               >
-                Fields CSV (import-ready)
+                Document Fields CSV (import-ready)
               </button>
+              {lineItemTables.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    void exportLineItemsCsv();
+                    setExportMenuOpen(false);
+                  }}
+                  className="block w-full rounded-md px-3 py-2 text-left text-xs text-foreground hover:bg-surface-soft"
+                >
+                  Line Items CSV
+                </button>
+              )}
               <button
                 type="button"
                 onClick={() => {

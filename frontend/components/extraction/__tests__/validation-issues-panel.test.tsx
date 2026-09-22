@@ -48,7 +48,7 @@ describe("ValidationIssuesPanel", () => {
     const rows = buildFieldRows([scalar({ verified: false })], [], new Map());
     render(<ValidationIssuesPanel rows={rows} onIssueClick={onIssueClick} />);
 
-    fireEvent.click(screen.getByText("contract_number"));
+    fireEvent.click(screen.getByText("Contract Number"));
 
     expect(onIssueClick).toHaveBeenCalledWith("contract_number");
   });

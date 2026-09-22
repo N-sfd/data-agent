@@ -13,10 +13,13 @@ from uuid import uuid4
 import fitz
 from fastapi.testclient import TestClient
 
+from app.core.auth import hash_api_key
 from app.core.config import Settings, get_settings
 from app.core.observability import _sanitize, log_event
 from app.database.session import SessionLocal
 from app.main import app
+from app.models.actor import Actor
+from app.models.document_extracted_table import DocumentExtractedTable
 from app.models.document_metadata_field import DocumentMetadataField
 from app.models.metadata_field_audit_log import MetadataFieldAuditLog
 from app.services.file_upload import sanitize_display_filename
@@ -248,3 +251,80 @@ def test_rbac_enforced_blocks_spoofed_admin_on_export() -> None:
             headers={"X-Actor-Id": "actor-admin-default"},
         )
     assert response.status_code == 401
+
+
+def test_rbac_enforced_csv_xlsx_line_items_require_real_auth() -> None:
+    """P0 regression for the previously-reported "Export Excel failed
+    (401)" bug: CSV/XLSX/line-items must use the exact same auth gate as
+    the JSON export that already worked — 401 unauthenticated, 200 with a
+    real credential, for every export format, not just JSON."""
+
+    upload = client.post(
+        "/api/documents/upload",
+        files={"file": (f"rc-export-auth-{uuid4()}.pdf", _pdf(), "application/pdf")},
+    )
+    document_id = upload.json()["document_id"]
+
+    database = SessionLocal()
+    try:
+        database.add(
+            DocumentMetadataField(
+                document_id=document_id,
+                field_group="Header",
+                field_key="contract_number",
+                label="Contract Number",
+                value="47QRCA25DSF07",
+                original_value="47QRCA25DSF07",
+                confidence=0.9,
+                value_type="text",
+                extraction_method="layout",
+                evidence_json={"page_number": 1, "source_text": "Contract Number: 47QRCA25DSF07"},
+                verified=True,
+                review_status="accepted",
+                extraction_source="target",
+            )
+        )
+        database.add(
+            DocumentExtractedTable(
+                document_id=document_id,
+                target_key="clins",
+                display_name="CLINs",
+                columns_json=["clin", "description", "amount"],
+                rows_json=[{"clin": "0001", "description": "Labor", "amount": "1000"}],
+                pages_json=[1],
+                extraction_method="layout",
+                confidence=0.88,
+            )
+        )
+        raw_key = f"rc-service-key-{uuid4()}"
+        database.add(
+            Actor(
+                id=f"actor-rc-export-service-{uuid4()}",
+                actor_type="service",
+                display_name="RC Export Service",
+                role="admin",
+                api_key_hash=hash_api_key(raw_key),
+                active=True,
+            )
+        )
+        database.commit()
+    finally:
+        database.close()
+
+    endpoints = [
+        f"/api/documents/{document_id}/export.csv",
+        f"/api/documents/{document_id}/export.xlsx",
+        f"/api/documents/{document_id}/normalized",
+        f"/api/documents/{document_id}/export/line-items.csv",
+    ]
+
+    enforced = get_settings().model_copy(update={"rbac_enforced": True})
+    with patch("app.core.auth.get_settings", return_value=enforced):
+        for path in endpoints:
+            unauthenticated = client.get(path)
+            assert unauthenticated.status_code == 401, path
+
+            authenticated = client.get(
+                path, headers={"Authorization": f"Bearer {raw_key}"}
+            )
+            assert authenticated.status_code == 200, (path, authenticated.text)

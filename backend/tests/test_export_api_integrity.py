@@ -139,12 +139,13 @@ def test_export_csv_uses_effective_reviewed_value() -> None:
     finally:
         database.close()
 
-    # Default: wide business CSV (field keys as headers).
+    # Default: wide business CSV (human field names as headers, not raw
+    # field_key slugs — an integration-ready record).
     response = client.get(f"/api/documents/{document_id}/export.csv")
     assert response.status_code == 200, response.text
     assert "text/csv" in response.headers["content-type"]
     lines = response.text.strip().splitlines()
-    assert lines[0] == "total_amount"
+    assert lines[0] == "Total Amount"
     assert "$125,000" in lines[1]
 
     # Legacy long format still available.

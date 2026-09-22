@@ -36,7 +36,7 @@ describe("FieldsTable", () => {
     const rows = buildFieldRows([scalar()], [], new Map());
     render(<FieldsTable title="Fields" rows={rows} />);
 
-    expect(screen.getByText("contract_number")).toBeInTheDocument();
+    expect(screen.getByText("Contract Number")).toBeInTheDocument();
     expect(screen.getByText("W912DR-26-C-0042")).toBeInTheDocument();
     expect(screen.getByText(/high 0\.90/i)).toBeInTheDocument();
     expect(screen.getByText("source_evidence")).toBeInTheDocument();
@@ -126,7 +126,7 @@ describe("FieldsTable", () => {
       expect.objectContaining({
         id: "contract_number",
         pageNumber: 1,
-        label: "contract_number",
+        label: "Contract Number",
         value: "W912DR-26-C-0042",
       }),
     );

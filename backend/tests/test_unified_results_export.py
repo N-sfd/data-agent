@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import csv
 import io
 import time
 from uuid import uuid4
@@ -158,11 +159,102 @@ def test_wide_fields_csv_is_dataset_oriented() -> None:
         database.close()
 
     lines = csv_body.strip().splitlines()
-    assert "contract_number" in lines[0]
-    assert "date_issued" in lines[0]
+    # Row 1 is human field names (the display label), not raw field_key
+    # slugs — an integration-ready header row, not an internal id dump.
+    assert "Contract Number" in lines[0]
+    assert "Date Issued" in lines[0]
+    assert "contract_number" not in lines[0]
     assert "47QRCA25DSF07" in lines[1]
     assert "4/15/2025" in lines[1]
     assert not lines[0].startswith("field,value")
+
+
+def test_wide_csv_and_normalized_never_expose_raw_kv_key() -> None:
+    document_id = _upload()
+    database = SessionLocal()
+    try:
+        _seed_field(
+            database,
+            document_id,
+            key="kv_pricing_arrangement",
+            label="Pricing Arrangement",
+            value="Firm Fixed Price",
+        )
+        database.commit()
+        fields = list(
+            database.query(DocumentMetadataField).filter_by(
+                document_id=document_id
+            )
+        )
+        csv_body = build_fields_wide_csv(fields)
+    finally:
+        database.close()
+
+    header = csv_body.strip().splitlines()[0]
+    assert "Pricing Arrangement" in header
+    assert "kv_" not in header.lower()
+
+    normalized = client.get(f"/api/documents/{document_id}/normalized")
+    assert normalized.status_code == 200, normalized.text
+    field_keys = normalized.json()["fields"].keys()
+    assert "kv_pricing_arrangement" not in field_keys
+    assert "pricing_arrangement" in field_keys
+
+
+def test_wide_csv_escapes_commas_quotes_and_newlines() -> None:
+    document_id = _upload()
+    database = SessionLocal()
+    try:
+        _seed_field(
+            database,
+            document_id,
+            key="contractor_name",
+            label="Contractor Name",
+            value='ABC, "Prime" Engineering\nSecond Line',
+        )
+        database.commit()
+        fields = list(
+            database.query(DocumentMetadataField).filter_by(document_id=document_id)
+        )
+        csv_body = build_fields_wide_csv(fields)
+    finally:
+        database.close()
+
+    rows = list(csv.reader(io.StringIO(csv_body)))
+    assert rows[0] == ["Contractor Name"]
+    assert rows[1] == ['ABC, "Prime" Engineering\nSecond Line']
+
+
+def test_line_items_csv_with_no_tables_is_a_clean_404_not_a_crash() -> None:
+    document_id = _upload()
+    response = client.get(f"/api/documents/{document_id}/export/line-items.csv")
+    assert response.status_code == 404
+    assert "line-item" in response.json()["detail"].lower()
+
+
+def test_line_items_csv_is_a_real_rectangular_table_not_flattened_columns() -> None:
+    document_id = _upload()
+    database = SessionLocal()
+    try:
+        _seed_table(database, document_id, key="clins", display_name="CLINs")
+        database.commit()
+    finally:
+        database.close()
+
+    response = client.get(f"/api/documents/{document_id}/export/line-items.csv")
+    assert response.status_code == 200, response.text
+    assert "text/csv" in response.headers["content-type"]
+
+    lines = response.text.strip().splitlines()
+    assert lines[0] == "clin,description,amount"
+    # One CLIN per row — not one column per CLIN.
+    assert lines[1] == "0001,Labor,1000"
+    assert lines[2] == "0002,Travel,250"
+
+    missing = client.get(
+        f"/api/documents/{document_id}/export/line-items.csv?table_key=nope"
+    )
+    assert missing.status_code == 404
 
 
 def test_xlsx_workbook_has_fields_tables_and_evidence() -> None:
@@ -211,8 +303,11 @@ def test_xlsx_workbook_has_fields_tables_and_evidence() -> None:
     headers = [cell.value for cell in all_fields[1]]
     assert "Field / Label" in headers
     assert "Extracted Value" in headers
-    labels = [row[2].value for row in all_fields.iter_rows(min_row=2)]
-    values = [row[3].value for row in all_fields.iter_rows(min_row=2)]
+    # Section is deliberately not a default column here (unreliable,
+    # mostly blank) — the data still lives in Source Evidence.
+    assert "Section" not in headers
+    labels = [row[1].value for row in all_fields.iter_rows(min_row=2)]
+    values = [row[2].value for row in all_fields.iter_rows(min_row=2)]
     assert any(
         label and "contract" in str(label).lower() for label in labels
     ) or "47QRCA25DSF07" in values
@@ -411,7 +506,7 @@ def test_blank_needs_review_not_populated_with_label() -> None:
         database.close()
 
     lines = csv_body.strip().splitlines()
-    assert lines[0] == "issued_by"
+    assert lines[0] == "Issued By"
     # Empty / blank — not the form label text.
     assert "Issued By" not in lines[1]
     assert lines[1] in {"", '""'}
@@ -493,5 +588,5 @@ def test_normalized_endpoint_matches_export_sources() -> None:
     csv_response = client.get(f"/api/documents/{document_id}/export.csv")
     assert csv_response.status_code == 200, csv_response.text
     csv_lines = csv_response.text.strip().splitlines()
-    assert "contract_number" in csv_lines[0]
+    assert "Contract Number" in csv_lines[0]
     assert "47QRCA25DSF07" in csv_lines[1]

@@ -92,6 +92,28 @@ def looks_like_clause_citation_value(value: str | None) -> bool:
         return False
     return bool(_CLAUSE_CITATION_VALUE.match(text))
 
+
+# Bare nested paragraph/clause numbering ("11.1.1. except", "12.1.3.2.1.",
+# "23.1.3", "1.2.2. (Cost") — a section/paragraph pointer picked up next to
+# a heading, not a business field value. Distinct from
+# _CLAUSE_CITATION_VALUE, which requires a trailing "- Title" / ", Title"
+# clause name; this shape has no such suffix, just the bare numbering with
+# at most a short trailing fragment truncated by the OCR crop.
+_PARAGRAPH_REFERENCE_VALUE = re.compile(
+    r"^\d{1,3}(?:\.\d{1,3}){1,5}\.?(?:\s+\S.{0,20})?$"
+)
+
+
+def looks_like_paragraph_reference_value(value: str | None) -> bool:
+    """True for a bare nested paragraph/clause numbering reference."""
+
+    if not value:
+        return False
+    text = " ".join(str(value).strip().split())
+    if not text:
+        return False
+    return bool(_PARAGRAPH_REFERENCE_VALUE.match(text))
+
 # Compact identifiers we accept; everything else with spaces is suspect
 # when the field semantics imply an ID.
 _COMPACT_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/\-]{2,47}$")

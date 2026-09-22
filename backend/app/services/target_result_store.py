@@ -29,6 +29,8 @@ from app.schemas.extraction_intelligence import (
 )
 from app.schemas.universal_extraction import SourceEvidence
 from app.services.detected_target_store import load_document_targets
+from app.services.discovery_enrichment import humanize_field_key
+from app.services.field_classification import is_auto_kv_key
 from app.services.review_routing import (
     REASON_EXTRACTION_DIFFERS,
     decide_review_for_scalar,
@@ -106,9 +108,24 @@ def persist_target_extraction_results(
             )
         )
 
-        label = label_by_key.get(key) or scalar.target or key
+        # scalar.target is often just the raw candidate key re-echoed
+        # (ScalarTargetResult.target == DocumentTarget.key upstream), so it
+        # is only trusted as a label when it isn't itself an internal
+        # kv_/custom_ key — otherwise humanize the key rather than ever
+        # persist a raw candidate key as the user-facing label.
+        candidate_label = (scalar.target or "").strip()
+        if not candidate_label or candidate_label == key or is_auto_kv_key(
+            candidate_label
+        ):
+            candidate_label = None
+        label = label_by_key.get(key) or candidate_label or humanize_field_key(key)
         group = group_by_key.get(key) or "extracted"
         value_type = value_type_by_key.get(key) or "string"
+        if is_auto_kv_key(key):
+            # Debug/provenance only — the raw discovery candidate id must
+            # never surface as the field's identity outside this blob.
+            evidence["candidate_key"] = key
+            evidence["canonical_field_name"] = key[3:]
         if scalar.confidence_signals:
             evidence["confidence_signals"] = scalar.confidence_signals
         evidence["validation_status"] = scalar.validation_status

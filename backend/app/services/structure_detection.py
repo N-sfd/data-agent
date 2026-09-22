@@ -926,9 +926,31 @@ async def detect_document_structures(
 
     detected_fields: list[DetectedField] = []
 
+    # A page carrying a real 3+ column table is a line-item/CLIN schedule,
+    # not a document-info block — "Amount"/"Unit Price"/"Quantity" found
+    # in that page's flattened text is one row's figure, not a
+    # document-level fact, even though it reads exactly like one.
+    line_item_pages: set[int] = {
+        page.page_number
+        for page in scan_pages
+        for table in (page.tables_json or [])
+        if len(table.get("headers") or []) >= 3
+    }
+    # Generic, single-word probes/labels that are legitimate document
+    # facts on an invoice (one "Amount" due) but are ambiguous — and
+    # wrong — once a real line-item table exists on the same page.
+    _AMBIGUOUS_ON_LINE_ITEM_PAGE = frozenset(
+        {"amount", "unit_price", "quantity", "unit", "price", "total"}
+    )
+
     for key, label, probe_label in FIELD_PROBES:
         probe_hits: list[tuple[int, str]] = []
         for page in scan_pages:
+            if (
+                key in _AMBIGUOUS_ON_LINE_ITEM_PAGE
+                and page.page_number in line_item_pages
+            ):
+                continue
             value = extract_labeled_value(
                 text=page.final_text or "",
                 requested_label=probe_label,
@@ -966,6 +988,16 @@ async def detect_document_structures(
 
     known_probe_labels = {probe_label.lower() for _, _, probe_label in FIELD_PROBES}
 
+    # Cross-candidate corroboration for stacked_line pairs — these infer a
+    # value purely from "next line down" with no same-line separator, so a
+    # column/reading-order artifact in the page text can pair one page's
+    # heading with another region's unrelated value. A single such
+    # mis-pairing is hard to catch in isolation, but the same exact value
+    # attaching to several otherwise-unrelated headings is decisive: a
+    # real contract fact belongs to one field, not five.
+    _REPEATED_VALUE_MIN_OCCURRENCES = 3
+    kv_value_occurrences: dict[str, list[str]] = {}
+
     for page in scan_pages:
         for pair in scan_page_for_labeled_pairs(page=page):
             if pair.normalized_label in known_probe_labels:
@@ -979,6 +1011,15 @@ async def detect_document_structures(
 
             slug = _slugify(pair.raw_label)
             if is_internal_form_name(slug) or is_internal_form_name(f"kv_{slug}"):
+                continue
+            if (
+                slug in _AMBIGUOUS_ON_LINE_ITEM_PAGE
+                and page.page_number in line_item_pages
+            ):
+                # Same reasoning as the FIELD_PROBES guard above: a bare
+                # "Unit Price"/"Quantity"/... found on a page that also
+                # carries a real line-item table is that table's own
+                # column data leaking into free text, not a document fact.
                 continue
 
             from app.services.field_classification import (
@@ -1031,6 +1072,53 @@ async def detect_document_structures(
                     source_labels=[pair.raw_label],
                 )
             )
+            # Only stacked_line is checked here: it infers a value purely
+            # from line adjacency with no same-line separator at all, so
+            # it is the one method genuinely vulnerable to a column/
+            # reading-order artifact pairing the wrong text. inline_regex
+            # still requires an explicit colon/gap/dot-leader on the same
+            # line as its label — real structural evidence a repeated
+            # value there doesn't undermine.
+            if pair.method == "stacked_line":
+                normalized_value = " ".join(str(pair.value).strip().lower().split())
+                if normalized_value:
+                    kv_value_occurrences.setdefault(normalized_value, []).append(
+                        kv_key
+                    )
+
+    # Demote (not silently drop) any candidate whose value repeated across
+    # 3+ otherwise-unrelated low-structure-method labels — evidence of a
+    # scan artifact, not 3+ genuine facts sharing one value.
+    suspect_keys: set[str] = set()
+    for keys in kv_value_occurrences.values():
+        if len(set(keys)) >= _REPEATED_VALUE_MIN_OCCURRENCES:
+            suspect_keys.update(keys)
+
+    if suspect_keys:
+        rewritten: list[DetectedTarget] = []
+        for item in detected:
+            if item.key not in suspect_keys:
+                rewritten.append(item)
+                continue
+            rewritten.append(
+                _target(
+                    key=f"section_{item.key[len('kv_'):]}",
+                    label=item.label,
+                    extraction_type="clause",
+                    pages=item.pages,
+                    confidence=item.confidence,
+                    evidence=item.evidence
+                    + [
+                        "Excluded from business fields: this value repeated "
+                        "across multiple unrelated candidates, indicating a "
+                        "text-extraction column/reading-order artifact "
+                        "rather than a genuine label/value pairing."
+                    ],
+                    discovery_method=item.discovery_method,
+                    source_labels=item.source_labels,
+                )
+            )
+        detected = rewritten
 
     entities = extract_generic_entities(combined_text)
     detected_contacts = entities["email"] + entities["phone"]

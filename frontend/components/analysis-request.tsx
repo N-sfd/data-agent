@@ -3,6 +3,7 @@
 import { ArrowRight, Loader2, Save, Search } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
+import { PIPELINE_STAGE_LABELS } from "@/components/extraction-live-progress";
 import ExtractionInstruction from "@/components/extraction/extraction-instruction";
 import SuggestedExtraction from "@/components/extraction/suggested-extraction";
 import TargetPicker, {
@@ -392,18 +393,9 @@ export default function AnalysisRequest({
                 ? "Connecting to processing service…"
                 : schemaDiscovering
                   ? "Discovering fields…"
-                  : pipelineStage === "rendering_ocr" ||
-                      pipelineStage === "running_ocr"
-                    ? "OCR…"
-                    : pipelineStage === "indexing" ||
-                        pipelineStage === "detecting_structure"
-                      ? "Detecting structure…"
-                      : pipelineStage === "reading_document" ||
-                          pipelineStage === "queued"
-                        ? "Reading pages…"
-                        : pipelineStage === "discovering_fields"
-                          ? "Discovering fields…"
-                          : "Processing document pages…"}
+                  : pipelineStage && PIPELINE_STAGE_LABELS[pipelineStage]
+                    ? `${PIPELINE_STAGE_LABELS[pipelineStage]}…`
+                    : "Processing document pages…"}
             </div>
             <div className="grid gap-2 sm:grid-cols-2">
               {Array.from({ length: 6 }).map((_, index) => (

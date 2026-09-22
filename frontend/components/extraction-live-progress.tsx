@@ -16,7 +16,7 @@ interface ExtractionLiveProgressProps {
   discoveryReused?: boolean;
 }
 
-const PIPELINE_STAGE_LABELS: Record<string, string> = {
+export const PIPELINE_STAGE_LABELS: Record<string, string> = {
   uploaded: "Uploading",
   queued: "Reading pages",
   reading_document: "Reading pages",
