@@ -48,6 +48,45 @@ _CODE_THEN_NEXT_FIELD = re.compile(
     re.IGNORECASE,
 )
 
+# Table-of-contents / navigation lines: "ATTACHMENT J-1 ........ 69",
+# "SECTION B ............. 9". A run of 3+ dot leaders (optionally spaced,
+# as OCR often inserts spaces between dots) followed by a bare 1-4 digit
+# page number is a page reference, never an extracted field value. This
+# is deliberately narrow (dots required) so it never catches ordinary
+# numeric field values (amounts, quantities, NAICS codes, ...).
+_DOTTED_LEADER = re.compile(r"(?:\.\s?){3,}\s*\d{1,4}\s*$")
+
+# FAR/DFARS clause citation shape: "52.217-9" / "505(b)(6)" optionally
+# followed by a comma and the clause's Title Case name — this is a
+# *reference*, produced by the dedicated clause-citation scanner, not a
+# scalar business field value.
+_CLAUSE_CITATION_VALUE = re.compile(
+    r"^\d{1,4}(?:\.\d{1,3})?(?:-\d{1,3})?(?:\([a-zA-Z0-9]{1,4}\)){0,4}"
+    r"\s*[-,]\s*[A-Z][A-Za-z0-9 /&'\-]{2,80}$"
+)
+
+
+def looks_like_toc_entry(value: str | None) -> bool:
+    """True for dotted-leader table-of-contents navigation lines."""
+
+    if not value:
+        return False
+    text = " ".join(str(value).strip().split())
+    if not text:
+        return False
+    return bool(_DOTTED_LEADER.search(text))
+
+
+def looks_like_clause_citation_value(value: str | None) -> bool:
+    """True for a FAR/DFARS clause citation ("505(b)(6), Post-award...")."""
+
+    if not value:
+        return False
+    text = " ".join(str(value).strip().split())
+    if not text:
+        return False
+    return bool(_CLAUSE_CITATION_VALUE.match(text))
+
 # Compact identifiers we accept; everything else with spaces is suspect
 # when the field semantics imply an ID.
 _COMPACT_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/\-]{2,47}$")
@@ -190,6 +229,11 @@ def reject_as_field_value(
     text = " ".join(str(value).strip().split())
     if known_labels and text.lower() in {label.lower() for label in known_labels}:
         return "matches_known_label"
+    if looks_like_toc_entry(text):
+        return "toc_entry"
+    effective_type_early = (value_type or "").lower() or None
+    if effective_type_early != "clause" and looks_like_clause_citation_value(text):
+        return "clause_citation_reference"
     if looks_like_form_label(text):
         return "looks_like_form_label"
     # Leftover label tokens after a failed split ("NUMBER", "NO.", "CODE").

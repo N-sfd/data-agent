@@ -26,7 +26,11 @@ from app.services.generic_kv_scanner import (
 from app.services.generic_label_extractor import (
     extract_labeled_value,
 )
-from app.services.label_rejection import looks_like_narrative_fragment
+from app.services.label_rejection import (
+    looks_like_clause_citation_value,
+    looks_like_narrative_fragment,
+    looks_like_toc_entry,
+)
 from app.services.table_quality import assess_table_candidate
 
 DETECTION_PAGE_LIMIT = 40
@@ -587,6 +591,16 @@ def _looks_like_reliable_kv_label(pair: ScannedPair) -> bool:
         return False
 
     if _looks_like_section_heading(label):
+        return False
+
+    # TOC/navigation lines ("ATTACHMENT J-1 ........ 69") and bare FAR/
+    # DFARS clause citations ("505(b)(6), Post-award Notices...") are
+    # real text on the page, but they are references, not business-field
+    # values — reject them here so they never become a kv_* candidate
+    # in the first place, rather than relying on the UI to hide them.
+    if looks_like_toc_entry(pair.value):
+        return False
+    if looks_like_clause_citation_value(pair.value):
         return False
 
     if pair.method in _LOW_CONFIDENCE_KV_METHODS:

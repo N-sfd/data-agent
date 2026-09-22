@@ -95,3 +95,37 @@ def test_gov_form_labels_are_discoverable() -> None:
         "contract no" in label for label in labels
     )
     assert "dodaac" in keys or any("dodaac" in label for label in labels)
+
+
+def test_toc_dotted_leaders_are_not_discovered_as_business_fields() -> None:
+    text = (
+        "TABLE OF CONTENTS\n"
+        "ATTACHMENT J-1 ........................ 69\n"
+        "ATTACHMENT J-2 ........................ 72\n"
+        "ATTACHMENT J-10 ....................... 122\n"
+        "SECTION B ..................... 9\n"
+    )
+
+    schema = asyncio.run(_discover(text))
+
+    keys = {target.key for target in schema.targets}
+    values = {
+        " ".join(str(e) for e in target.source_examples).lower()
+        for target in schema.targets
+    }
+
+    assert "kv_attachment_j_1" not in keys
+    assert "kv_attachment_j_2" not in keys
+    assert "kv_attachment_j_10" not in keys
+    assert not any("........" in value for value in values)
+
+
+def test_clause_citation_reference_is_not_discovered_as_a_business_field() -> None:
+    text = (
+        "FAR 16 clause reference: 505(b)(6), Post-award Notices and Debriefings\n"
+    )
+
+    schema = asyncio.run(_discover(text))
+
+    keys = {target.key for target in schema.targets}
+    assert "kv_far_16" not in keys

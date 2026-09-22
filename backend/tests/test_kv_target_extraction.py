@@ -253,6 +253,78 @@ def test_scan_ordinary_text_pdf_keeps_human_labels() -> None:
     assert not any(is_internal_form_name(label) for label in labels)
 
 
+def test_toc_dotted_leader_evidence_is_not_promoted_as_a_field() -> None:
+    """'ATTACHMENT J-1 ........ 69' is a table-of-contents navigation
+    line, not an extracted business-field value, even when discovery
+    picked it up as a kv_* candidate with high OCR confidence."""
+    page = _page(
+        1,
+        "TABLE OF CONTENTS\nATTACHMENT J-1 ........................ 69\n",
+    )
+    target = _kv_target(
+        id="doc:kv_attachment_j_1",
+        key="kv_attachment_j_1",
+        label="Attachment J-1",
+        page_numbers=[1],
+        confidence=0.99,
+        source_examples=[
+            "'Attachment J-1: ........................ 69' on page 1 (inline_regex)"
+        ],
+    )
+
+    result = _resolve_scalar_from_source_examples(target, page_lookup={1: page})
+
+    assert result is None
+
+
+def test_clause_citation_evidence_is_not_promoted_as_a_field() -> None:
+    """'505(b)(6), Post-award Notices and Debriefings' is a FAR clause
+    citation/reference, not a scalar business-field value."""
+    page = _page(
+        4,
+        "FAR 16 references 505(b)(6), Post-award Notices and Debriefings\n",
+    )
+    target = _kv_target(
+        id="doc:kv_far_16",
+        key="kv_far_16",
+        label="Far 16",
+        page_numbers=[4],
+        confidence=0.99,
+        source_examples=[
+            "'Far 16: 505(b)(6), Post-award Notices and Debriefings' on page 4 (inline_regex)"
+        ],
+    )
+
+    result = _resolve_scalar_from_source_examples(target, page_lookup={4: page})
+
+    assert result is None
+
+
+def test_no_candidate_returns_none_instead_of_default_confidence() -> None:
+    """When nothing at all is found for a target, the resolver should
+    return None (so the caller can escalate to AI / mark Not Found)
+    rather than manufacturing a fixed ~25% Needs Review row."""
+    page = _page(2, "This page has no relevant labels or values at all.")
+    page.id = 2
+    target = _kv_target(
+        id="doc:contacts",
+        key="contacts",
+        label="Contacts",
+        page_numbers=[2],
+        confidence=0.5,
+        source_examples=[],
+    )
+
+    result, retrieval, escalate = _resolve_scalar_target(
+        target,
+        page_lookup={2: page},
+        all_pages=[page],
+    )
+
+    assert result is None
+    assert escalate is True
+
+
 def test_field_probe_evidence_resolves_via_source_examples() -> None:
     """WAWF Payment Office and similar field-probe targets store evidence
     in the format  'PROBE_LABEL: value' on page N (field_probe)  and

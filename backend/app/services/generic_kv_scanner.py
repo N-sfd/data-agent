@@ -461,6 +461,16 @@ _INLINE_PATTERNS: tuple[tuple[re.Pattern[str], float], ...] = (
     (_DOT_LEADER, 0.76),
 )
 
+# A dot-leader match ("ATTACHMENT J-1 ........ 69") is a table-of-contents
+# / navigation line by construction — the dots ARE the leader connecting a
+# heading to its page number. Once matched, the captured "value" is just
+# the bare trailing page number, indistinguishable in shape from a real
+# short numeric field value, so it must be rejected right here using the
+# fact that *this specific pattern* fired, not by re-guessing from the
+# bare number alone downstream (where that guess would be unsafe/too
+# broad against legitimate short numeric values like quantities or codes).
+_TOC_PAGE_NUMBER_VALUE = re.compile(r"^\d{1,4}$")
+
 
 def _scan_inline_regex(text: str) -> list[ScannedPair]:
     pairs: list[ScannedPair] = []
@@ -468,6 +478,8 @@ def _scan_inline_regex(text: str) -> list[ScannedPair]:
         for match in pattern.finditer(text):
             label, value = match.group(1).strip(), match.group(2).strip()
             if not label or not value or _looks_like_noise(label):
+                continue
+            if pattern is _DOT_LEADER and _TOC_PAGE_NUMBER_VALUE.match(value):
                 continue
             if not _acceptable_pair_value(value):
                 continue

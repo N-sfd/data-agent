@@ -470,6 +470,15 @@ def _resolve_scalar_target(
         )
 
     if consensus.decision == "reject" or consensus.selected is None:
+        if not candidates:
+            # No candidate of any kind was found — this is a genuine
+            # "not found", not a weak/ambiguous extraction. Let it fall
+            # through to AI fallback (if enabled) and, failing that,
+            # land in unresolved_targets so the UI shows a real
+            # "Not Found" with no confidence score, instead of a
+            # manufactured ~25% that reads as a weak-but-real signal.
+            return None, retrieval, True
+
         page_hint = candidate_pages[0] if candidate_pages else None
         page_number = page_hint.page_number if page_hint else (
             (target.page_numbers or [1])[0]
