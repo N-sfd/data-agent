@@ -129,3 +129,25 @@ def test_clause_citation_reference_is_not_discovered_as_a_business_field() -> No
 
     keys = {target.key for target in schema.targets}
     assert "kv_far_16" not in keys
+
+
+def test_ucf_section_heading_and_form_noise_are_not_discovered_as_fields() -> None:
+    text = (
+        "E. Inspection and Acceptance: All items must pass final inspection.\n"
+        "Address: (Type or print)\n"
+        "Area Code Number: EXT.\n"
+        "CLIN: DESCRIPTION OF SUPPLIES/SERVICES AMOUNT\n"
+        "Government: Government property includes both Government-furnished "
+        "and contractor-acquired property necessary to perform this contract.\n"
+        "Contract Number: 47QRCA25DSF07\n"
+    )
+
+    schema = asyncio.run(_discover(text))
+
+    keys = {target.key for target in schema.targets}
+    assert "kv_e_inspection_and_acceptance" not in keys
+    assert "kv_address" not in keys
+    assert "kv_area_code_number" not in keys
+    assert "kv_clin" not in keys
+    assert "kv_government" not in keys
+    assert "contract_number" in keys

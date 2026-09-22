@@ -24,10 +24,15 @@ _BARE_FORM_LABEL = re.compile(
     r"ISSUED BY|ISSUED TO|SHIP TO|"
     r"DATE ISSUED|EFFECTIVE DATE|"
     r"NAME|TELEPHONE|EMAIL|ADDRESS|NUMBER|NO\.?|CODE|DATE|TYPE|"
-    r"OFFEROR|AWARD|"
+    r"OFFEROR|AWARD|EXT\.?|EXTENSION|"
     r"PAGE\s+\d+\s+OF\s+\d+"
     r")$"
 )
+
+# Printed-form instructions in parentheses ("(Type or print)",
+# "(mm/dd/yyyy)", "(See instructions)") are boilerplate guidance printed
+# next to a blank, not a filled-in value.
+_PARENTHETICAL_INSTRUCTION = re.compile(r"^\([A-Za-z0-9 /,.'\-]{2,50}\)$")
 
 # Field markers anywhere (lettered or numbered form cells).
 _FIELD_MARKER = re.compile(r"(?:^|[\s/|]+)\d{1,2}\.\s+[A-Z]{2,}")
@@ -126,6 +131,8 @@ def looks_like_form_label(value: str | None) -> bool:
         return True
     if _BARE_FORM_LABEL.match(text.upper()):
         return True
+    if _PARENTHETICAL_INSTRUCTION.match(text):
+        return True
     if _MULTI_LABEL_MASHUP.search(text):
         return True
     if count_field_markers(text) >= 2:
@@ -135,6 +142,20 @@ def looks_like_form_label(value: str | None) -> bool:
         len(text) > 28
         and not any(ch.isdigit() for ch in text)
         and text == text.title()
+    ):
+        return True
+    # ALL-CAPS table/column-header captions ("DESCRIPTION OF SUPPLIES/
+    # SERVICES AMOUNT") read like a normal organization name in caps
+    # (also common on government forms) EXCEPT for the "/"-joined
+    # multi-concept shape a real name never has — require it so this
+    # doesn't reject legitimate all-caps contractor/entity names.
+    words = text.split()
+    if (
+        "/" in text
+        and len(words) >= 3
+        and len(text) > 20
+        and not any(ch.isdigit() for ch in text)
+        and text == text.upper()
     ):
         return True
     return False
@@ -208,6 +229,21 @@ def looks_like_narrative_fragment(value: str | None) -> bool:
         function_count = sum(1 for word in words if word in _FUNCTION_WORDS)
         if function_count / len(words) >= _NARRATIVE_FUNCTION_WORD_RATIO:
             return True
+
+    # A long sentence-case run ending in terminal punctuation is prose
+    # even when it's information-dense enough to dodge the function-word
+    # ratio above ("Government property includes both Government-
+    # furnished and contractor-acquired property necessary to perform
+    # this contract."). Real field values — names, IDs, addresses,
+    # dates — don't end a multi-word run with a period; that shape is
+    # specific to a written sentence.
+    if (
+        len(words) >= 10
+        and text[-1] in ".!?"
+        and text[0].isupper()
+        and not text.isupper()
+    ):
+        return True
 
     return False
 

@@ -35,6 +35,7 @@ from app.services.confidence_engine import (
     explain_confidence,
 )
 from app.services.detected_target_store import load_document_targets
+from app.services.document_outline import SectionBoundary, build_document_outline
 from app.services.form_field_search import search_form_fields
 from app.services.generic_kv_scanner import is_internal_form_name
 from app.services.generic_label_extractor import (
@@ -48,6 +49,7 @@ from app.services.page_retrieval import (
     pages_from_trace,
 )
 from app.services.result_validation import build_validation_result
+from app.services.section_detection import section_for_value
 from app.services.review_routing import decide_review_for_scalar
 from app.services.label_rejection import reject_as_field_value
 from app.services.candidate_consensus import ExtractionCandidate, resolve_candidates
@@ -152,6 +154,7 @@ def _resolve_scalar_from_source_examples(
     target: DocumentTarget,
     page_lookup: dict[int, DocumentPage],
     retrieval: RetrievalTrace | None = None,
+    outline: list[SectionBoundary] | None = None,
 ) -> ScalarTargetResult | None:
     """Use discovery-time evidence before re-parsing page text."""
     if retrieval is None:
@@ -221,6 +224,12 @@ def _resolve_scalar_from_source_examples(
                 "page_number": page_number,
                 "source_text": snippet,
                 "source_reference": f"page {page_number}",
+                "section": section_for_value(
+                    outline,
+                    page_number=page_number,
+                    page_text=page_text,
+                    value=value,
+                ),
                 "raw_ocr": value,
                 "normalized_value": value,
                 "extraction_method": "source_evidence",
@@ -303,6 +312,7 @@ def _resolve_scalar_target(
     known_labels: frozenset[str] | None = None,
     blocks_by_page_id: dict[int, list[LayoutBlock]] | None = None,
     pdf_path: Any = None,
+    outline: list[SectionBoundary] | None = None,
 ) -> tuple[ScalarTargetResult | None, RetrievalTrace, bool]:
     """Return (result, retrieval_trace, escalate_to_ai).
 
@@ -317,7 +327,7 @@ def _resolve_scalar_target(
     )
 
     from_evidence = _resolve_scalar_from_source_examples(
-        target, page_lookup, retrieval
+        target, page_lookup, retrieval, outline=outline
     )
     if from_evidence is not None:
         return from_evidence, from_evidence.retrieval or retrieval, False
@@ -579,6 +589,13 @@ def _resolve_scalar_target(
                 or (page.page_number if page else 1),
                 "source_text": snippet,
                 "source_reference": f"page {selected.source_page or '?'}",
+                "section": section_for_value(
+                    outline,
+                    page_number=selected.source_page
+                    or (page.page_number if page else 1),
+                    page_text=page_text,
+                    value=snippet,
+                ),
                 "x0": bbox[0] if bbox and len(bbox) == 4 else None,
                 "y0": bbox[1] if bbox and len(bbox) == 4 else None,
                 "x1": bbox[2] if bbox and len(bbox) == 4 else None,
@@ -965,6 +982,10 @@ async def extract_by_targets(
         normalize_label(t.label).lower() for t in stored.targets
     )
     blocks_by_page_id = _load_blocks_by_page_id(database=database, pages=all_pages)
+    # Built once per extraction run, not per field — a UCF section spans
+    # many pages, so every field's evidence resolves its section against
+    # this same outline rather than each guessing independently.
+    outline = build_document_outline(all_pages)
 
     pdf_path = None
     try:
@@ -1003,6 +1024,7 @@ async def extract_by_targets(
                 known_labels=known_labels,
                 blocks_by_page_id=blocks_by_page_id,
                 pdf_path=pdf_path,
+                outline=outline,
             )
             retrieval_by_key[target.key] = retrieval
             if resolved_scalar is not None:

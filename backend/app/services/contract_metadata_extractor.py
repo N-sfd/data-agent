@@ -26,8 +26,9 @@ from app.services.generic_label_extractor import (
     extract_labeled_value_from_layout,
     normalize_label,
 )
+from app.services.document_outline import SectionBoundary, build_document_outline
 from app.services.label_rejection import reject_as_field_value
-from app.services.section_detection import find_nearby_section
+from app.services.section_detection import section_for_value
 from app.services.source_validator import validate_source_value
 
 
@@ -69,9 +70,6 @@ def _normalize_code(field_key: str, raw_value: str) -> str:
         return match.group(0)
 
     return raw_value
-
-
-_find_nearby_section = find_nearby_section
 
 
 def _normalize_field_value(
@@ -126,6 +124,7 @@ def _try_deterministic(
     document_name: str,
     known_labels: frozenset[str] | None = None,
     blocks_by_page_id: dict[int, list[LayoutBlock]] | None = None,
+    outline: list[SectionBoundary] | None = None,
 ) -> MetadataFieldResult | None:
     for page in pages:
         text = page.final_text or ""
@@ -160,7 +159,12 @@ def _try_deterministic(
             document_name=document_name,
             page_number=page.page_number,
             source_text=raw_value,
-            section=_find_nearby_section(text, raw_value),
+            section=section_for_value(
+                outline,
+                page_number=page.page_number,
+                page_text=text,
+                value=raw_value,
+            ),
         )
 
         return MetadataFieldResult(
@@ -183,6 +187,7 @@ async def _resolve_with_ai(
     pages: list[DocumentPage],
     document_name: str,
     ai_provider: AIProvider,
+    outline: list[SectionBoundary] | None = None,
 ) -> list[MetadataFieldResult]:
     if not unresolved or not pages:
         return []
@@ -254,8 +259,11 @@ async def _resolve_with_ai(
                     source_reference=(
                         f"{document_name}, page {page_number}"
                     ),
-                    section=_find_nearby_section(
-                        page.final_text or "", source_text
+                    section=section_for_value(
+                        outline,
+                        page_number=page_number,
+                        page_text=page.final_text or "",
+                        value=source_text,
                     ),
                 ),
                 verified=True,
@@ -287,6 +295,10 @@ async def extract_contract_metadata(
     blocks_by_page_id = _load_blocks_by_page_id(
         database=database, pages=pages
     )
+    # Built once for the whole document — a UCF section spans many
+    # pages, so every field resolves its section against this same
+    # outline rather than each field re-deriving it independently.
+    outline = build_document_outline(pages)
 
     for field in all_field_specs:
         match = _try_deterministic(
@@ -295,6 +307,7 @@ async def extract_contract_metadata(
             document_name=document.original_filename,
             known_labels=known_labels,
             blocks_by_page_id=blocks_by_page_id,
+            outline=outline,
         )
 
         if match:
@@ -307,6 +320,7 @@ async def extract_contract_metadata(
         pages=pages,
         document_name=document.original_filename,
         ai_provider=ai_provider,
+        outline=outline,
     )
 
     resolved.extend(ai_resolved)

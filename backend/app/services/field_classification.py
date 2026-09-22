@@ -10,6 +10,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from app.services.document_outline import UCF_SECTIONS
 from app.services.label_rejection import looks_like_narrative_fragment
 
 # Canonical keys for the Key Contract Fields horizontal record.
@@ -68,6 +69,12 @@ _SECTION_HEADING_WORDS = frozenset(
         "total solution", "period of performance", "abbreviations",
         "acronyms", "applicable documents", "description", "discussion",
     }
+    # Full UCF section titles ("Inspection and Acceptance", "Contract
+    # Administration Data", ...) — a kv_ scanner picking up "E.
+    # Inspection and Acceptance" as a label:value pair is finding a
+    # section heading, not a business field, the same way "B.1 General"
+    # is.
+    | {title.lower() for title in UCF_SECTIONS.values()}
 )
 _LONG_VALUE_CHARS = 160
 _SOW_KV_SLUG = re.compile(

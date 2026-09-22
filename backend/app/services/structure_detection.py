@@ -26,6 +26,7 @@ from app.services.generic_kv_scanner import (
 from app.services.generic_label_extractor import (
     extract_labeled_value,
 )
+from app.services.field_classification import _looks_like_section_heading
 from app.services.label_rejection import (
     looks_like_clause_citation_value,
     looks_like_narrative_fragment,
@@ -561,27 +562,11 @@ _DANGLING_TRAILING_WORDS = frozenset(
 # "C.1 Scope", "D.1 Background") is shaped just like a short form label —
 # 1-3 words, no dangling connector — so the checks above let it through.
 # It isn't a business field though: it's a section marker whose "value"
-# is really the body text that follows it, not a filled-in answer. Gate
-# on the label's remaining text (after stripping any leading numbering)
-# matching common SOW/PWS/clause heading vocabulary.
-_SECTION_HEADING_LEADER = re.compile(
-    r"^\s*(?:[A-Z]|\d{1,2})(?:\.\d{1,2})?\.?\s+"
-)
-_SECTION_HEADING_WORDS = frozenset(
-    {
-        "general", "authority", "background", "scope", "purpose",
-        "applicability", "definitions", "references", "overview",
-        "introduction", "objective", "objectives", "requirements",
-        "responsibilities", "summary", "policy", "procedures",
-        "total solution", "period of performance", "abbreviations",
-        "acronyms", "applicable documents", "description", "discussion",
-    }
-)
-
-
-def _looks_like_section_heading(label: str) -> bool:
-    stripped = _SECTION_HEADING_LEADER.sub("", label).strip().lower()
-    return stripped in _SECTION_HEADING_WORDS
+# is really the body text that follows it, not a filled-in answer.
+# _looks_like_section_heading (imported at module top) matches common
+# SOW/PWS/clause heading vocabulary plus full UCF section titles, kept
+# as a single shared copy in field_classification.py so this gate and
+# is_narrative_or_section_field() never drift.
 
 
 def _looks_like_reliable_kv_label(pair: ScannedPair) -> bool:

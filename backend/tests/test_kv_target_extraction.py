@@ -325,6 +325,41 @@ def test_no_candidate_returns_none_instead_of_default_confidence() -> None:
     assert escalate is True
 
 
+def test_resolved_scalar_inherits_section_from_document_outline() -> None:
+    """A field resolved on a page with no heading of its own must still
+    carry the section it structurally belongs to, inherited from the
+    nearest preceding heading anywhere earlier in the document — not
+    left blank just because the value and the heading are on different
+    pages."""
+    page_23 = _page(23, "SECTION G\nCONTRACT ADMINISTRATION DATA\n")
+    page_24 = _page(
+        24, "WAWF Payment Office: DFAS Columbus routing data follows."
+    )
+    target = _kv_target(
+        id="doc:wawf_payment_office",
+        key="wawf_payment_office",
+        label="WAWF Payment Office",
+        page_numbers=[24],
+        confidence=0.86,
+        source_examples=[
+            "'WAWF Payment Office: DFAS Columbus routing data follows.' on page 24 (field_probe)"
+        ],
+    )
+
+    from app.services.document_outline import build_document_outline
+
+    outline = build_document_outline([page_23, page_24])
+
+    result = _resolve_scalar_from_source_examples(
+        target,
+        page_lookup={23: page_23, 24: page_24},
+        outline=outline,
+    )
+
+    assert result is not None
+    assert result.evidence.section == "G — Contract Administration Data"
+
+
 def test_field_probe_evidence_resolves_via_source_examples() -> None:
     """WAWF Payment Office and similar field-probe targets store evidence
     in the format  'PROBE_LABEL: value' on page N (field_probe)  and
