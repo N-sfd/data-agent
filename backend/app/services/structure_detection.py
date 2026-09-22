@@ -982,6 +982,35 @@ async def detect_document_structures(
             if is_internal_form_name(slug) or is_internal_form_name(f"kv_{slug}"):
                 continue
 
+            from app.services.field_classification import (
+                is_narrative_or_section_field,
+            )
+
+            kv_key = f"kv_{slug}"
+            if is_narrative_or_section_field(
+                key=kv_key,
+                label=pair.raw_label,
+                value=pair.value,
+                field_group="field",
+            ):
+                # Keep as section/narrative signal only — never a business field.
+                detected.append(
+                    _target(
+                        key=f"section_{slug}",
+                        label=pair.raw_label,
+                        extraction_type="section",
+                        pages=[page.page_number],
+                        confidence=pair.confidence,
+                        evidence=[
+                            f"'{pair.raw_label}' section marker on page "
+                            f"{page.page_number}"
+                        ],
+                        discovery_method=pair.method,
+                        source_labels=[pair.raw_label],
+                    )
+                )
+                continue
+
             method_note = pair.method
             if pair.source_field_path:
                 method_note = (
@@ -990,7 +1019,7 @@ async def detect_document_structures(
 
             detected.append(
                 _target(
-                    key=f"kv_{slug}",
+                    key=kv_key,
                     label=pair.raw_label,
                     extraction_type="field",
                     pages=[page.page_number],

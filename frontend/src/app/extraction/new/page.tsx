@@ -15,9 +15,7 @@ import TargetResults from "@/components/extraction/target-results";
 import ExtractionSummaryBar from "@/components/extraction/extraction-summary-bar";
 import AnalysisRequest from "@/components/analysis-request";
 import UniversalResults from "@/components/universal-results";
-import SourceVerificationPanel, {
-  type SourceViewRequest,
-} from "@/components/source-verification-panel";
+import type { SourceViewRequest } from "@/components/source-verification-panel";
 import DocumentOverview from "@/components/document-overview";
 import DocumentUploader from "@/components/document-uploader";
 import BackendStatusBanner from "@/components/backend-status-banner";
@@ -1196,15 +1194,14 @@ function NewExtractionPageContent() {
               <div className="flex flex-wrap items-end justify-between gap-3">
                 <div>
                   <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-text-teal">
-                    Source Verification
+                    Extraction Results
                   </p>
                   <p className="mt-1 text-lg font-medium text-foreground">
-                    PDF + Results workspace
+                    Structured data workbook
                   </p>
                   <p className="mt-1 max-w-2xl text-sm text-text-secondary">
-                    Click any extracted value to jump to its page, highlight the
-                    evidence, and Verify / Edit / Reject — this is the core
-                    Data Agent experience.
+                    Full-width spreadsheet of accepted fields. Click any row to
+                    open source verification on demand.
                   </p>
                 </div>
               </div>
@@ -1213,77 +1210,26 @@ function NewExtractionPageContent() {
                 <ExtractionSummaryBar result={targetResult} />
               </div>
 
-              {/*
-                Responsive strategy:
-                - Desktop (lg+): side-by-side split, PDF pane sticky.
-                - Tablet (sm-lg): stacked, both panels always visible —
-                  no toggle needed, there's room for both.
-                - Mobile (<sm): Results only; "View Source" opens the PDF
-                  pane as a full-screen drawer. The pane is NEVER unmounted
-                  (only hidden/fixed via CSS) so its render cache survives
-                  opening and closing the drawer repeatedly.
-              */}
-              <div className="mt-4 grid gap-5 lg:grid-cols-[minmax(0,0.5fr)_minmax(0,0.5fr)]">
-                <div
-                  className={[
-                    mobileSourceOpen
-                      ? "fixed inset-0 z-50 overflow-y-auto bg-background p-4"
-                      : "hidden",
-                    "sm:static sm:z-auto sm:block sm:overflow-visible sm:bg-transparent sm:p-0",
-                    "min-h-0 lg:sticky lg:top-4 lg:max-h-[calc(100vh-2rem)] lg:self-start lg:overflow-hidden",
-                  ].join(" ")}
-                >
-                  {mobileSourceOpen && (
-                    <div className="mb-3 sm:hidden">
-                      <button
-                        type="button"
-                        onClick={() => setMobileSourceOpen(false)}
-                        className="btn-secondary w-full text-sm"
-                      >
-                        Close Source Preview
-                      </button>
-                    </div>
+              <div className="mt-4 min-w-0">
+                <TargetResults
+                  result={targetResult}
+                  targets={(schemaDiscovery?.targets ?? []).filter(
+                    (target) =>
+                      target.source !== "template" &&
+                      target.source_examples.length > 0 &&
+                      target.target_type !== "clause" &&
+                      target.target_type !== "section" &&
+                      target.target_type !== "obligation" &&
+                      !target.key.startsWith("table_p"),
                   )}
-                  <div className="overflow-hidden rounded-xl border border-border bg-surface">
-                    <div className="border-b border-border bg-surface-soft px-3 py-2">
-                      <p className="text-[11px] font-semibold uppercase tracking-wider text-text-muted">
-                        Source PDF
-                      </p>
-                    </div>
-                    <SourceVerificationPanel
-                      documentId={document.document_id}
-                      documentName={document.original_filename}
-                      pageCount={document.page_count}
-                      request={sourceRequest}
-                    />
-                  </div>
-                </div>
-
-                <div className="min-w-0">
-                  <div className="mb-2">
-                    <p className="text-[11px] font-semibold uppercase tracking-wider text-text-muted">
-                      Extraction Results
-                    </p>
-                  </div>
-                  <TargetResults
-                    result={targetResult}
-                    targets={(schemaDiscovery?.targets ?? []).filter(
-                      (target) =>
-                        target.source !== "template" &&
-                        target.source_examples.length > 0 &&
-                        target.target_type !== "clause" &&
-                        target.target_type !== "section" &&
-                        target.target_type !== "obligation" &&
-                        !target.key.startsWith("table_p"),
-                    )}
-                    documentId={document.document_id}
-                    documentName={document.original_filename}
-                    status="complete"
-                    processingDurationMs={targetResultDurationMs}
-                    selectedResultId={sourceRequest?.id ?? null}
-                    onViewSource={handleViewSource}
-                  />
-                </div>
+                  documentId={document.document_id}
+                  documentName={document.original_filename}
+                  pageCount={document.page_count}
+                  status="complete"
+                  processingDurationMs={targetResultDurationMs}
+                  selectedResultId={sourceRequest?.id ?? null}
+                  onViewSource={handleViewSource}
+                />
               </div>
             </div>
           </div>

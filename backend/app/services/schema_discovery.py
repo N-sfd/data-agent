@@ -84,7 +84,21 @@ def _enrich_document_target(target: DocumentTarget) -> DocumentTarget:
     target.is_internal = is_internal_form_name(target.key) or is_internal_form_name(
         target.label
     )
-    target.selectable = not target.is_internal
+    if target.target_type in {"section", "clause", "obligation"}:
+        target.selectable = False
+    else:
+        from app.services.field_classification import is_narrative_or_section_field
+
+        if is_narrative_or_section_field(
+            key=target.key,
+            label=target.label,
+            field_group=target.group,
+        ):
+            target.selectable = False
+            if target.target_type == "field":
+                target.target_type = "section"
+        else:
+            target.selectable = not target.is_internal
     if not target.source_labels:
         target.source_labels = labels_from_evidence(
             target.source_examples, display

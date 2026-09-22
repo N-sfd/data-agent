@@ -19,6 +19,12 @@ from typing import Any
 
 from app.models.document import Document
 from app.models.document_metadata_field import DocumentMetadataField
+from app.services.field_classification import (
+    KEY_CONTRACT_FIELD_KEYS,
+    is_canonical_business_field,
+    is_key_contract_field,
+    is_narrative_or_section_field,
+)
 from app.services.section_detection import find_nearby_section
 
 AUTHORITATIVE_REVIEW_STATUSES = frozenset({"accepted", "edited"})
@@ -78,6 +84,93 @@ def source_page_for(field: DocumentMetadataField) -> int:
 
 def is_authoritative(field: DocumentMetadataField) -> bool:
     return (field.review_status or "pending") in AUTHORITATIVE_REVIEW_STATUSES
+
+
+def _select_fields(
+    fields: list[DocumentMetadataField],
+    *,
+    authoritative_only: bool = False,
+    business_only: bool = True,
+) -> list[DocumentMetadataField]:
+    selected = (
+        [field for field in fields if is_authoritative(field)]
+        if authoritative_only
+        else list(fields)
+    )
+    if not business_only:
+        return selected
+    return [
+        field
+        for field in selected
+        if is_canonical_business_field(
+            key=field.field_key,
+            label=field.label,
+            value=field.value,
+            field_group=field.field_group,
+        )
+    ]
+
+
+def _section_fields(
+    fields: list[DocumentMetadataField],
+) -> list[DocumentMetadataField]:
+    return [
+        field
+        for field in fields
+        if is_narrative_or_section_field(
+            key=field.field_key,
+            label=field.label,
+            value=field.value,
+            field_group=field.field_group,
+        )
+    ]
+
+
+def _needs_review_fields(
+    fields: list[DocumentMetadataField],
+) -> list[DocumentMetadataField]:
+    rows: list[DocumentMetadataField] = []
+    for field in fields:
+        status = (field.review_status or "pending").lower()
+        validation = validation_status_for(field).lower()
+        confidence = field.confidence
+        low_conf = isinstance(confidence, (int, float)) and confidence < 0.6
+        empty = field.value is None or str(field.value).strip() == ""
+        if status in {"rejected", "pending"} and (
+            validation == "failed" or low_conf or empty or status == "rejected"
+        ):
+            rows.append(field)
+        elif validation == "failed" or low_conf:
+            rows.append(field)
+    return rows
+
+
+def _append_audit_sheet(sheet: Any, fields: list[DocumentMetadataField], *, page_text_by_number: dict[int, str] | None) -> None:
+    sheet.append(
+        [
+            "PDF Page",
+            "Section",
+            "Field / Label",
+            "Extracted Value",
+            "Field Type",
+            "Confidence",
+            "Validation",
+            "Review Status",
+        ]
+    )
+    for field in fields:
+        sheet.append(
+            [
+                source_page_for(field),
+                section_for(field, page_text_by_number=page_text_by_number),
+                field.label or field.field_key or "",
+                "" if field.value is None else str(field.value),
+                field.field_group or "field",
+                field.confidence,
+                validation_status_for(field),
+                field.review_status or "pending",
+            ]
+        )
 
 
 def section_for(
@@ -206,10 +299,8 @@ def build_fields_wide_csv(
 ) -> str:
     """Business-data CSV: one header row of field keys, one data row."""
 
-    selected = (
-        [field for field in fields if is_authoritative(field)]
-        if authoritative_only
-        else list(fields)
+    selected = _select_fields(
+        fields, authoritative_only=authoritative_only, business_only=True
     )
     # Prefer stable keys; fall back to labels when key missing.
     headers: list[str] = []
@@ -236,10 +327,8 @@ def build_normalized_document(
     UI all read from the same underlying rows this is built from, so this
     endpoint is a thin reshape rather than a separate derivation."""
 
-    selected = (
-        [field for field in fields if is_authoritative(field)]
-        if authoritative_only
-        else list(fields)
+    selected = _select_fields(
+        fields, authoritative_only=authoritative_only, business_only=True
     )
     field_map: dict[str, Any] = {}
     for field in selected:
@@ -290,35 +379,86 @@ def build_export_xlsx(
     authoritative_only: bool = False,
     page_text_by_number: dict[int, str] | None = None,
 ) -> bytes:
-    """Complete workbook: Document, Fields (wide), table sheets, Source Evidence."""
+    """Workbook: All Fields, Key Contract Fields, Sections, Line Items,
+    Needs Review, Source Evidence, plus one sheet per accepted table.
+    """
 
     from openpyxl import Workbook
 
-    selected = (
-        [field for field in fields if is_authoritative(field)]
-        if authoritative_only
-        else list(fields)
+    business = _select_fields(
+        fields, authoritative_only=authoritative_only, business_only=True
     )
+    sections = _section_fields(fields)
+    needs_review = _needs_review_fields(fields)
+    key_contract = [
+        field
+        for field in business
+        if is_key_contract_field(key=field.field_key, label=field.label)
+    ]
+
     workbook = Workbook()
     used_titles: set[str] = set()
 
-    document_sheet = workbook.active
-    document_sheet.title = _safe_sheet_title("Document", used_titles)
-    document_sheet.append(["property", "value"])
-    document_sheet.append(["document_id", document.id])
-    document_sheet.append(["filename", document.original_filename])
-    document_sheet.append(["page_count", document.page_count])
-    document_sheet.append(
-        ["generated_at", datetime.now(timezone.utc).isoformat()]
+    all_fields_sheet = workbook.active
+    all_fields_sheet.title = _safe_sheet_title("All Fields", used_titles)
+    _append_audit_sheet(
+        all_fields_sheet, business, page_text_by_number=page_text_by_number
     )
 
-    fields_sheet = workbook.create_sheet(_safe_sheet_title("Fields", used_titles))
-    headers = [field.field_key or field.label for field in selected]
-    values = [
-        "" if field.value is None else str(field.value) for field in selected
-    ]
-    fields_sheet.append(headers)
-    fields_sheet.append(values)
+    key_sheet = workbook.create_sheet(
+        _safe_sheet_title("Key Contract Fields", used_titles)
+    )
+    # Prefer canonical key order; append any extra key-contract hits after.
+    by_key = {
+        (field.field_key or field.label or "").lower(): field
+        for field in key_contract
+    }
+    ordered_keys: list[str] = []
+    ordered_fields: list[DocumentMetadataField] = []
+    for canonical in KEY_CONTRACT_FIELD_KEYS:
+        field = by_key.pop(canonical, None)
+        if field is None:
+            field = by_key.pop(f"kv_{canonical}", None)
+        if field is not None:
+            ordered_keys.append(field.field_key or field.label)
+            ordered_fields.append(field)
+    for field in key_contract:
+        key = field.field_key or field.label
+        if key not in ordered_keys:
+            ordered_keys.append(key)
+            ordered_fields.append(field)
+    key_sheet.append(
+        [field.label or field.field_key or "" for field in ordered_fields]
+        or ["(no key contract fields)"]
+    )
+    key_sheet.append(
+        [
+            "" if field.value is None else str(field.value)
+            for field in ordered_fields
+        ]
+        or [""]
+    )
+
+    sections_sheet = workbook.create_sheet(
+        _safe_sheet_title("Sections", used_titles)
+    )
+    _append_audit_sheet(
+        sections_sheet, sections, page_text_by_number=page_text_by_number
+    )
+
+    line_items_sheet = workbook.create_sheet(
+        _safe_sheet_title("Line Items", used_titles)
+    )
+    line_items_sheet.append(
+        ["Note", "Line-item rows are exported as dedicated table sheets below."]
+    )
+
+    needs_sheet = workbook.create_sheet(
+        _safe_sheet_title("Needs Review", used_titles)
+    )
+    _append_audit_sheet(
+        needs_sheet, needs_review, page_text_by_number=page_text_by_number
+    )
 
     for table in tables or []:
         title = getattr(table, "display_name", None) or getattr(
@@ -359,7 +499,7 @@ def build_export_xlsx(
             "extraction_method",
         ]
     )
-    for field in selected:
+    for field in business + sections:
         evidence = _evidence(field)
         evidence_sheet.append(
             [
@@ -376,9 +516,7 @@ def build_export_xlsx(
                 field.confidence,
                 validation_status_for(field),
                 field.review_status or "pending",
-                field.extraction_method
-                or evidence.get("extraction_method")
-                or "",
+                field.extraction_method,
             ]
         )
 

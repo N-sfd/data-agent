@@ -9,13 +9,20 @@ import {
   type FieldRow,
   type FieldRowStatus,
 } from "@/components/extraction/field-row";
-import FieldsTable from "@/components/extraction/fields-table";
-import FieldsDatasetTable from "@/components/extraction/fields-dataset-table";
-import SelectedFieldsReviewTable from "@/components/extraction/selected-fields-review-table";
+import FieldsWorkbookGrid from "@/components/extraction/fields-workbook-grid";
 import ResultSummaryBar from "@/components/extraction/result-summary-bar";
+import SourceVerificationDrawer from "@/components/extraction/source-verification-drawer";
 import TableResult from "@/components/extraction/table-result";
 import ValidationIssuesPanel from "@/components/extraction/validation-issues-panel";
 import type { SourceViewRequest } from "@/components/source-verification-panel";
+import {
+  isBusinessFieldRow,
+  isKeyContractRow,
+  isLineItemTable,
+  isNarrativeOrSectionRow,
+  needsReviewRow,
+  type WorkbookTab,
+} from "@/components/extraction/workbook-classify";
 import {
   downloadDocumentExportXlsx,
   downloadReviewedJson,
@@ -43,6 +50,7 @@ interface TargetResultsProps {
   targets?: DocumentTarget[];
   documentId?: string;
   documentName?: string;
+  pageCount?: number;
   status?: "complete" | "processing" | "failed" | "partial";
   processingDurationMs?: number | null;
   selectedResultId?: string | null;
@@ -165,6 +173,7 @@ export default function TargetResults({
   targets = [],
   documentId,
   documentName,
+  pageCount = 1,
   status = "complete",
   processingDurationMs,
   selectedResultId = null,
@@ -180,12 +189,17 @@ export default function TargetResults({
   );
   const [onlyWithValues, setOnlyWithValues] = useState(false);
   const [onlyMissing, setOnlyMissing] = useState(false);
-  const [activeTab, setActiveTab] = useState<"fields" | "tables">("fields");
+  const [workbookTab, setWorkbookTab] = useState<WorkbookTab>("all");
   const [exportMenuOpen, setExportMenuOpen] = useState(false);
   const exportMenuRef = useRef<HTMLDivElement | null>(null);
   const [corrections, setCorrections] = useState<Map<string, TargetCorrection>>(
     new Map(),
   );
+  const [sourceOpen, setSourceOpen] = useState(false);
+  const [sourceRequest, setSourceRequest] = useState<SourceViewRequest | null>(
+    null,
+  );
+  const [activeRow, setActiveRow] = useState<FieldRow | null>(null);
 
   useEffect(() => {
     if (!exportMenuOpen) return;
@@ -257,6 +271,7 @@ export default function TargetResults({
     () => allRows.filter((row) => row.status !== "extracted").length,
     [allRows],
   );
+  void issueCount;
 
   const filteredRows = useMemo(() => {
     const query = searchQuery.trim().toLowerCase();
@@ -299,6 +314,9 @@ export default function TargetResults({
     else if (kind === "identifier") identifierRows.push(row);
     else fieldRows.push(row);
   }
+  void contactRows;
+  void identifierRows;
+  void fieldRows;
 
   const dataTables = result.tables.filter(
     (table) => !isClauseLike(table.target),
@@ -306,6 +324,30 @@ export default function TargetResults({
   const clauseTables = dedupeClauseTables(
     result.tables.filter((table) => isClauseLike(table.target)),
   );
+  const lineItemTables = dataTables.filter(isLineItemTable);
+  const genuineTables = dataTables.filter((table) => !isLineItemTable(table));
+
+  const businessRows = filteredRows.filter(isBusinessFieldRow);
+  const workbookRows: Record<WorkbookTab, FieldRow[]> = {
+    all: businessRows,
+    key: businessRows.filter(isKeyContractRow),
+    sections: filteredRows.filter(isNarrativeOrSectionRow),
+    line_items: [],
+    tables: [],
+    needs_review: businessRows.filter(needsReviewRow),
+  };
+
+  const typeLabelMap = new Map<string, string>();
+  for (const [key, value] of typeByLabel) {
+    typeLabelMap.set(key, value);
+  }
+
+  function handleOpenSource(request: SourceViewRequest, row?: FieldRow) {
+    setSourceRequest(request);
+    setActiveRow(row ?? allRows.find((item) => item.id === request.id) ?? null);
+    setSourceOpen(true);
+    onViewSource?.(request);
+  }
 
   async function handleSaveCorrection(row: FieldRow, correctedValue: string) {
     if (!documentId) return;
@@ -392,14 +434,14 @@ export default function TargetResults({
   }
 
   function exportFieldsJson() {
-    const fields = allRows
+    const fields = workbookRows.all
       .filter((row) => row.scalar)
       .map((row) => scalarToExportField(row.scalar!, row.correction));
     downloadReviewedJson(`${result.document_id}-fields.json`, fields);
   }
 
   function exportFieldsCsv() {
-    const fields = allRows
+    const fields = workbookRows.all
       .filter((row) => row.scalar)
       .map((row) => scalarToExportField(row.scalar!, row.correction));
     // Wide business CSV: field keys as headers, one data row.
@@ -429,50 +471,158 @@ export default function TargetResults({
     }
   }
 
+  function exportAuditCsv() {
+    const rows = workbookRows.all;
+    const headers = [
+      "PDF Page",
+      "Section",
+      "Field / Label",
+      "Extracted Value",
+      "Field Type",
+      "Confidence",
+      "Status",
+    ];
+    const escape = (cell: string) => {
+      if (/[",\n]/.test(cell)) return `"${cell.replace(/"/g, '""')}"`;
+      return cell;
+    };
+    const lines = [headers.map(escape).join(",")];
+    for (const row of rows) {
+      const page = row.evidence?.page_number ?? row.scalar?.page ?? "";
+      lines.push(
+        [
+          String(page),
+          row.evidence?.section || "",
+          row.label,
+          String(row.value ?? ""),
+          row.scalar?.display_method || "field",
+          row.confidence != null ? `${Math.round(row.confidence * 100)}%` : "",
+          row.status,
+        ]
+          .map((cell) => escape(String(cell)))
+          .join(","),
+      );
+    }
+    downloadBlob(
+      `${lines.join("\n")}\n`,
+      `${result.document_id}-audit.csv`,
+      "text/csv;charset=utf-8;",
+    );
+  }
+
+  const WORKBOOK_TABS: { id: WorkbookTab; label: string; count?: number }[] = [
+    { id: "all", label: "All Fields", count: workbookRows.all.length },
+    { id: "key", label: "Key Contract Fields", count: workbookRows.key.length },
+    { id: "sections", label: "Sections", count: workbookRows.sections.length },
+    {
+      id: "line_items",
+      label: "Line Items",
+      count: lineItemTables.length,
+    },
+    { id: "tables", label: "Tables", count: genuineTables.length },
+    {
+      id: "needs_review",
+      label: "Needs Review",
+      count: workbookRows.needs_review.length,
+    },
+  ];
+
   return (
-    <div className="space-y-6">
-      <ResultSummaryBar
-        documentName={documentName ?? "Document"}
-        status={status}
-        fieldsExtracted={result.scalars.length}
-        tablesExtracted={dataTables.length}
-        highConfidence={confidenceCounts.high}
-        mediumConfidence={confidenceCounts.medium}
-        lowConfidence={confidenceCounts.low}
-        validationWarnings={issueCount}
-        processingDurationMs={processingDurationMs}
-      />
-
-      {(dataTables.length > 0 || clauseTables.length > 0) && (
-        <div className="flex gap-1 rounded-lg border border-border bg-surface-soft p-1">
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <ResultSummaryBar
+          documentName={documentName ?? "Document"}
+          status={status}
+          fieldsExtracted={workbookRows.all.length}
+          tablesExtracted={genuineTables.length + lineItemTables.length}
+          highConfidence={confidenceCounts.high}
+          mediumConfidence={confidenceCounts.medium}
+          lowConfidence={confidenceCounts.low}
+          validationWarnings={workbookRows.needs_review.length}
+          processingDurationMs={processingDurationMs}
+        />
+        <div className="relative" ref={exportMenuRef}>
           <button
             type="button"
-            onClick={() => setActiveTab("fields")}
-            className={[
-              "flex-1 rounded-md px-3 py-1.5 text-sm font-semibold transition sm:flex-none",
-              activeTab === "fields"
-                ? "bg-surface text-primary shadow-sm"
-                : "text-text-secondary",
-            ].join(" ")}
+            onClick={() => setExportMenuOpen((open) => !open)}
+            className="btn-primary text-sm"
           >
-            Fields
+            <Download className="h-4 w-4" />
+            Export Complete Excel
+            <ChevronDown className="h-4 w-4" />
           </button>
-          <button
-            type="button"
-            onClick={() => setActiveTab("tables")}
-            className={[
-              "flex-1 rounded-md px-3 py-1.5 text-sm font-semibold transition sm:flex-none",
-              activeTab === "tables"
-                ? "bg-surface text-primary shadow-sm"
-                : "text-text-secondary",
-            ].join(" ")}
-          >
-            Tables ({dataTables.length + clauseTables.length})
-          </button>
+          {exportMenuOpen && (
+            <div className="absolute right-0 top-full z-10 mt-1 w-52 rounded-lg border border-border bg-surface p-1 shadow-lg">
+              <button
+                type="button"
+                onClick={() => {
+                  void exportFieldsXlsx();
+                  setExportMenuOpen(false);
+                }}
+                className="block w-full rounded-md px-3 py-2 text-left text-xs font-medium text-foreground hover:bg-surface-soft"
+              >
+                Export Complete Excel (.xlsx)
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  exportFieldsCsv();
+                  setExportMenuOpen(false);
+                }}
+                className="block w-full rounded-md px-3 py-2 text-left text-xs text-foreground hover:bg-surface-soft"
+              >
+                Fields CSV (import-ready)
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  exportAuditCsv();
+                  setExportMenuOpen(false);
+                }}
+                className="block w-full rounded-md px-3 py-2 text-left text-xs text-foreground hover:bg-surface-soft"
+              >
+                Audit CSV
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  exportFieldsJson();
+                  setExportMenuOpen(false);
+                }}
+                className="block w-full rounded-md px-3 py-2 text-left text-xs text-foreground hover:bg-surface-soft"
+              >
+                Download JSON
+              </button>
+            </div>
+          )}
         </div>
-      )}
+      </div>
 
-      {activeTab === "fields" && allRows.length > 0 && (
+      <div className="flex gap-1 overflow-x-auto border-b border-border pb-px">
+        {WORKBOOK_TABS.map((tab) => (
+          <button
+            key={tab.id}
+            type="button"
+            onClick={() => setWorkbookTab(tab.id)}
+            className={[
+              "whitespace-nowrap border-b-2 px-3 py-2 text-sm font-medium transition",
+              workbookTab === tab.id
+                ? "border-success text-foreground"
+                : "border-transparent text-text-secondary hover:text-foreground",
+            ].join(" ")}
+          >
+            {tab.label}
+            {typeof tab.count === "number" && (
+              <span className="ml-1.5 text-xs text-text-muted">({tab.count})</span>
+            )}
+          </button>
+        ))}
+      </div>
+
+      {(workbookTab === "all" ||
+        workbookTab === "key" ||
+        workbookTab === "sections" ||
+        workbookTab === "needs_review") && (
         <div className="space-y-2.5 rounded-xl border border-border bg-surface-soft p-2.5">
           <div className="flex flex-wrap items-center gap-2">
             <input
@@ -520,51 +670,6 @@ export default function TargetResults({
                 </option>
               ))}
             </select>
-            <div className="relative ml-auto" ref={exportMenuRef}>
-              <button
-                type="button"
-                onClick={() => setExportMenuOpen((open) => !open)}
-                className="btn-secondary py-1.5 text-xs"
-              >
-                <Download className="h-3.5 w-3.5" />
-                Export
-                <ChevronDown className="h-3.5 w-3.5" />
-              </button>
-              {exportMenuOpen && (
-                <div className="absolute right-0 top-full z-10 mt-1 w-40 rounded-lg border border-border bg-surface p-1 shadow-lg">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      exportFieldsJson();
-                      setExportMenuOpen(false);
-                    }}
-                    className="block w-full rounded-md px-3 py-1.5 text-left text-xs text-foreground hover:bg-surface-soft"
-                  >
-                    Download JSON
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      exportFieldsCsv();
-                      setExportMenuOpen(false);
-                    }}
-                    className="block w-full rounded-md px-3 py-1.5 text-left text-xs text-foreground hover:bg-surface-soft"
-                  >
-                    Download CSV
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      void exportFieldsXlsx();
-                      setExportMenuOpen(false);
-                    }}
-                    className="block w-full rounded-md px-3 py-1.5 text-left text-xs text-foreground hover:bg-surface-soft"
-                  >
-                    Export Excel (.xlsx)
-                  </button>
-                </div>
-              )}
-            </div>
           </div>
           <div className="flex flex-wrap items-center gap-4 px-1">
             <label className="flex items-center gap-1.5 text-xs text-text-secondary">
@@ -593,95 +698,44 @@ export default function TargetResults({
         </div>
       )}
 
-      {activeTab === "fields" && internalMissingCount > 0 && (
+      {internalMissingCount > 0 && workbookTab === "all" && (
         <p className="text-xs text-text-muted">
           {internalMissingCount} internal form field
-          {internalMissingCount === 1 ? " was" : "s were"} skipped (no
-          readable value could be mapped).
+          {internalMissingCount === 1 ? " was" : "s were"} skipped.
         </p>
       )}
 
-      {activeTab === "fields" && allRows.length > 0 && filteredRows.length === 0 && (
-        <p className="rounded-xl border border-border bg-surface-soft p-4 text-center text-sm text-text-secondary">
-          No fields match the current search/filter.
-        </p>
+      {(workbookTab === "all" ||
+        workbookTab === "key" ||
+        workbookTab === "sections" ||
+        workbookTab === "needs_review") && (
+        <FieldsWorkbookGrid
+          rows={workbookRows[workbookTab]}
+          typeByLabel={typeLabelMap}
+          selectedId={selectedResultId ?? sourceRequest?.id ?? null}
+          onViewSource={(request) => {
+            const row = allRows.find((item) => item.id === request.id) ?? null;
+            handleOpenSource(request, row ?? undefined);
+          }}
+          onSelectRow={(row) => setActiveRow(row)}
+        />
       )}
 
-      <div
-        id="fields-section"
-        className={["space-y-6", activeTab === "fields" ? "" : "hidden"].join(" ")}
-      >
-        <div>
-          <h3 className="mb-2 text-sm font-semibold text-foreground">
-            Selected fields
-          </h3>
-          <SelectedFieldsReviewTable
-            rows={filteredRows.length > 0 ? filteredRows : allRows}
-            selectedId={selectedResultId}
-            onViewSource={onViewSource}
-          />
-        </div>
-
-        <details className="rounded-xl border border-border bg-surface">
-          <summary className="cursor-pointer list-none px-4 py-3 text-sm font-semibold text-foreground">
-            Business dataset layout (export preview)
-          </summary>
-          <div className="border-t border-border p-3">
-            <FieldsDatasetTable
-              rows={filteredRows.length > 0 ? filteredRows : allRows}
-              selectedId={selectedResultId}
-            />
-          </div>
-        </details>
-
-        <details className="rounded-xl border border-border bg-surface">
-          <summary className="cursor-pointer list-none px-4 py-3 text-sm font-semibold text-foreground">
-            Field details & review actions
-          </summary>
-          <div className="space-y-4 border-t border-border p-3">
-            <FieldsTable
-              title="Fields"
-              rows={fieldRows}
-              selectedId={selectedResultId}
-              onViewSource={onViewSource}
-              onSaveCorrection={documentId ? handleSaveCorrection : undefined}
-              onMarkVerified={documentId ? handleMarkVerified : undefined}
-              onReject={documentId ? handleReject : undefined}
-            />
-            <FieldsTable
-              title="Identifiers & codes"
-              rows={identifierRows}
-              selectedId={selectedResultId}
-              onViewSource={onViewSource}
-              onSaveCorrection={documentId ? handleSaveCorrection : undefined}
-              onMarkVerified={documentId ? handleMarkVerified : undefined}
-              onReject={documentId ? handleReject : undefined}
-            />
-            <FieldsTable
-              title="Contacts"
-              rows={contactRows}
-              selectedId={selectedResultId}
-              onViewSource={onViewSource}
-              onSaveCorrection={documentId ? handleSaveCorrection : undefined}
-              onMarkVerified={documentId ? handleMarkVerified : undefined}
-              onReject={documentId ? handleReject : undefined}
-            />
-          </div>
-        </details>
-      </div>
-
-      {activeTab === "tables" && dataTables.length > 0 && (
-        <div id="tables-section">
-          <h3 className="mb-3 text-sm font-semibold text-foreground">Tables</h3>
-          <div className="space-y-4">
-            {dataTables.map((table, index) => (
+      {workbookTab === "line_items" && (
+        <div className="space-y-4">
+          {lineItemTables.length === 0 ? (
+            <p className="rounded-xl border border-border bg-surface px-4 py-8 text-center text-sm text-text-secondary">
+              No CLIN / line-item tables detected.
+            </p>
+          ) : (
+            lineItemTables.map((table, index) => (
               <TableResult
                 key={tableToUniversalTable(table, index).table_id}
                 table={tableToUniversalTable(table, index)}
                 onViewSource={
                   onViewSource
                     ? (req) =>
-                        onViewSource({
+                        handleOpenSource({
                           ...req,
                           id: tableToUniversalTable(table, index).table_id,
                           value: table.target,
@@ -690,71 +744,50 @@ export default function TargetResults({
                     : undefined
                 }
               />
-            ))}
-          </div>
+            ))
+          )}
         </div>
       )}
 
-      {activeTab === "tables" && clauseTables.length > 0 && (
-        <div className="editorial-card p-5 sm:p-6">
-          <h3 className="text-sm font-semibold text-foreground">
-            Clauses & sections
-          </h3>
-          <div className="mt-3 space-y-2">
-            {clauseTables.map((table, index) => {
-              const pages = table.pages.length
-                ? `Pages ${table.pages.join(", ")}`
-                : "Source pending";
-              const preview =
-                table.rows[0] && table.columns[0]
-                  ? String(table.rows[0][table.columns[0]] ?? "")
-                  : "";
-
-              return (
-                <details
-                  key={`${table.target}-${index}`}
-                  className="group rounded-xl border border-border bg-surface-soft"
-                >
-                  <summary className="cursor-pointer list-none px-4 py-3">
-                    <div className="flex flex-wrap items-start justify-between gap-3">
-                      <div className="min-w-0">
-                        <p className="text-sm font-semibold text-foreground">
-                          {table.target}
-                        </p>
-                        <p className="mt-0.5 text-xs text-text-secondary">
-                          {pages}
-                          {table.rows.length > 0 &&
-                            ` · ${table.rows.length} row${table.rows.length === 1 ? "" : "s"}`}
-                        </p>
-                        {preview && (
-                          <p className="mt-2 line-clamp-2 text-sm leading-5 text-text-secondary">
-                            {preview}
-                          </p>
-                        )}
-                      </div>
-                      <span className="inline-flex items-center rounded-full bg-success/10 px-2.5 py-1 text-[11px] font-semibold text-success">
-                        Source verified
-                      </span>
-                    </div>
-                  </summary>
-                  <div className="border-t border-border p-3">
-                    <TableResult
-                      table={tableToUniversalTable(table, index + 1000)}
-                    />
-                  </div>
-                </details>
-              );
-            })}
-          </div>
+      {workbookTab === "tables" && (
+        <div className="space-y-4">
+          {genuineTables.length === 0 ? (
+            <p className="rounded-xl border border-border bg-surface px-4 py-8 text-center text-sm text-text-secondary">
+              No accepted structured tables.
+            </p>
+          ) : (
+            genuineTables.map((table, index) => (
+              <TableResult
+                key={tableToUniversalTable(table, index).table_id}
+                table={tableToUniversalTable(table, index)}
+                onViewSource={
+                  onViewSource
+                    ? (req) =>
+                        handleOpenSource({
+                          ...req,
+                          id: tableToUniversalTable(table, index).table_id,
+                          value: table.target,
+                          verified: true,
+                        })
+                    : undefined
+                }
+              />
+            ))
+          )}
+          {clauseTables.length > 0 && (
+            <p className="text-xs text-text-muted">
+              Narrative clauses are listed under Sections, not Tables.
+            </p>
+          )}
         </div>
       )}
 
-      {activeTab === "fields" && (
+      {workbookTab === "needs_review" && (
         <div id="validation-section">
-          <h3 className="mb-3 text-sm font-semibold text-foreground">
-            Validation Issues
-          </h3>
-          <ValidationIssuesPanel rows={allRows} onIssueClick={handleIssueClick} />
+          <ValidationIssuesPanel
+            rows={workbookRows.needs_review}
+            onIssueClick={handleIssueClick}
+          />
         </div>
       )}
 
@@ -764,6 +797,21 @@ export default function TargetResults({
             <p key={index}>{warning}</p>
           ))}
         </div>
+      )}
+
+      {documentId && (
+        <SourceVerificationDrawer
+          open={sourceOpen}
+          onClose={() => setSourceOpen(false)}
+          documentId={documentId}
+          documentName={documentName ?? "Document"}
+          pageCount={pageCount}
+          request={sourceRequest}
+          activeRow={activeRow}
+          onSaveCorrection={handleSaveCorrection}
+          onMarkVerified={handleMarkVerified}
+          onReject={handleReject}
+        />
       )}
     </div>
   );

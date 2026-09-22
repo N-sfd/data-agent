@@ -200,16 +200,30 @@ def test_xlsx_workbook_has_fields_tables_and_evidence() -> None:
 
     workbook = load_workbook(io.BytesIO(body))
     titles = set(workbook.sheetnames)
-    assert "Document" in titles
-    assert "Fields" in titles
+    assert "All Fields" in titles
+    assert "Key Contract Fields" in titles
+    assert "Sections" in titles
+    assert "Needs Review" in titles
     assert "Source Evidence" in titles
     assert any("CLIN" in name.upper() or "clin" in name.lower() for name in titles)
 
-    fields_sheet = workbook["Fields"]
-    headers = [cell.value for cell in fields_sheet[1]]
-    values = [cell.value for cell in fields_sheet[2]]
-    assert "contract_number" in headers
-    assert "47QRCA25DSF07" in values
+    all_fields = workbook["All Fields"]
+    headers = [cell.value for cell in all_fields[1]]
+    assert "Field / Label" in headers
+    assert "Extracted Value" in headers
+    labels = [row[2].value for row in all_fields.iter_rows(min_row=2)]
+    values = [row[3].value for row in all_fields.iter_rows(min_row=2)]
+    assert any(
+        label and "contract" in str(label).lower() for label in labels
+    ) or "47QRCA25DSF07" in values
+
+    key_sheet = workbook["Key Contract Fields"]
+    key_headers = [cell.value for cell in key_sheet[1]]
+    key_values = [cell.value for cell in key_sheet[2]]
+    assert any(
+        header and "contract" in str(header).lower() for header in key_headers
+    )
+    assert "47QRCA25DSF07" in key_values
 
     evidence = workbook["Source Evidence"]
     evidence_headers = [cell.value for cell in evidence[1]]
