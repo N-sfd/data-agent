@@ -66,6 +66,7 @@ const CSV_HEADERS = [
 export function scalarToExportField(
   scalar: ScalarTargetResult,
   correction?: TargetCorrection | null,
+  displayLabel?: string,
 ): ReviewedExportField {
   const extracted =
     scalar.extracted_value != null && String(scalar.extracted_value) !== ""
@@ -85,7 +86,11 @@ export function scalarToExportField(
   }
 
   return {
-    field: scalar.target,
+    // scalar.target is the internal discovery candidate key (e.g.
+    // "kv_pricing_arrangement"), not a display label — callers that have
+    // the resolved display label (FieldRow.label) must pass it here so
+    // exports never fall back to a raw kv_* string.
+    field: displayLabel || scalar.target,
     field_key: scalar.normalized_key,
     extracted_value: extracted,
     value: effective,

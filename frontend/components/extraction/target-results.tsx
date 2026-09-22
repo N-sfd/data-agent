@@ -24,8 +24,6 @@ import {
   type WorkbookTab,
 } from "@/components/extraction/workbook-classify";
 import {
-  downloadDocumentExportLineItemsCsv,
-  downloadDocumentExportXlsx,
   downloadReviewedJson,
   scalarToExportField,
 } from "@/lib/reviewed-export";
@@ -192,7 +190,6 @@ export default function TargetResults({
   const [onlyMissing, setOnlyMissing] = useState(false);
   const [workbookTab, setWorkbookTab] = useState<WorkbookTab>("all");
   const [exportMenuOpen, setExportMenuOpen] = useState(false);
-  const [exportError, setExportError] = useState<string | null>(null);
   const exportMenuRef = useRef<HTMLDivElement | null>(null);
   const [corrections, setCorrections] = useState<Map<string, TargetCorrection>>(
     new Map(),
@@ -441,14 +438,14 @@ export default function TargetResults({
   function exportFieldsJson() {
     const fields = workbookRows.all
       .filter((row) => row.scalar)
-      .map((row) => scalarToExportField(row.scalar!, row.correction));
+      .map((row) => scalarToExportField(row.scalar!, row.correction, row.label));
     downloadReviewedJson(`${result.document_id}-fields.json`, fields);
   }
 
   function exportFieldsCsv() {
     const fields = workbookRows.all
       .filter((row) => row.scalar)
-      .map((row) => scalarToExportField(row.scalar!, row.correction));
+      .map((row) => scalarToExportField(row.scalar!, row.correction, row.label));
     // Wide business CSV: human field names as headers, one data row —
     // never the raw internal field_key (e.g. "kv_pricing_arrangement").
     const headers = fields.map((field) => field.field || field.field_key || "");
@@ -463,40 +460,6 @@ export default function TargetResults({
       `${result.document_id}-fields.csv`,
       "text/csv;charset=utf-8;",
     );
-  }
-
-  async function exportFieldsXlsx() {
-    if (!documentId) return;
-    setExportError(null);
-    try {
-      await downloadDocumentExportXlsx(
-        documentId,
-        `${result.document_id}-export.xlsx`,
-      );
-    } catch (error) {
-      setExportError(
-        error instanceof Error
-          ? error.message
-          : "Export Excel failed. Please retry.",
-      );
-    }
-  }
-
-  async function exportLineItemsCsv() {
-    if (!documentId) return;
-    setExportError(null);
-    try {
-      await downloadDocumentExportLineItemsCsv(
-        documentId,
-        `${result.document_id}-line-items.csv`,
-      );
-    } catch (error) {
-      setExportError(
-        error instanceof Error
-          ? error.message
-          : "Export Line Items CSV failed. Please retry.",
-      );
-    }
   }
 
   function exportAuditCsv() {
@@ -576,48 +539,17 @@ export default function TargetResults({
             className="btn-primary text-sm"
           >
             <Download className="h-4 w-4" />
-            Export Complete Excel
+            Export
             <ChevronDown className="h-4 w-4" />
           </button>
-          {exportError && (
-            <p className="absolute right-0 top-full z-10 mt-1 w-64 rounded-lg border border-danger/20 bg-danger/5 px-3 py-2 text-xs text-danger">
-              {exportError}
-            </p>
-          )}
           {exportMenuOpen && (
             <div className="absolute right-0 top-full z-10 mt-1 w-52 rounded-lg border border-border bg-surface p-1 shadow-lg">
-              <button
-                type="button"
-                onClick={() => {
-                  void exportFieldsXlsx();
-                  setExportMenuOpen(false);
-                }}
-                className="block w-full rounded-md px-3 py-2 text-left text-xs font-medium text-foreground hover:bg-surface-soft"
-              >
-                Export Complete Excel (.xlsx)
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  exportFieldsCsv();
-                  setExportMenuOpen(false);
-                }}
-                className="block w-full rounded-md px-3 py-2 text-left text-xs text-foreground hover:bg-surface-soft"
-              >
-                Document Fields CSV (import-ready)
-              </button>
-              {lineItemTables.length > 0 && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    void exportLineItemsCsv();
-                    setExportMenuOpen(false);
-                  }}
-                  className="block w-full rounded-md px-3 py-2 text-left text-xs text-foreground hover:bg-surface-soft"
-                >
-                  Line Items CSV
-                </button>
-              )}
+              {/* Excel/Document Fields CSV/Line Items CSV route through
+                  authenticated backend endpoints (export.read) and 401 in
+                  any browser session without a valid credential. Audit CSV
+                  and JSON are built entirely from data already loaded in
+                  this page, so they always work. Re-add the backend-backed
+                  options once export auth is actually provisioned. */}
               <button
                 type="button"
                 onClick={() => {

@@ -54,6 +54,22 @@ describe("scalarToExportField", () => {
     expect(row.source).toEqual({ page: 8 });
   });
 
+  it("uses the resolved display label, never the raw discovery key", () => {
+    const withoutLabel = scalarToExportField(
+      scalar({ target: "kv_pricing_arrangement" }),
+    );
+    // No displayLabel passed: falls back to scalar.target as-is (callers
+    // that have a resolved label must pass it explicitly).
+    expect(withoutLabel.field).toBe("kv_pricing_arrangement");
+
+    const withLabel = scalarToExportField(
+      scalar({ target: "kv_pricing_arrangement" }),
+      null,
+      "Pricing Arrangement",
+    );
+    expect(withLabel.field).toBe("Pricing Arrangement");
+  });
+
   it("maps CSV rows with effective value as primary value column", () => {
     const rows = exportFieldsToCsvRows([
       scalarToExportField(
