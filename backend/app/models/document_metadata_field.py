@@ -108,7 +108,8 @@ class DocumentMetadataField(Base):
         default="",
     )
 
-    # contract = analyze-contract path; target = Select All / jobs/extract
+    # contract = analyze-contract path; target = Select All / jobs/extract;
+    # v3 = structure_classifier/candidate_router pipeline (V3 All Fields sheet)
     extraction_source: Mapped[str] = mapped_column(
         String(20),
         nullable=False,

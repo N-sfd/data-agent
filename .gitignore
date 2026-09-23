@@ -37,3 +37,5 @@ backend/extract.json
 backend/out.json
 backend/req.json
 backend/upload.json
+backend/uvicorn.log
+reference/regression/generated_v3.xlsx

@@ -34,6 +34,18 @@ class DocumentFundingLine(Base):
 
     amount: Mapped[float | None] = mapped_column(Float, nullable=True)
 
+    # --- V3 Funding sheet columns (docs/v3-schema-manifest.md §3) ---
+    # Open vocabulary (decision #4): "Basic IDIQ" | "Task Orders" |
+    # "Minimum Guarantee" | ... — distinguishes an actual obligated-funding
+    # fact from task-order/future-funding requirement narrative; both get a
+    # row, never silently dropped.
+    funding_level: Mapped[str | None] = mapped_column(String(60), nullable=True)
+    clin: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    funding_status: Mapped[str | None] = mapped_column(Text, nullable=True)
+    accounting_appropriation: Mapped[str | None] = mapped_column(Text, nullable=True)
+    purchase_request: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    qa_status: Mapped[str | None] = mapped_column(String(80), nullable=True)
+
     confidence: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
 
     evidence_json: Mapped[dict] = mapped_column(JSON, nullable=False)

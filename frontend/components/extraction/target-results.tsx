@@ -14,6 +14,7 @@ import ResultSummaryBar from "@/components/extraction/result-summary-bar";
 import SourceVerificationDrawer from "@/components/extraction/source-verification-drawer";
 import TableResult from "@/components/extraction/table-result";
 import ValidationIssuesPanel from "@/components/extraction/validation-issues-panel";
+import V3Results from "@/components/extraction/v3-results";
 import type { SourceViewRequest } from "@/components/source-verification-panel";
 import {
   isBusinessFieldRow,
@@ -189,6 +190,7 @@ export default function TargetResults({
   const [onlyWithValues, setOnlyWithValues] = useState(false);
   const [onlyMissing, setOnlyMissing] = useState(false);
   const [workbookTab, setWorkbookTab] = useState<WorkbookTab>("all");
+  const [showLegacyAudit, setShowLegacyAudit] = useState(false);
   const [exportMenuOpen, setExportMenuOpen] = useState(false);
   const exportMenuRef = useRef<HTMLDivElement | null>(null);
   const [corrections, setCorrections] = useState<Map<string, TargetCorrection>>(
@@ -558,7 +560,7 @@ export default function TargetResults({
                 }}
                 className="block w-full rounded-md px-3 py-2 text-left text-xs text-foreground hover:bg-surface-soft"
               >
-                Audit CSV
+                Extraction Audit CSV (debug)
               </button>
               <button
                 type="button"
@@ -575,6 +577,23 @@ export default function TargetResults({
         </div>
       </div>
 
+      {documentId && (
+        <V3Results documentId={documentId} documentName={documentName} />
+      )}
+
+      <div className="pt-2">
+        <button
+          type="button"
+          onClick={() => setShowLegacyAudit((open) => !open)}
+          className="text-xs font-medium text-text-secondary underline decoration-dotted hover:text-foreground"
+        >
+          {showLegacyAudit ? "Hide" : "Show"} legacy field audit (debug —
+          superseded by V3 above)
+        </button>
+      </div>
+
+      {showLegacyAudit && (
+      <>
       <div className="flex gap-1 overflow-x-auto border-b border-border pb-px">
         {WORKBOOK_TABS.map((tab) => (
           <button
@@ -766,6 +785,8 @@ export default function TargetResults({
             onIssueClick={handleIssueClick}
           />
         </div>
+      )}
+      </>
       )}
 
       {result.warnings.length > 0 && (

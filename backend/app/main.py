@@ -15,6 +15,7 @@ from app.api import (
     system,
     target_corrections,
     universal_extraction,
+    v3_export,
 )
 from app.core.config import get_settings
 from app.core.observability import RequestIdMiddleware
@@ -42,11 +43,17 @@ from app.models import document_address as document_address_model  # noqa: F401
 from app.models import (  # noqa: F401
     document_amendment_history as document_amendment_history_model,
 )
+from app.models import document_attachment as document_attachment_model  # noqa: F401
 from app.models import document_clause as document_clause_model  # noqa: F401
 from app.models import (  # noqa: F401
     document_clause_reference as document_clause_reference_model,
 )
 from app.models import document_contact as document_contact_model  # noqa: F401
+from app.models import (  # noqa: F401
+    document_contract_summary as document_contract_summary_model,
+)
+from app.models import document_qa_review as document_qa_review_model  # noqa: F401
+from app.models import far_master_clause as far_master_clause_model  # noqa: F401
 from app.models import (  # noqa: F401
     document_delivery_schedule as document_delivery_schedule_model,
 )
@@ -203,6 +210,12 @@ app.include_router(
     reviewed_export.router,
     prefix="/api/documents",
     tags=["Export"],
+)
+
+app.include_router(
+    v3_export.router,
+    prefix="/api/documents",
+    tags=["V3 Export"],
 )
 
 app.include_router(

@@ -19,11 +19,17 @@ from app.models import document_address as document_address_model  # noqa: F401
 from app.models import (  # noqa: F401
     document_amendment_history as document_amendment_history_model,
 )
+from app.models import document_attachment as document_attachment_model  # noqa: F401
 from app.models import document_clause as document_clause_model  # noqa: F401
 from app.models import (  # noqa: F401
     document_clause_reference as document_clause_reference_model,
 )
 from app.models import document_contact as document_contact_model  # noqa: F401
+from app.models import (  # noqa: F401
+    document_contract_summary as document_contract_summary_model,
+)
+from app.models import document_qa_review as document_qa_review_model  # noqa: F401
+from app.models import far_master_clause as far_master_clause_model  # noqa: F401
 from app.models import (  # noqa: F401
     document_delivery_schedule as document_delivery_schedule_model,
 )
@@ -63,6 +69,16 @@ from app.models import (  # noqa: F401
 from app.models import page_text_block as page_text_block_model  # noqa: F401
 from app.models import (  # noqa: F401
     relationship_audit_log as relationship_audit_log_model,
+)
+from app.models import actor as actor_model  # noqa: F401
+from app.models import (  # noqa: F401
+    document_extracted_table as document_extracted_table_model,
+)
+from app.models import (  # noqa: F401
+    integration_audit_log as integration_audit_log_model,
+)
+from app.models import (  # noqa: F401
+    target_correction as target_correction_model,
 )
 
 # this is the Alembic Config object, which provides

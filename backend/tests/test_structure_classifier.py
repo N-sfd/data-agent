@@ -134,11 +134,34 @@ def test_short_identifier_value_candidate_tagged_form_field_value() -> None:
 
 
 def test_clause_listing_line_detected() -> None:
-    blocks = [_block(0, "52.202-1 Definitions JUN 2020")]
+    # A real incorporated-clauses listing is a sustained run of many such
+    # lines on one page (e.g. Section I) — CLAUSE_LISTING is gated on that
+    # page-level density (like TOC_ENTRY is gated on TOC line density) so a
+    # single isolated citation elsewhere in the document isn't mistaken for
+    # part of an incorporation list. See test_isolated_clause_citation_not_listing.
+    blocks = [
+        _block(0, "52.202-1 Definitions JUN 2020", y0=100.0, y1=112.0),
+        _block(1, "52.203-3 Gratuities APR 1984", y0=114.0, y1=126.0),
+        _block(2, "52.204-21 Basic Safeguarding of Covered Info Systems", y0=128.0, y1=140.0),
+    ]
+    doc_context = build_document_context(pages=[(8, blocks, 792.0)])
+    assert 8 in doc_context.clause_listing_pages
+
     regions = classify_page_regions(
-        page_number=8, blocks=blocks, tables=None, page_height=792.0
+        page_number=8, blocks=blocks, tables=None, page_height=792.0, doc_context=doc_context
     )
     assert regions[0].region_type == "CLAUSE_LISTING"
+
+
+def test_isolated_clause_citation_not_listing() -> None:
+    # A single citation on a page with no other clause lines nearby (e.g. an
+    # incidental in-prose mention) must NOT be tagged CLAUSE_LISTING purely
+    # because it matches the clause-number shape.
+    blocks = [_block(0, "52.219-14 Limitations on Subcontracting")]
+    regions = classify_page_regions(
+        page_number=15, blocks=blocks, tables=None, page_height=792.0
+    )
+    assert regions[0].region_type != "CLAUSE_LISTING"
 
 
 def test_table_row_matched_against_tables_json() -> None:

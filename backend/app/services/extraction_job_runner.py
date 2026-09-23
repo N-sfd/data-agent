@@ -34,6 +34,7 @@ from app.services.processing_versions import (
 from app.services.schema_discovery import discover_document_schema
 from app.services.target_extraction_service import extract_by_targets
 from app.services.target_result_store import persist_target_extraction_results
+from app.services.v3_orchestrator import run_and_persist_v3_extraction
 from app.schemas.document_target import ScalarTargetResult, TableTargetResult
 
 settings = get_settings()
@@ -473,6 +474,54 @@ async def run_extraction_job(
         stage_timings["validation_ms"] = int(
             (time.perf_counter() - validate_started) * 1000
         )
+
+        # V3 canonical pipeline (docs/v3-implementation-plan.md): runs as
+        # part of the SAME job the frontend already calls, so Results/CSV/
+        # Excel get V3 data without a separate opt-in step. Additive and
+        # isolated — a failure here is logged and surfaced in the job's
+        # warnings, but never fails the job or drops the kv_* results above.
+        v3_started = time.perf_counter()
+        _append_stage(job, "v3_classification")
+        database.commit()
+        try:
+            v3_pages = list(
+                database.scalars(
+                    select(DocumentPage)
+                    .where(DocumentPage.document_id == document.id)
+                    .order_by(DocumentPage.page_number)
+                )
+            )
+            v3_summary = await run_in_threadpool(
+                run_and_persist_v3_extraction,
+                database=database,
+                document=document,
+                pages=v3_pages,
+            )
+            stage_timings["v3_ms"] = int((time.perf_counter() - v3_started) * 1000)
+            warnings.extend(v3_summary.warnings)
+            log_event(
+                "v3_extraction_complete",
+                stage="v3_classification",
+                candidate_count=v3_summary.candidate_count,
+                all_fields_count=v3_summary.all_fields_count,
+                clin_count=v3_summary.clin_count,
+                funding_count=v3_summary.funding_count,
+                performance_delivery_count=v3_summary.performance_delivery_count,
+                attachment_count=v3_summary.attachment_count,
+                clause_reference_count=v3_summary.clause_reference_count,
+                pages_with_geometry=v3_summary.pages_with_geometry,
+            )
+        except Exception as exc:  # noqa: BLE001 - V3 is additive, never fails the job
+            database.rollback()
+            warning = f"V3 canonical extraction failed: {exc}"
+            warnings.append(warning)
+            log_event(
+                "v3_extraction_failed",
+                stage="v3_classification",
+                status="error",
+                error_category=type(exc).__name__,
+                error=str(exc),
+            )
 
         history = list((job.result_json or {}).get("stage_history") or [])
         job.result_json = {

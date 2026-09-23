@@ -46,6 +46,31 @@ class DocumentLineItem(Base):
 
     period_label: Mapped[str | None] = mapped_column(String(80), nullable=True)
 
+    # --- V3 CLINs sheet columns (docs/v3-schema-manifest.md §2) ---
+    option_base: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    pricing_type: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    # quantity/unit_price/amount are numeric above but the V3 sheet allows a
+    # literal placeholder string ("UNDEFINED", "NSP") when the source states
+    # one instead of a number — stored separately so the numeric columns
+    # never get coerced to 0/None to hold a non-numeric token.
+    max_quantity_text: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    status: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    fob: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    purchase_request: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    psc: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    pop_start: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    pop_end: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    ship_to: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    dodaac: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    qa_status: Mapped[str | None] = mapped_column(String(80), nullable=True)
+
+    # --- Internal-only hierarchy metadata (v3-implementation-plan.md
+    # decision #1) — never exported to the V3 CLINs sheet; each CLIN/SLIN
+    # still gets its own independent, fully-populated V3 row. ---
+    slin: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    parent_line_item: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    relationship: Mapped[str | None] = mapped_column(String(20), nullable=True)
+
     confidence: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
 
     evidence_json: Mapped[dict] = mapped_column(JSON, nullable=False)

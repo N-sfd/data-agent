@@ -82,6 +82,7 @@ _STOPWORDS = frozenset(
 )
 
 _TOC_DENSITY_THRESHOLD = 3
+_CLAUSE_LISTING_DENSITY_THRESHOLD = 3
 
 
 @dataclass(frozen=True)
@@ -90,6 +91,17 @@ class DocumentContext:
 
     footer_header_templates: frozenset[str] = field(default_factory=frozenset)
     toc_pages: frozenset[int] = field(default_factory=frozenset)
+    # Pages dense with clause-citation-shaped short blocks — a real
+    # incorporated-clauses listing (e.g. Section I "MASTER CONTRACT
+    # CLAUSES") is a sustained run of many such lines, not one isolated
+    # mention. Gates CLAUSE_LISTING region_type the same way toc_pages
+    # gates TOC_ENTRY, so a single incidental citation elsewhere in the
+    # document (a different page, a narrative aside) doesn't get tagged as
+    # if it were part of an incorporation list — confirmed necessary:
+    # without this gate, isolated citations on unrelated pages (a TOC
+    # cross-reference, a footnote) were being classified CLAUSE_LISTING and
+    # routed as incorporated Clauses instead of FAR References.
+    clause_listing_pages: frozenset[int] = field(default_factory=frozenset)
 
 
 def _normalize_for_repetition(text: str) -> str:
@@ -133,6 +145,7 @@ def build_document_context(
     )
 
     toc_pages: set[int] = set()
+    clause_listing_pages: set[int] = set()
     for page_number, blocks, _height in pages:
         toc_line_hits = sum(1 for b in blocks if _TOC_LINE_RE.match(b.text.strip()))
         has_toc_banner = any(
@@ -143,9 +156,19 @@ def build_document_context(
         ):
             toc_pages.add(page_number)
 
+        clause_line_hits = sum(
+            1
+            for b in blocks
+            if _CLAUSE_NUMBER_RE.search(b.text.strip())
+            and len(b.text.strip().split()) <= 15
+        )
+        if clause_line_hits >= _CLAUSE_LISTING_DENSITY_THRESHOLD:
+            clause_listing_pages.add(page_number)
+
     return DocumentContext(
         footer_header_templates=templates,
         toc_pages=toc_pages,
+        clause_listing_pages=frozenset(clause_listing_pages),
     )
 
 
@@ -264,12 +287,16 @@ def classify_page_regions(
             confidence = 0.85
             reasons = ["numbered_heading_shape"]
 
-        elif _CLAUSE_NUMBER_RE.search(text) and len(text.split()) <= 15:
+        elif (
+            page_number in context.clause_listing_pages
+            and _CLAUSE_NUMBER_RE.search(text)
+            and len(text.split()) <= 15
+        ):
             match = _CLAUSE_NUMBER_RE.search(text)
             starts_near_beginning = bool(match) and match.start() <= 5
             region_type = "CLAUSE_LISTING"
             confidence = 0.9 if starts_near_beginning else 0.65
-            reasons = ["clause_number_dominant_short_block"]
+            reasons = ["clause_number_dominant_short_block", "clause_listing_dense_page"]
 
         elif _FORM_LABEL_RE.match(text):
             region_type = "FORM_FIELD_LABEL"
