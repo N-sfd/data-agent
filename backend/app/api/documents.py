@@ -1416,7 +1416,12 @@ async def get_document(
         source_status=source_status_for(
             get_settings(), stored_filename=document.stored_filename
         ),
-        size_tier=(document.ingestion_provenance or {}).get("size_tier"),
+        # Documents lacking ingestion_provenance (pre-dates that tracking,
+        # or created outside the standard upload flow) must still satisfy
+        # the schema's own default rather than pass an explicit None,
+        # which bypasses the field's default and 500s the response.
+        size_tier=(document.ingestion_provenance or {}).get("size_tier")
+        or "small",
         prefer_background=(document.ingestion_provenance or {}).get(
             "processing_mode"
         )
