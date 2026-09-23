@@ -21,6 +21,8 @@ none of these per-CLIN; they are legitimately blank, not a bug).
 
 from __future__ import annotations
 
+import re
+
 from sqlalchemy import delete
 from sqlalchemy.orm import Session
 
@@ -41,11 +43,30 @@ def _to_float(raw: str | None) -> float | None:
         return None
 
 
+_FUNDING_LINE_DESCRIPTION_RE = re.compile(r"funding\s+line", re.IGNORECASE)
+
+
+def is_funding_shaped_row(row: ParsedClinRow) -> bool:
+    """A row matching the CLIN-line shape (numeric identifier + amount)
+    whose own description literally says "Funding Line" is not a CLIN —
+    it's an administrative/access-fee funding record that happens to sit
+    in the same pricing-schedule table. Confirmed on the regression
+    contract's "00001  Funding Line  2,500.00" row: a real, distinct
+    line item, not a Domain/NAICS CLIN, per docs/source-to-v3-mapping.md.
+    Detected by description content, not by CLIN-number shape alone —
+    a numeric identifier is not sufficient evidence either way.
+    """
+
+    return bool(_FUNDING_LINE_DESCRIPTION_RE.search(row.description or ""))
+
+
 def build_clins(
     *, document: Document, clin_rows: list[ParsedClinRow]
 ) -> list[DocumentLineItem]:
     rows: list[DocumentLineItem] = []
     for index, row in enumerate(clin_rows):
+        if is_funding_shaped_row(row):
+            continue
         qa_status = (
             "Verified" if row.confidence >= 0.7 else "Needs Review"
         )

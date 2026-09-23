@@ -24,12 +24,16 @@ from app.services.attachment_builder import (
     persist_attachments,
 )
 from app.services.clause_builder import build_clause_references, persist_clause_references
-from app.services.clin_builder import build_clins, persist_clins
+from app.services.clin_builder import build_clins, is_funding_shaped_row, persist_clins
 from app.services.contract_summary_builder import (
     build_contract_summary,
     persist_contract_summary,
 )
-from app.services.funding_builder import build_funding_lines, persist_funding_lines
+from app.services.funding_builder import (
+    build_funding_lines,
+    build_funding_lines_from_pricing_schedule_rows,
+    persist_funding_lines,
+)
 from app.services.performance_delivery_builder import (
     build_performance_delivery,
     persist_performance_delivery,
@@ -61,6 +65,16 @@ def run_and_persist_v3_extraction(
     all_fields_rows = build_all_fields(document=document, candidates=candidates)
     clin_rows = build_clins(document=document, clin_rows=classification.clin_rows)
     funding_rows = build_funding_lines(document=document, candidates=candidates)
+    funding_shaped_pricing_rows = [
+        row for row in classification.clin_rows if is_funding_shaped_row(row)
+    ]
+    funding_rows.extend(
+        build_funding_lines_from_pricing_schedule_rows(
+            document=document,
+            funding_shaped_rows=funding_shaped_pricing_rows,
+            start_index=len(funding_rows),
+        )
+    )
     performance_rows = build_performance_delivery(document=document, candidates=candidates)
     attachment_rows = build_attachments_from_section_j(document=document, pages=pages)
     if attachment_rows is None:

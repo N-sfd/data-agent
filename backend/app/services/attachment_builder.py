@@ -37,10 +37,16 @@ _ITEM_MARKER_RE = re.compile(r"^\s*(J(?:\.P)?-\d+)\b\s*(.*)$", re.IGNORECASE)
 _SECTION_END_RE = re.compile(r"^\s*\(End of Section J\)", re.IGNORECASE)
 
 
-def _reference_and_title(evidence: str) -> tuple[str, str | None]:
+def _reference_and_title(evidence: str) -> tuple[str, str | None] | None:
+    """Returns None when no real attachment identifier is present — the
+    caller must reject the candidate rather than fall back to raw section-
+    heading text (confirmed bad output: "PART III - LIST OF DOCUMENTS,
+    EXHIBITS AND OTHER ATTACHMENTS" is the heading that INTRODUCES the
+    attachments section, not an attachment identity itself)."""
+
     match = _REFERENCE_RE.search(evidence)
     if not match:
-        return evidence[:80].strip(), None
+        return None
     reference = match.group(0).strip()
     remainder = evidence[match.end():].strip(" -:.")
     return reference, (remainder[:300] or None)
@@ -151,7 +157,13 @@ def build_attachments(
         evidence = candidate.evidence or ""
         if not evidence.strip():
             continue
-        reference, title = _reference_and_title(evidence)
+        parsed = _reference_and_title(evidence)
+        if parsed is None:
+            # No real attachment identifier (e.g. a section-heading
+            # sentence introducing the attachments section) — never a
+            # business record, silently skip rather than fabricate one.
+            continue
+        reference, title = parsed
         dedupe_key = reference.strip().lower()
         if dedupe_key in seen:
             continue

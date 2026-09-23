@@ -19,6 +19,7 @@ from sqlalchemy.orm import Session
 from app.models.document import Document
 from app.models.document_funding_line import DocumentFundingLine
 from app.schemas.candidate_classification import ClassifiedCandidate
+from app.services.clin_block_detector import ParsedClinRow
 
 _AMOUNT_RE = re.compile(r"\$[\d,]+(?:\.\d{2})?")
 _CLIN_RE = re.compile(r"\b\d{4,6}[A-Z]{0,2}\b")
@@ -84,6 +85,45 @@ def build_funding_lines(
                     "page_number": candidate.source_page,
                     "source_text": evidence,
                     "reason_codes": candidate.reason_codes,
+                },
+            )
+        )
+    return rows
+
+
+def build_funding_lines_from_pricing_schedule_rows(
+    *, document: Document, funding_shaped_rows: list[ParsedClinRow], start_index: int
+) -> list[DocumentFundingLine]:
+    """Rows from the pricing-schedule table that describe an actual funding
+    line (e.g. "00001  Funding Line  2,500.00") rather than a CLIN — see
+    `clin_builder.is_funding_shaped_row`. These are source-grounded exactly
+    like a real CLIN row (same table, same evidence quality), so they're
+    `Verified`, not narrative-confidence `Needs Review`.
+    """
+
+    rows: list[DocumentFundingLine] = []
+    for offset, row in enumerate(funding_shaped_rows):
+        amount = None
+        if row.amount:
+            cleaned = row.amount.replace("$", "").replace(",", "").strip()
+            try:
+                amount = float(cleaned)
+            except ValueError:
+                amount = None
+        rows.append(
+            DocumentFundingLine(
+                document_id=document.id,
+                row_index=start_index + offset,
+                amount=amount,
+                funding_level="Basic IDIQ",
+                clin=row.clin,
+                funding_status=row.description or "Funding Line",
+                qa_status="Verified",
+                confidence=row.confidence,
+                evidence_json={
+                    "page_number": row.page_number,
+                    "source_text": row.source_text,
+                    "reason_codes": [*row.reason_codes, "funding_line_in_pricing_schedule"],
                 },
             )
         )

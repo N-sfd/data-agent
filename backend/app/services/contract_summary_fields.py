@@ -77,6 +77,81 @@ STEP2_EVALUATED_SUMMARY_FIELDS: tuple[str, ...] = (
 )
 
 
+# Quality-gate follow-up: single common words that are never themselves a
+# complete business-field label — every confirmed bad All Fields example
+# (FOR -> INFORMATION, NAME -> AND, SIGNATURE -> AWARD, SEC. -> ...) is a
+# single word matching this set. A safety-net denylist, not the primary
+# mechanism (that's `match_label`'s vocabulary + the multi-word heuristic
+# in `is_plausible_business_label` below).
+_SINGLE_WORD_NOISE_LABELS = frozenset(
+    {
+        "for", "and", "or", "the", "a", "an", "of", "to", "in", "on", "by",
+        "name", "signature", "award", "information", "sec", "date", "check",
+        "see", "note", "continued", "page", "item", "no", "block", "part",
+        "section", "title", "date/time", "initials", "sic",
+    }
+)
+
+# Multi-word phrases that are structural/navigational, not business labels,
+# even though they pass the "multi-word" bar the general heuristic below
+# otherwise trusts.
+_MULTI_WORD_NOISE_LABELS = frozenset(
+    {
+        "table of contents",
+        "continued on next page",
+        "see continuation sheet",
+        "this space intentionally left blank",
+    }
+)
+
+_STOPWORDS_LOCAL = frozenset(
+    "the a an of to in on for and or but is are was were be been being "
+    "this that these those shall will would should may might must not "
+    "whether if as by with from at it its their his her our your".split()
+)
+
+
+def is_plausible_business_label(label_text: str) -> bool:
+    """Quality-gate follow-up: gates unrecognized (no `match_label` hit)
+    form-cell labels before they can become GENERAL_ACCEPTED_FIELD/All
+    Fields records. A label recognized by `match_label` always bypasses
+    this (trusted vocabulary); this function only judges labels outside
+    that vocabulary, using shape rather than a fixed list — per the P0
+    instruction, "do not solve this by hardcoding only the examples
+    above." Rejects: single common words (structural fragments), known
+    navigational phrases, and prose-length text (real form labels are
+    short noun phrases, not instructions/sentences).
+    """
+
+    normalized = label_text.strip().lower().strip(":.")
+    if not normalized:
+        return False
+    if normalized in _MULTI_WORD_NOISE_LABELS:
+        return False
+
+    words = normalized.split()
+    if len(words) == 1:
+        # A single word is a business label only if it's a real noun that
+        # isn't a generic structural/stopword fragment — the confirmed bad
+        # examples are ALL single words, and no legitimate SF33-style
+        # field is truly one bare common word.
+        return normalized not in _SINGLE_WORD_NOISE_LABELS and normalized not in _STOPWORDS_LOCAL
+
+    if len(words) > 8:
+        # Real form labels are short noun phrases; anything this long is
+        # instructional/prose text masquerading as a label (e.g. "CHECK IF
+        # REMITTANCE ADDRESS IS DIFFERENT FROM ABOVE - ENTER...").
+        return False
+
+    stopword_hits = sum(1 for w in words if w.strip(",.;:-") in _STOPWORDS_LOCAL)
+    if stopword_hits / len(words) > 0.6:
+        # Mostly stopwords (e.g. "IS DIFFERENT FROM ABOVE") reads as prose
+        # fragment, not a label.
+        return False
+
+    return True
+
+
 def match_label(label_text: str) -> str | None:
     normalized = label_text.lower().strip()
     # Reject long prose masquerading as a form label.

@@ -15,6 +15,12 @@ interface V3ResultsProps {
   documentId: string;
   documentName?: string;
   onOpenSource?: (request: SourceViewRequest) => void;
+  /** Changes whenever the underlying extraction result changes (e.g. a new
+   * job completed for this same documentId in the same page session).
+   * V3 data is produced by that same job, so a stale fetch from an earlier
+   * job/partial state must be refetched — this component has no other
+   * signal that the job re-ran, since `documentId` alone doesn't change. */
+  refreshKey?: string | number;
 }
 
 // Per-dataset (label, value) column keys used to build the source-
@@ -238,6 +244,7 @@ export default function V3Results({
   documentId,
   documentName,
   onOpenSource,
+  refreshKey,
 }: V3ResultsProps) {
   const [doc, setDoc] = useState<NormalizedV3Document | null>(null);
   const [loading, setLoading] = useState(true);
@@ -248,24 +255,58 @@ export default function V3Results({
 
   useEffect(() => {
     let cancelled = false;
-    setLoading(true);
-    setError(null);
-    getNormalizedV3Document(documentId)
-      .then((data) => {
-        if (!cancelled) setDoc(data);
-      })
-      .catch((err) => {
-        if (!cancelled) {
-          setError(err instanceof Error ? err.message : "Failed to load V3 results.");
+
+    // The V3 persistence stage runs AFTER the legacy extraction batches
+    // finish (last stage in the same job, ~3-10s of its own), so the
+    // `refreshKey` change that fires this effect can land before V3 data
+    // actually exists yet — not a genuinely-empty document, just a fetch
+    // that raced the job's own last stage. A totally empty document is
+    // implausible (even a sparse contract has SOME All Fields/Contract
+    // Summary data), so retry a few times with a delay rather than
+    // showing a false "no data" state.
+    const RETRY_DELAYS_MS = [2500, 4000, 6000];
+
+    function isEmpty(data: NormalizedV3Document): boolean {
+      return (
+        data.all_fields.length === 0 &&
+        data.clins.length === 0 &&
+        data.clauses.length === 0 &&
+        data.attachments.length === 0 &&
+        !data.contract_summary
+      );
+    }
+
+    async function load() {
+      setLoading(true);
+      setError(null);
+      for (let attempt = 0; attempt <= RETRY_DELAYS_MS.length; attempt += 1) {
+        try {
+          const data = await getNormalizedV3Document(documentId);
+          if (cancelled) return;
+          if (!isEmpty(data) || attempt === RETRY_DELAYS_MS.length) {
+            setDoc(data);
+            setLoading(false);
+            return;
+          }
+        } catch (err) {
+          if (cancelled) return;
+          if (attempt === RETRY_DELAYS_MS.length) {
+            setError(
+              err instanceof Error ? err.message : "Failed to load V3 results.",
+            );
+            setLoading(false);
+            return;
+          }
         }
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
+        await new Promise((resolve) => setTimeout(resolve, RETRY_DELAYS_MS[attempt]));
+      }
+    }
+
+    load();
     return () => {
       cancelled = true;
     };
-  }, [documentId]);
+  }, [documentId, refreshKey]);
 
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {

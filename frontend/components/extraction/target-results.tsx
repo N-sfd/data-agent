@@ -582,6 +582,7 @@ export default function TargetResults({
           documentId={documentId}
           documentName={documentName}
           onOpenSource={(request) => handleOpenSource(request)}
+          refreshKey={`${result.scalars.length}-${result.tables.length}-${result.warnings.length}`}
         />
       )}
 

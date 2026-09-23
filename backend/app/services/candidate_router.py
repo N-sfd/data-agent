@@ -22,6 +22,7 @@ from app.services.clause_citation_scanner import ClauseCitation
 from app.services.clin_block_detector import ParsedClinRow
 from app.services.contract_summary_fields import (
     FIELD_KEY_TO_V3_COLUMN,
+    is_plausible_business_label,
     match_label,
     validate_value,
 )
@@ -284,6 +285,56 @@ def route_clin_rows(rows: list[ParsedClinRow]) -> list[ClassifiedCandidate]:
     return candidates
 
 
+def _split_embedded_colon_value(
+    label: str, value: str | None
+) -> tuple[str, str | None]:
+    """"UEID: LLKXZRFEQMR3" as a single label must not become Normalized
+    Field="UEID: LLKXZRFEQMR3" — the label is always cleaned to "UEID"
+    when it has this shape, regardless of whether an independently-found
+    `value` exists (keep that value if present; the colon-suffix is only
+    used as a fallback value when nothing else was found)."""
+
+    if ":" not in label:
+        return label, value
+    prefix, _, suffix = label.partition(":")
+    prefix, suffix = prefix.strip(), suffix.strip()
+    if prefix and suffix and len(suffix) <= 80:
+        return prefix, (value if value else suffix)
+    return label, value
+
+
+_INSTRUCTION_VALUE_RE = re.compile(
+    r"^\(?(see\b|the\b|enter\b|submit\b|check\b|this\b|if\b)", re.IGNORECASE
+)
+
+
+def _looks_like_real_value(value: str) -> bool:
+    """A paired form-field VALUE must look like actual data, not a
+    cross-reference or truncated instruction continuation. Confirmed bad
+    pairings: a legitimate SF33 label ("Discount for Prompt Payment",
+    "Acknowledgement of Amendments") paired with "(See Section I, Clause
+    No. 52.232.8)" or "(The offeror acknowledges receipt of" — the LABEL
+    is real, the VALUE is narrative, so label-vocabulary alone can't catch
+    this; the value's own shape must be checked too."""
+
+    stripped = value.strip()
+    if not stripped:
+        return False
+    if _INSTRUCTION_VALUE_RE.match(stripped):
+        return False
+    if stripped.endswith(":"):
+        # A "value" ending in a colon is itself a label fragment (e.g.
+        # "UNITED STATES CODE AT:"), not real data.
+        return False
+    words = stripped.split()
+    if len(words) >= 5:
+        # A real form value (identifier, date, name, amount, short phrase)
+        # is rarely 5+ words; that length is a narrative/cross-reference
+        # fragment far more often than it's real data.
+        return False
+    return True
+
+
 def route_form_cell_associations(
     associations: list[FormCellAssociation],
 ) -> list[ClassifiedCandidate]:
@@ -349,27 +400,48 @@ def route_form_cell_associations(
             continue
 
         field_key = cell.field_key
+        clean_label, clean_value = _split_embedded_colon_value(
+            cell.label_text, cell.value_text
+        )
+
+        reasons = ["form_cell_association"]
         if field_key and field_key in FIELD_KEY_TO_V3_COLUMN:
             category = "CONTRACT_SUMMARY"
+            reasons.append(f"field_key_{field_key}")
         elif field_key:
             category = "GENERAL_ACCEPTED_FIELD"
-        else:
+            reasons.append(f"field_key_{field_key}")
+        elif is_plausible_business_label(clean_label) and (
+            clean_value is None or _looks_like_real_value(clean_value)
+        ):
+            # Quality-gate follow-up: no recognized vocabulary, but the
+            # label shape (multi-word, not a structural/navigational
+            # phrase, not prose-length) is plausibly a real business
+            # datum, AND the value itself looks like data rather than a
+            # cross-reference/instruction continuation — accepted, but
+            # distinguishable in reason_codes from a vocabulary-matched
+            # field.
             category = "GENERAL_ACCEPTED_FIELD"
+            reasons.append("no_recognized_field_vocabulary_but_plausible_label")
+        else:
+            # Single common word or structural/navigational phrase (e.g.
+            # "FOR", "NAME", "SIGNATURE", "TABLE OF CONTENTS") — never a
+            # business field, regardless of a geometrically-plausible
+            # value pairing. Routed to NOISE, which never reaches V3 All
+            # Fields (all_fields_builder only accepts GENERAL_ACCEPTED_FIELD).
+            category = "NOISE"
+            reasons.append("label_not_plausible_business_field")
 
         candidates.append(
             ClassifiedCandidate(
                 category=category,  # type: ignore[arg-type]
                 confidence=cell.confidence,
-                reason_codes=[
-                    "form_cell_association",
-                    *([f"field_key_{field_key}"] if field_key else []),
-                    *cell.reason_codes,
-                ],
+                reason_codes=[*reasons, *cell.reason_codes],
                 source_page=cell.page_number,
                 evidence=f"{cell.label_text} -> {cell.value_text}",
                 region_type="FORM_FIELD_VALUE",
-                label=cell.label_text,
-                value=cell.value_text,
+                label=clean_label,
+                value=clean_value,
                 bbox=value_bbox,
                 extraction_method=(
                     cell.value_line.extraction_method

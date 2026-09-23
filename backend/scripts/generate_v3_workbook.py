@@ -265,6 +265,39 @@ def main() -> None:
 
     print(f"\nOVERALL STRUCTURAL MATCH: {sheets_match and all_headers_match}")
 
+    print("\n" + "=" * 100)
+    print("DATASET CONSISTENCY — normalized reader vs generated XLSX (single canonical reader)")
+    print("=" * 100)
+    xlsx_sheet_by_dataset = {
+        "clins": "CLINs",
+        "funding": "Funding",
+        "performance_delivery": "Performance Delivery",
+        "attachments": "Attachments",
+        "clauses": "Clauses",
+        "far_references": "FAR References",
+        "dfars": "DFARS",
+        "all_fields": "All Fields",
+        "qa_review": "QA Review",
+        "source_documents": "Source Documents",
+    }
+    print(f"{'DATASET':<22} {'NORMALIZED':>10} {'XLSX':>8}  MATCH")
+    all_match = True
+    for attr, sheet_name in xlsx_sheet_by_dataset.items():
+        normalized_count = len(getattr(normalized, attr))
+        xlsx_count = generated_wb[sheet_name].max_row - 1
+        match = normalized_count == xlsx_count
+        all_match = all_match and match
+        print(f"{attr:<22} {normalized_count:>10} {xlsx_count:>8}  {'OK' if match else 'MISMATCH'}")
+        assert normalized_count == xlsx_count, (
+            f"{attr}: normalized reader returned {normalized_count} rows but "
+            f"generated XLSX sheet {sheet_name!r} has {xlsx_count} — the API "
+            f"and XLSX exporter are not reading the same canonical object."
+        )
+    contract_summary_in_xlsx = generated_wb["Contract Summary"].max_row - 1
+    print(f"{'contract_summary':<22} {'1' if normalized.contract_summary else '0':>10} {contract_summary_in_xlsx:>8}  "
+          f"{'OK' if bool(normalized.contract_summary) == (contract_summary_in_xlsx == 1) else 'MISMATCH'}")
+    print(f"\nALL DATASETS CONSISTENT (normalized == xlsx): {all_match}")
+
     database.close()
 
 
