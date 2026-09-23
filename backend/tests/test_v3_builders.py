@@ -257,6 +257,57 @@ def test_build_performance_delivery_classifies_record_type():
     assert rows[0].end_timing == "12/31/2029"
 
 
+def test_build_performance_delivery_widens_truncated_evidence_to_full_sentence():
+    # Quality-gate regression: a NARRATIVE region's captured text is an
+    # arbitrary fixed-width window, not sentence-bounded — the regression
+    # contract produced mid-sentence fragments like "will not be awarded a
+    # full ten year period of performance. Each award made after the
+    # initial" as `requirement`. Given the source page's full text, the
+    # builder must widen to the complete containing sentence.
+    page = SimpleNamespace(
+        page_number=32,
+        final_text=(
+            "Contracts awarded after the initial award date, resulting from an "
+            "on-ramp/open solicitation period, will not be awarded a full ten "
+            "year period of performance. Each award made after the initial "
+            "contract awards will have a base period of no more than five years."
+        ),
+    )
+    candidates = [
+        _candidate(
+            category="PERFORMANCE_DELIVERY",
+            evidence="will not be awarded a full ten year period of performance. Each award made after the",
+            confidence=0.55,
+            source_page=32,
+        )
+    ]
+    rows = build_performance_delivery(document=_document(), candidates=candidates, pages=[page])
+    # Widened to the full sentence(s) actually containing the evidence
+    # window — no mid-sentence truncation on either end.
+    assert rows[0].requirement.startswith(
+        "Contracts awarded after the initial award date"
+    )
+    assert rows[0].requirement.rstrip().endswith("five years.")
+
+
+def test_build_performance_delivery_flags_unresolved_cross_reference():
+    # Quality-gate regression: "See Section F.3, Period of Performance, for
+    # ..." is a pointer to a value stated elsewhere in the document, not a
+    # resolved performance value itself — must never be presented as if it
+    # were one.
+    candidates = [
+        _candidate(
+            category="PERFORMANCE_DELIVERY",
+            evidence="See Section F.3, Period of Performance, for the OASIS+ SB IDIQ and task orders.",
+            confidence=0.55,
+            source_page=15,
+        )
+    ]
+    rows = build_performance_delivery(document=_document(), candidates=candidates)
+    assert rows[0].qa_status == "Needs Review"
+    assert "unresolved_cross_reference" in rows[0].evidence_json["reason_codes"]
+
+
 # --- attachment_builder ---
 
 

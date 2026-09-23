@@ -2,21 +2,27 @@
 
 Two sources, per column:
 
-  1. The 7 columns `contract_summary_fields.FIELD_KEY_TO_V3_COLUMN` already
-     covers (Contract Number, Solicitation/RFP, Award Date, Contractor,
-     Agency/Office, NAICS, Ceiling/Max Aggregate) come straight from
-     CONTRACT_SUMMARY-category `ClassifiedCandidate`s produced by
-     candidate_router (form-field label/value pairs, already semantically
-     validated).
-  2. The remaining 7 columns (Contract Vehicle, Minimum Guarantee, Base
-     Period, Options, Max Duration, Task Order Range, Size Standard) have
-     no existing extraction logic anywhere in the codebase (confirmed gap,
-     docs/v3-implementation-plan.md limitation #2) — this module adds
-     conservative, evidence-anchored regex extraction for them, over the
-     document's own page text. Per the P0 rule ("a blank/Needs Review value
-     is better than a fabricated value"), any column with no confident
-     textual match stays blank with `qa_status="Needs Review"` rather than
-     being inferred/guessed.
+  1. The 6 columns `contract_summary_fields.FIELD_KEY_TO_V3_COLUMN` covers
+     (Contract Number, Solicitation/RFP, Award Date, Contractor,
+     Agency/Office, NAICS) come straight from CONTRACT_SUMMARY-category
+     `ClassifiedCandidate`s produced by candidate_router (form-field
+     label/value pairs, already semantically validated).
+  2. The remaining 8 columns (Contract Vehicle, Ceiling / Max Aggregate,
+     Minimum Guarantee, Base Period, Options, Max Duration, Task Order
+     Range, Size Standard) have no reliable form-field source — this module
+     adds conservative, evidence-anchored regex extraction for them, over
+     the document's own page text. Per the P0 rule ("a blank/Needs Review
+     value is better than a fabricated value"), any column with no
+     confident textual match stays blank with `qa_status="Needs Review"`
+     rather than being inferred/guessed.
+
+     Quality-gate finding: Ceiling / Max Aggregate was previously sourced
+     from the SF33 "20. AMOUNT" form field via FIELD_KEY_TO_V3_COLUMN, which
+     for this contract is actually the Minimum Guarantee amount (an
+     award/obligated amount, not a ceiling) — that mapping duplicated the
+     same $2,500 figure into both columns. Ceiling / Max Aggregate is now
+     derived only from its own explicit ceiling language (see
+     `_MAX_CEILING_NO_LIMIT_RE`/`_MAX_CEILING_AMOUNT_RE` below).
 
 One row per document (unique on document_id) — `persist_contract_summary`
 does an upsert, not delete-then-insert-many.
@@ -154,6 +160,21 @@ _MINIMUM_GUARANTEE_RE = re.compile(
     r"minimum\s+guarante(?:e|ed)[^.$]{0,60}?(?P<amount>\$[\d,]+(?:\.\d{2})?)",
     re.IGNORECASE,
 )
+# Quality-gate fix: the contract ceiling must come from its own explicit
+# statement, never from the SF33 "20. AMOUNT" award-action field (that
+# field turned out to equal the Minimum Guarantee for this contract type,
+# not the ceiling — see contract_summary_fields.py). Some IDIQs state an
+# explicit "no maximum dollar ceiling" (unlimited) position; others state a
+# real dollar figure. Check the unlimited phrasing first — it is the more
+# specific, definitive statement — and only fall back to a bare dollar
+# figure near "ceiling" language when no such statement is present.
+_MAX_CEILING_NO_LIMIT_RE = re.compile(
+    r"no\s+maximum\s+dollar\s+ceiling", re.IGNORECASE
+)
+_MAX_CEILING_AMOUNT_RE = re.compile(
+    r"maximum\s+(?:contract\s+)?ceiling[^.$]{0,80}?(?P<amount>\$[\d,]+(?:\.\d{2})?)",
+    re.IGNORECASE,
+)
 _TASK_ORDER_RANGE_RE = re.compile(
     r"task order[s]?[^.]{0,40}?(?:minimum|maximum|range)[^.]{0,120}?"
     r"(?P<amount>\$[\d,]+(?:\.\d{2})?)",
@@ -247,6 +268,16 @@ def _extract_narrative_columns(pages: list[DocumentPage]) -> dict[str, _FieldVal
     )
     if min_guarantee:
         found["Minimum Guarantee"] = min_guarantee
+
+    max_ceiling = _search_pages(
+        pages,
+        _MAX_CEILING_NO_LIMIT_RE,
+        value_from_match=lambda m: "No maximum dollar ceiling (unlimited task order value)",
+    ) or _search_pages(
+        pages, _MAX_CEILING_AMOUNT_RE, value_from_match=lambda m: m.group("amount")
+    )
+    if max_ceiling:
+        found["Ceiling / Max Aggregate"] = max_ceiling
 
     task_order_range = _search_pages(
         pages, _TASK_ORDER_RANGE_RE, value_from_match=lambda m: m.group("amount")

@@ -1,4 +1,8 @@
-from app.services.contract_summary_fields import match_label, validate_value
+from app.services.contract_summary_fields import (
+    is_plausible_business_label,
+    match_label,
+    validate_value,
+)
 
 
 def test_match_label_recognizes_sf33_numbered_labels() -> None:
@@ -12,6 +16,24 @@ def test_match_label_recognizes_sf33_numbered_labels() -> None:
 def test_match_label_returns_none_for_unrecognized_text() -> None:
     assert match_label("10. FOR INFORMATION CALL") is None
     assert match_label("PART II - CONTRACT CLAUSES") is None
+
+
+def test_match_label_rejects_narrative_fragment_containing_vocabulary_word() -> None:
+    # Quality-gate regression: a wrapped table cell ("Contractor shall email
+    # response to the OASIS+ Program Management Office (PMO) at the date
+    # specified within the data call(s).") was truncated down to
+    # "Contractor shall email" during line-association. The bare word
+    # "email" is legitimate label vocabulary, but it must not match here —
+    # a label containing a modal verb ("shall") is a sentence fragment, not
+    # a real SF33-style noun-phrase label like "E-MAIL ADDRESS".
+    assert match_label("Contractor shall email") is None
+    assert match_label("Offeror will provide") is None
+    assert match_label("E-MAIL ADDRESS") == "email"
+
+
+def test_is_plausible_business_label_rejects_modal_verb_sentence_fragment() -> None:
+    assert is_plausible_business_label("Contractor shall email") is False
+    assert is_plausible_business_label("Contract Vehicle") is True
 
 
 def test_more_specific_phrase_wins_over_shorter_contained_phrase() -> None:

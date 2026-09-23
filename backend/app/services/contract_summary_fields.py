@@ -56,8 +56,15 @@ FIELD_KEY_TO_V3_COLUMN: dict[str, str] = {
     "offeror_name": "Contractor",
     "issued_by": "Agency / Office",
     "naics": "NAICS",
-    "amount": "Ceiling / Max Aggregate",
 }
+# Deliberately NOT mapped here: "amount" (SF33 Block 20 "AMOUNT"). Quality-
+# gate finding: for this contract that block holds the award/obligated
+# amount for THIS award action, which for an IDIQ equals the Minimum
+# Guarantee ($2,500.00) — not the contract ceiling. Routing it into
+# "Ceiling / Max Aggregate" silently duplicated the minimum-guarantee value
+# into the ceiling column. It stays a GENERAL_ACCEPTED_FIELD (All Fields)
+# entry instead; `contract_summary_builder._max_ceiling_value` derives the
+# real ceiling from its own narrative language rather than this form field.
 
 # Fields the Step 2 regression gate must evaluate even when they are not
 # 1:1 V3 Contract Summary columns (source-supported SF33 / award facts).
@@ -110,6 +117,17 @@ _STOPWORDS_LOCAL = frozenset(
     "whether if as by with from at it its their his her our your".split()
 )
 
+# Quality-gate finding: a wrapped, multi-line table cell ("Contractor shall
+# email response to the OASIS+ Program Management Office (PMO) at the date
+# specified within the data call(s).") got truncated down to "Contractor
+# shall email" during line-association and passed the length/stopword-ratio
+# checks above (3 short words, no stopwords). Real form-field labels are
+# noun phrases ("Contract Number", "E-mail Address"); a label containing a
+# modal auxiliary verb is structurally a narrative/instruction sentence
+# fragment instead — this is a shape signal, not specific to any one
+# contract's wording.
+_NARRATIVE_VERB_MARKERS = frozenset({"shall", "must", "should", "will", "shall.", "must.", "will."})
+
 
 def is_plausible_business_label(label_text: str) -> bool:
     """Quality-gate follow-up: gates unrecognized (no `match_label` hit)
@@ -143,6 +161,12 @@ def is_plausible_business_label(label_text: str) -> bool:
         # REMITTANCE ADDRESS IS DIFFERENT FROM ABOVE - ENTER...").
         return False
 
+    if any(w.strip(",.;:-").lower() in _NARRATIVE_VERB_MARKERS for w in words):
+        # A modal auxiliary verb ("shall"/"must"/"should"/"will") means this
+        # is a sentence fragment (e.g. "Contractor shall email"), not a
+        # noun-phrase field label, regardless of its short length.
+        return False
+
     stopword_hits = sum(1 for w in words if w.strip(",.;:-") in _STOPWORDS_LOCAL)
     if stopword_hits / len(words) > 0.6:
         # Mostly stopwords (e.g. "IS DIFFERENT FROM ABOVE") reads as prose
@@ -158,6 +182,17 @@ def match_label(label_text: str) -> str | None:
     if len(normalized.split()) > 10:
         return None
     if "obligated amount" in normalized:
+        return None
+    # Quality-gate finding: a vocabulary phrase (e.g. "email") can appear as
+    # a SUBSTRING of a narrative sentence fragment ("Contractor shall email
+    # response to...") that a table-wrap artifact truncated down to
+    # "Contractor shall email" — that substring match must not short-circuit
+    # past the modal-verb sentence-fragment check below just because a
+    # vocabulary word happens to occur in it.
+    if any(
+        word.strip(",.;:-") in _NARRATIVE_VERB_MARKERS
+        for word in normalized.split()
+    ):
         return None
     for phrases, field_key in _LABEL_TO_FIELD:
         if any(phrase in normalized for phrase in phrases):

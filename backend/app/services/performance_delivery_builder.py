@@ -24,6 +24,7 @@ from sqlalchemy import delete
 from sqlalchemy.orm import Session
 
 from app.models.document import Document
+from app.models.document_page import DocumentPage
 from app.models.document_performance_period import DocumentPerformancePeriod
 from app.schemas.candidate_classification import ClassifiedCandidate
 
@@ -32,6 +33,32 @@ _RELATIVE_TIMING_RE = re.compile(
     r"\bwithin\s+\d+\s+(?:calendar\s+)?days?\b", re.IGNORECASE
 )
 _CLIN_RE = re.compile(r"\b\d{4,6}[A-Z]{0,2}\b")
+
+# Quality-gate finding: a NARRATIVE region's captured text is a fixed-width
+# line/paragraph fragment, not necessarily a complete sentence — the
+# regression contract's own "period of performance" narrative mentions came
+# through as arbitrary mid-sentence truncations (e.g. "will not be awarded
+# a full ten year period of performance. Each award made after the
+# initial"). Widening to the surrounding sentence(s) on the source page
+# makes `requirement` an honest, complete quote instead of a fragment,
+# without inventing any text beyond what the page actually says.
+_CROSS_REFERENCE_RE = re.compile(
+    r"^\s*See\s+Section\s+[A-Z0-9.]+", re.IGNORECASE
+)
+
+
+def _widen_to_sentence(evidence: str, page_text: str) -> str:
+    if not page_text.strip():
+        return evidence
+    idx = page_text.find(evidence[:40])
+    if idx == -1:
+        return evidence
+    start = max(0, page_text.rfind(".", 0, idx) + 1)
+    end_search_from = idx + len(evidence)
+    end = page_text.find(".", end_search_from)
+    end = end + 1 if end != -1 else min(len(page_text), end_search_from + 200)
+    widened = page_text[start:end].strip()
+    return widened or evidence
 
 _RECORD_TYPE_KEYWORDS: tuple[tuple[tuple[str, ...], str], ...] = (
     (("period of performance",), "Period of Performance"),
@@ -51,17 +78,23 @@ def _record_type(evidence: str) -> str:
 
 
 def build_performance_delivery(
-    *, document: Document, candidates: list[ClassifiedCandidate]
+    *,
+    document: Document,
+    candidates: list[ClassifiedCandidate],
+    pages: list[DocumentPage] | None = None,
 ) -> list[DocumentPerformancePeriod]:
+    pages_by_number = {p.page_number: (p.final_text or "") for p in (pages or [])}
     rows: list[DocumentPerformancePeriod] = []
     seen: set[str] = set()
 
     for index, candidate in enumerate(candidates):
         if candidate.category != "PERFORMANCE_DELIVERY":
             continue
-        evidence = candidate.evidence or ""
-        if not evidence.strip():
+        raw_evidence = candidate.evidence or ""
+        if not raw_evidence.strip():
             continue
+        page_text = pages_by_number.get(candidate.source_page, "")
+        evidence = _widen_to_sentence(raw_evidence, page_text)
         dedupe_key = evidence.strip().lower()
         if dedupe_key in seen:
             continue
@@ -69,7 +102,19 @@ def build_performance_delivery(
 
         dates = _DATE_RE.findall(evidence)
         relative_timing = _RELATIVE_TIMING_RE.search(evidence)
-        qa_status = "Verified" if candidate.confidence >= 0.6 else "Needs Review"
+        is_unresolved_cross_reference = bool(_CROSS_REFERENCE_RE.match(evidence))
+        qa_status = (
+            "Needs Review"
+            if is_unresolved_cross_reference
+            else ("Verified" if candidate.confidence >= 0.6 else "Needs Review")
+        )
+        reason_codes = list(candidate.reason_codes)
+        if is_unresolved_cross_reference:
+            # Points elsewhere in the document (e.g. "See Section F.3") for
+            # the actual value rather than stating one itself — flagged so
+            # a reviewer knows to cross-check rather than treating this row
+            # as a resolved performance value.
+            reason_codes.append("unresolved_cross_reference")
 
         rows.append(
             DocumentPerformancePeriod(
@@ -91,7 +136,7 @@ def build_performance_delivery(
                 evidence_json={
                     "page_number": candidate.source_page,
                     "source_text": evidence,
-                    "reason_codes": candidate.reason_codes,
+                    "reason_codes": reason_codes,
                 },
             )
         )

@@ -75,7 +75,9 @@ def run_and_persist_v3_extraction(
             start_index=len(funding_rows),
         )
     )
-    performance_rows = build_performance_delivery(document=document, candidates=candidates)
+    performance_rows = build_performance_delivery(
+        document=document, candidates=candidates, pages=pages
+    )
     attachment_rows = build_attachments_from_section_j(document=document, pages=pages)
     if attachment_rows is None:
         attachment_rows = build_attachments(document=document, candidates=candidates)
