@@ -5,15 +5,20 @@ from app.models.document_page import DocumentPage
 from app.schemas.candidate_classification import StructuralRegion
 from app.services.source_validator import validate_source_value
 
+# Title capture deliberately uses [ \t]+ (not \s+): \s+ matches newlines
+# too, which let a clause number immediately followed by a DIFFERENT
+# clause number on the next line get that next number captured as if it
+# were the first clause's title (confirmed by a line-level regression
+# test). The title, when captured at all, must be on the same source line.
 FAR_CLAUSE_PATTERN = re.compile(
     r"\b(52\.\d{3}-\d+(?:\s+Alt(?:ernate)?\s+[IVXLC\d]+)?)"
-    r"(?:\s+([^\n]{5,120}))?",
+    r"(?:[ \t]+([^\n]{5,120}))?",
     re.IGNORECASE,
 )
 
 DFARS_CLAUSE_PATTERN = re.compile(
     r"\b(252\.\d{3}-\d+)"
-    r"(?:\s+([^\n]{5,120}))?",
+    r"(?:[ \t]+([^\n]{5,120}))?",
     re.IGNORECASE,
 )
 
@@ -24,7 +29,7 @@ DFARS_CLAUSE_PATTERN = re.compile(
 # Regulation="GSAR", handled at the routing layer, not here).
 GSAR_CLAUSE_PATTERN = re.compile(
     r"\b(552\.\d{3}-\d+)"
-    r"(?:\s+([^\n]{5,120}))?",
+    r"(?:[ \t]+([^\n]{5,120}))?",
     re.IGNORECASE,
 )
 
@@ -91,6 +96,38 @@ def _region_says_listing_context(
     return None
 
 
+def _reconstruct_title_from_neighboring_region(
+    *,
+    clause_number: str,
+    page_regions: list[StructuralRegion] | None,
+) -> str | None:
+    """When the same-line regex capture yields no usable title (e.g. the
+    clause number sits on its own line: "52.204-21" with the title on the
+    next line), look at the next structural region on this page for a
+    short, non-citation line to use as the title - line-level neighbor
+    lookup, not a rewrite of the citation scanner itself."""
+
+    if not page_regions:
+        return None
+
+    ordered = sorted(page_regions, key=lambda r: r.block_index)
+    for index, region in enumerate(ordered):
+        if clause_number not in region.text:
+            continue
+        for candidate in ordered[index + 1 : index + 2]:
+            if FAR_CLAUSE_PATTERN.search(candidate.text) or DFARS_CLAUSE_PATTERN.search(
+                candidate.text
+            ) or GSAR_CLAUSE_PATTERN.search(candidate.text):
+                # The very next region is itself another citation - not a
+                # title continuation.
+                return None
+            words = candidate.text.split()
+            if 1 <= len(words) <= 12:
+                return candidate.text.strip().rstrip(".")
+        return None
+    return None
+
+
 def _scan_page_for_family(
     *,
     page: DocumentPage,
@@ -112,6 +149,14 @@ def _scan_page_for_family(
 
         if clause_number in seen:
             continue
+
+        if not title:
+            reconstructed = _reconstruct_title_from_neighboring_region(
+                clause_number=clause_number,
+                page_regions=page_regions,
+            )
+            if reconstructed:
+                title = reconstructed
 
         if not validate_source_value(
             value=clause_number,

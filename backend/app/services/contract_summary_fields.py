@@ -1,0 +1,200 @@
+"""Step 2: SF33/gov-form label vocabulary + field-specific semantic
+validation for Contract Summary candidates.
+
+Generic government-form field recognition (SF33 numbered items and their
+common synonyms across similar forms), not specific to the regression
+contract. Confirmed need: Step 1's routing accepted a label/value pairing
+purely on proximity, with no check that the VALUE actually looks like the
+kind of thing the LABEL asks for - "Date Issued" happily took a
+solicitation-number-shaped string because nothing checked it looked like a
+date. Semantic validation closes that gap and directly implements the P0
+rule: identifier fields require identifier-compatible values, dates must
+parse as plausible dates, etc.
+"""
+
+from __future__ import annotations
+
+import re
+from collections.abc import Callable
+from dataclasses import dataclass
+
+# (substrings to match against a normalized label, field_key). First match
+# wins - ordered so more specific phrases are checked before shorter ones
+# they contain (e.g. "solicitation number" before a bare "number").
+_LABEL_TO_FIELD: tuple[tuple[tuple[str, ...], str], ...] = (
+    (("contract number", "contract no"), "contract_number"),
+    (("solicitation number", "solicitation no", "solicitation / rfp"), "solicitation_number"),
+    (("type of solicitation",), "type_of_solicitation"),
+    (("requisition/purchase number", "requisition/purchase", "purchase request number"), "purchase_request_number"),
+    (("date issued",), "date_issued"),
+    (("award date",), "award_date"),
+    (("effective date",), "effective_date"),
+    (("naics",), "naics"),
+    (("psc code", "product service code"), "psc_code"),
+    (("ueid", "unique entity id", "unique entity identifier"), "ueid"),
+    (("issued by",), "issued_by"),
+    (("administered by",), "administered_by"),
+    (("name and address of offeror", "name of offeror or contractor", "name of offeror"), "offeror_name"),
+    (("contractor name", "name of contractor"), "contractor_name"),
+    (("name of contracting officer", "contracting officer"), "contracting_officer_name"),
+    (("e-mail address", "email address", "e-mail", "email"), "email"),
+    (("telephone number", "telephone", "phone number"), "telephone"),
+    # Only bare SF33 item 20 / explicit award amount — not "Obligated Amount".
+    (("20. amount", "award amount", "total amount"), "amount"),
+    (("10a. name", "10a name"), "contact_name"),
+    (("15a. name", "15a name"), "offeror_name"),
+)
+
+# Exact V3 Contract Summary columns from docs/v3-schema-manifest.md §11.
+# Fields recognized on forms but absent from this wide header stay in
+# GENERAL_ACCEPTED_FIELD / evaluated separately in the Step 2 gate.
+FIELD_KEY_TO_V3_COLUMN: dict[str, str] = {
+    "contract_number": "Contract Number",
+    "solicitation_number": "Solicitation / RFP",
+    "award_date": "Award Date",
+    "contractor_name": "Contractor",
+    "offeror_name": "Contractor",
+    "issued_by": "Agency / Office",
+    "naics": "NAICS",
+    "amount": "Ceiling / Max Aggregate",
+}
+
+# Fields the Step 2 regression gate must evaluate even when they are not
+# 1:1 V3 Contract Summary columns (source-supported SF33 / award facts).
+STEP2_EVALUATED_SUMMARY_FIELDS: tuple[str, ...] = (
+    "contract_number",
+    "solicitation_number",
+    "award_date",
+    "date_issued",
+    "ueid",
+    "contracting_officer_name",
+    "telephone",
+    "email",
+    "naics",
+    "contractor_name",
+    "issued_by",
+    "amount",
+)
+
+
+def match_label(label_text: str) -> str | None:
+    normalized = label_text.lower().strip()
+    # Reject long prose masquerading as a form label.
+    if len(normalized.split()) > 10:
+        return None
+    if "obligated amount" in normalized:
+        return None
+    for phrases, field_key in _LABEL_TO_FIELD:
+        if any(phrase in normalized for phrase in phrases):
+            return field_key
+    return None
+
+
+_CONTRACT_ID_RE = re.compile(r"^[0-9A-Z]{4,8}[- ]?[0-9A-Z]{1,3}[- ]?[0-9A-Z]{3,10}$")
+_DATE_RE = re.compile(r"^\d{1,2}[/-]\d{1,2}[/-]\d{2,4}$|^\d{4}-\d{2}-\d{2}$")
+_EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[A-Za-z]{2,}$")
+_PHONE_RE = re.compile(r"^\(?\d{3}\)?[-. ]?\d{3}[-. ]?\d{4}$|^\d{3}[-. ]?\d{4}$")
+_UEID_RE = re.compile(r"^[0-9A-Z]{12}$")
+_NAICS_RE = re.compile(r"^\d{6}$")
+_MONEY_RE = re.compile(r"^\$?[\d,]+(\.\d{1,2})?$")
+_NAME_LIKE_RE = re.compile(r"^[A-Z][a-zA-Z'.\-]+(\s+[A-Z][a-zA-Z'.\-]+){0,3}$")
+_PSC_RE = re.compile(r"^[A-Z0-9]{1,4}$")
+
+
+@dataclass(frozen=True)
+class ValidationResult:
+    is_valid: bool
+    reason: str
+
+
+def _validate_identifier(value: str) -> ValidationResult:
+    if _CONTRACT_ID_RE.match(value.strip()):
+        return ValidationResult(True, "matches_contract_identifier_shape")
+    return ValidationResult(False, "does_not_match_identifier_shape")
+
+
+def _validate_date(value: str) -> ValidationResult:
+    if _DATE_RE.match(value.strip()):
+        return ValidationResult(True, "matches_date_shape")
+    return ValidationResult(False, "does_not_parse_as_date")
+
+
+def _validate_naics(value: str) -> ValidationResult:
+    if _NAICS_RE.match(value.strip()):
+        return ValidationResult(True, "six_digit_naics_code")
+    return ValidationResult(False, "not_a_six_digit_code")
+
+
+def _validate_ueid(value: str) -> ValidationResult:
+    if _UEID_RE.match(value.strip()):
+        return ValidationResult(True, "twelve_char_alphanumeric_ueid_shape")
+    return ValidationResult(False, "not_twelve_char_alphanumeric")
+
+
+def _validate_email(value: str) -> ValidationResult:
+    if _EMAIL_RE.match(value.strip()):
+        return ValidationResult(True, "valid_email_shape")
+    return ValidationResult(False, "not_a_valid_email_shape")
+
+
+def _validate_phone(value: str) -> ValidationResult:
+    cleaned = value.strip()
+    if _PHONE_RE.match(cleaned):
+        return ValidationResult(True, "valid_phone_shape")
+    # Digits-only 10-digit / 7-digit forms after composition.
+    digits = re.sub(r"\D", "", cleaned)
+    if len(digits) == 10 or len(digits) == 7:
+        return ValidationResult(True, "valid_phone_shape")
+    return ValidationResult(False, "not_a_valid_phone_shape")
+
+
+def _validate_name(value: str) -> ValidationResult:
+    if _NAME_LIKE_RE.match(value.strip()):
+        return ValidationResult(True, "person_name_shape")
+    return ValidationResult(False, "not_name_like_could_be_heading_or_prose")
+
+
+def _validate_amount(value: str) -> ValidationResult:
+    if _MONEY_RE.match(value.strip()):
+        return ValidationResult(True, "monetary_shape")
+    return ValidationResult(False, "not_a_monetary_value")
+
+
+def _validate_psc(value: str) -> ValidationResult:
+    if _PSC_RE.match(value.strip()):
+        return ValidationResult(True, "psc_code_shape")
+    return ValidationResult(False, "not_psc_code_shape")
+
+
+def _validate_freeform(value: str) -> ValidationResult:
+    return ValidationResult(bool(value.strip()) and len(value) < 200, "freeform_no_shape_check")
+
+
+_VALIDATORS: dict[str, Callable[[str], ValidationResult]] = {
+    "contract_number": _validate_identifier,
+    "solicitation_number": _validate_identifier,
+    "type_of_solicitation": _validate_freeform,
+    "date_issued": _validate_date,
+    "award_date": _validate_date,
+    "effective_date": _validate_date,
+    "naics": _validate_naics,
+    "psc_code": _validate_psc,
+    "ueid": _validate_ueid,
+    "email": _validate_email,
+    "telephone": _validate_phone,
+    "contracting_officer_name": _validate_name,
+    "contact_name": _validate_name,
+    "purchase_request_number": _validate_freeform,
+    "issued_by": _validate_freeform,
+    "administered_by": _validate_freeform,
+    "contractor_name": _validate_freeform,
+    "offeror_name": _validate_freeform,
+    "amount": _validate_amount,
+}
+
+
+def validate_value(field_key: str, value: str) -> ValidationResult:
+    validator = _VALIDATORS.get(field_key)
+    if validator is None:
+        return ValidationResult(True, "no_validator_defined_for_field")
+    return validator(value)

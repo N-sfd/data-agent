@@ -1,5 +1,6 @@
-from app.schemas.candidate_classification import StructuralRegion
+from app.schemas.candidate_classification import ClassifiedCandidate, StructuralRegion
 from app.services.candidate_router import (
+    deduplicate_clin_funding_overlap,
     route_clause_citations,
     route_clin_rows,
     route_page_regions,
@@ -238,6 +239,88 @@ def test_value_before_label_in_reading_order_never_paired() -> None:
     matches = [c for c in candidates if c.label == "DATE ISSUED"]
     assert matches[0].value is None
     assert matches[0].category == "QA_REVIEW"
+
+
+def test_semantic_validation_rejects_wrong_shaped_value_for_date_field() -> None:
+    # Confirmed regression: "5. DATE ISSUED" must not accept a
+    # solicitation-number-shaped value just because it was the nearest
+    # available candidate after the real date field's own label was lost.
+    label = _region(
+        "FORM_FIELD_LABEL", "5. DATE ISSUED", block_index=4,
+        bbox=(420.0, 46.6, 463.1, 52.6),
+    )
+    wrong_shaped_value = _region(
+        "FORM_FIELD_VALUE", "47QRCA23R0001", block_index=7,
+        bbox=(432.0, 52.8, 500.0, 63.4),
+    )
+    candidates = route_page_regions([label, wrong_shaped_value])
+    matches = [c for c in candidates if c.label == "DATE ISSUED"]
+    assert matches[0].category == "QA_REVIEW"
+    assert matches[0].value is None
+    assert any("does_not_parse_as_date" in r for r in matches[0].reason_codes)
+
+
+def test_semantic_validation_accepts_correctly_shaped_date() -> None:
+    label = _region(
+        "FORM_FIELD_LABEL", "5. DATE ISSUED", block_index=4,
+        bbox=(420.0, 46.6, 463.1, 52.6),
+    )
+    correct_value = _region(
+        "FORM_FIELD_VALUE", "02/03/2025", block_index=6,
+        bbox=(432.0, 58.8, 488.1, 69.4),
+    )
+    candidates = route_page_regions([label, correct_value])
+    matches = [c for c in candidates if c.label == "DATE ISSUED"]
+    # "Date Issued" is a recognized SF33 field (passes semantic validation)
+    # but has no corresponding V3 Contract Summary column (only "Award
+    # Date" does) - correctly GENERAL_ACCEPTED_FIELD, not invented into
+    # Contract Summary.
+    assert matches[0].category == "GENERAL_ACCEPTED_FIELD"
+    assert matches[0].value == "02/03/2025"
+    assert "semantic_validation_passed" in matches[0].reason_codes
+
+
+def test_ambiguous_candidates_route_to_qa_review_preserving_both() -> None:
+    label = _region(
+        "FORM_FIELD_LABEL", "2. CONTRACT NUMBER", block_index=0,
+        bbox=(19.0, 46.6, 81.2, 52.6),
+    )
+    # Two equally-plausible, equally-close, both-identifier-shaped values.
+    candidate_a = _region(
+        "FORM_FIELD_VALUE", "47QRCA25DSF07", block_index=1,
+        bbox=(19.5, 52.8, 92.4, 63.4),
+    )
+    candidate_b = _region(
+        "FORM_FIELD_VALUE", "47QRCA23R0001", block_index=2,
+        bbox=(20.0, 53.0, 92.9, 63.6),
+    )
+    candidates = route_page_regions([label, candidate_a, candidate_b])
+    matches = [c for c in candidates if c.label == "CONTRACT NUMBER"]
+    assert matches[0].category == "QA_REVIEW"
+    assert matches[0].value is None
+    assert any("ambiguous" in r for r in matches[0].reason_codes)
+
+
+def test_clin_funding_dedup_keeps_clin_drops_funding_duplicate() -> None:
+    evidence = "10301   RD-541330-SB    0.00 Obligated Amount: $0.00"
+    clin_candidate = ClassifiedCandidate(
+        category="CLIN", confidence=0.6, source_page=3, evidence=evidence,
+        region_type="TABLE_ROW", label="10301", value="0.00",
+    )
+    funding_candidate = ClassifiedCandidate(
+        category="FUNDING", confidence=0.55, source_page=3, evidence=evidence,
+        region_type="NARRATIVE",
+    )
+    unrelated = ClassifiedCandidate(
+        category="FUNDING", confidence=0.55, source_page=4,
+        evidence="Different funding narrative entirely", region_type="NARRATIVE",
+    )
+    result = deduplicate_clin_funding_overlap([clin_candidate, funding_candidate, unrelated])
+    categories = [c.category for c in result]
+    assert categories.count("FUNDING") == 1  # only the unrelated one survives
+    assert categories.count("CLIN") == 1
+    clin_result = next(c for c in result if c.category == "CLIN")
+    assert "also_matched_funding_keyword_pattern_same_source_line" in clin_result.reason_codes
 
 
 def test_unrecognized_label_still_preserved_as_general_accepted_field() -> None:

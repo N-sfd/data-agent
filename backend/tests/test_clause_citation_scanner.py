@@ -101,6 +101,49 @@ def test_toc_line_referencing_clause_number_is_dropped_not_far_reference() -> No
     assert citations == []
 
 
+def test_title_reconstructed_from_next_line_when_number_alone() -> None:
+    # Confirmed pattern once line-level regions are used: the clause number
+    # sits on its own line, with the title on the immediately following
+    # line - the same-line regex capture alone would yield an empty title.
+    page = _page(79, "52.204-21\nBasic Safeguarding of Covered Contractor Information Systems.")
+    number_region = StructuralRegion(
+        page_number=79, block_index=0, region_type="CLAUSE_LISTING",
+        text="52.204-21", confidence=0.9,
+    )
+    title_region = StructuralRegion(
+        page_number=79, block_index=1, region_type="NARRATIVE",
+        text="Basic Safeguarding of Covered Contractor Information Systems.",
+        confidence=0.7,
+    )
+
+    citations = scan_pages_for_clause_citations(
+        pages=[page],
+        regions_by_page={79: [number_region, title_region]},
+    )
+
+    assert citations[0].title == "Basic Safeguarding of Covered Contractor Information Systems"
+
+
+def test_title_not_reconstructed_from_another_citation_line() -> None:
+    page = _page(50, "52.204-21\n52.204-30")
+    number_region = StructuralRegion(
+        page_number=50, block_index=0, region_type="CLAUSE_LISTING",
+        text="52.204-21", confidence=0.9,
+    )
+    next_citation_region = StructuralRegion(
+        page_number=50, block_index=1, region_type="CLAUSE_LISTING",
+        text="52.204-30", confidence=0.9,
+    )
+
+    citations = scan_pages_for_clause_citations(
+        pages=[page],
+        regions_by_page={50: [number_region, next_citation_region]},
+    )
+
+    first = next(c for c in citations if c.clause_number == "52.204-21")
+    assert first.title == ""
+
+
 def test_narrative_context_reported_false() -> None:
     page = _page(
         25,

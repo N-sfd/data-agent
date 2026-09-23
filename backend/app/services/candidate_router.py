@@ -20,32 +20,12 @@ import re
 from app.schemas.candidate_classification import ClassifiedCandidate, StructuralRegion
 from app.services.clause_citation_scanner import ClauseCitation
 from app.services.clin_block_detector import ParsedClinRow
-
-# Reuses the existing gov-contract field vocabulary (contract_field_schema.py)
-# rather than inventing a parallel label list. A FORM_FIELD_LABEL region
-# whose normalized text contains one of these phrases routes to
-# CONTRACT_SUMMARY; anything else identifier-shaped routes to
-# GENERAL_ACCEPTED_FIELD instead of being silently dropped.
-_CONTRACT_SUMMARY_LABEL_PHRASES: tuple[str, ...] = (
-    "contract number",
-    "contract no",
-    "solicitation number",
-    "solicitation no",
-    "award date",
-    "date issued",
-    "effective date",
-    "execution date",
-    "purchase request",
-    "naics",
-    "psc code",
-    "product service code",
-    "contracting officer",
-    "issued by",
-    "ueid",
-    "unique entity",
-    "contractor name",
-    "requisition",
+from app.services.contract_summary_fields import (
+    FIELD_KEY_TO_V3_COLUMN,
+    match_label,
+    validate_value,
 )
+from app.services.form_cell_associator import FormCellAssociation
 
 _ATTACHMENT_KEYWORDS = ("attachment", "exhibit", "appendix")
 _PERFORMANCE_KEYWORDS = (
@@ -88,6 +68,11 @@ _MAX_LABEL_VALUE_X_DISTANCE = 250.0
 # Fallback when bbox geometry is degenerate: value must appear within this
 # many blocks of the label in reading order.
 _MAX_LABEL_VALUE_BLOCK_GAP = 3
+# When two-or-more semantically-valid value candidates for the same label
+# are within this combined distance of each other, treat the pairing as
+# genuinely ambiguous (-> QA_REVIEW, preserve both) rather than silently
+# picking the marginally closer one.
+_AMBIGUITY_DISTANCE_MARGIN = 15.0
 
 
 def _looks_like_prose(text: str) -> bool:
@@ -159,11 +144,6 @@ def _label_value_associated(
     return False, ["no_geometric_proximity_in_same_column"]
 
 
-def _matches_contract_summary_label(label_text: str) -> bool:
-    normalized = label_text.lower()
-    return any(phrase in normalized for phrase in _CONTRACT_SUMMARY_LABEL_PHRASES)
-
-
 def _clause_family_to_category(family: str, *, listing_context: bool | None) -> str:
     if family == "DFARS":
         # Per Step-1 instructions section 5: DFARS routes to the DFARS
@@ -221,6 +201,65 @@ def route_clause_citations(
     return candidates
 
 
+def _normalize_evidence_for_identity(text: str) -> str:
+    collapsed = re.sub(r"\s+", " ", text.strip().lower())
+    return collapsed[:80]
+
+
+def deduplicate_clin_funding_overlap(
+    candidates: list[ClassifiedCandidate],
+) -> list[ClassifiedCandidate]:
+    """Fixes a confirmed double-count: the same source line (e.g. "10301
+    RD-541330-SB ... Obligated Amount: $0.00") gets found independently by
+    the CLIN row parser (-> CLIN, correct) AND by the general block
+    classifier, whose NARRATIVE keyword match on "obligated amount" also
+    produces a competing FUNDING candidate for the identical text.
+
+    Not a blanket "CLIN always wins" rule (a CLIN row may legitimately
+    carry funding information that needs its own structured Funding
+    record later) - this only collapses the case where the two
+    candidates' evidence is the *same underlying source line* (matched by
+    normalized page+text identity), keeping the CLIN candidate as primary
+    and folding the funding-keyword signal into its reason codes instead
+    of losing it or double-counting it.
+    """
+
+    by_identity: dict[tuple[int, str], list[ClassifiedCandidate]] = {}
+    for candidate in candidates:
+        key = (candidate.source_page, _normalize_evidence_for_identity(candidate.evidence))
+        by_identity.setdefault(key, []).append(candidate)
+
+    to_drop: set[int] = set()
+    merged_reason_notes: dict[int, list[str]] = {}
+
+    for group in by_identity.values():
+        if len(group) < 2:
+            continue
+        clin_members = [c for c in group if c.category == "CLIN"]
+        funding_members = [c for c in group if c.category == "FUNDING"]
+        if not clin_members or not funding_members:
+            continue
+        primary = clin_members[0]
+        for funding_candidate in funding_members:
+            to_drop.add(id(funding_candidate))
+            merged_reason_notes.setdefault(id(primary), []).append(
+                "also_matched_funding_keyword_pattern_same_source_line"
+            )
+
+    deduplicated: list[ClassifiedCandidate] = []
+    for candidate in candidates:
+        if id(candidate) in to_drop:
+            continue
+        extra_notes = merged_reason_notes.get(id(candidate))
+        if extra_notes:
+            candidate = candidate.model_copy(
+                update={"reason_codes": [*candidate.reason_codes, *extra_notes]}
+            )
+        deduplicated.append(candidate)
+
+    return deduplicated
+
+
 def route_clin_rows(rows: list[ParsedClinRow]) -> list[ClassifiedCandidate]:
     candidates: list[ClassifiedCandidate] = []
     for row in rows:
@@ -242,6 +281,103 @@ def route_clin_rows(rows: list[ParsedClinRow]) -> list[ClassifiedCandidate]:
     return candidates
 
 
+def route_form_cell_associations(
+    associations: list[FormCellAssociation],
+) -> list[ClassifiedCandidate]:
+    """Routes Step 2 form-cell associations (line-granularity ownership)
+    into ClassifiedCandidate rows. Prefer this path when LogicalLines are
+    available; ``route_page_regions`` remains for block-level fallbacks.
+    """
+
+    candidates: list[ClassifiedCandidate] = []
+    for cell in associations:
+        label_bbox = (
+            cell.label_line.x0,
+            cell.label_line.y0,
+            cell.label_line.x1,
+            cell.label_line.y1,
+        )
+        value_bbox = (
+            (
+                cell.value_line.x0,
+                cell.value_line.y0,
+                cell.value_line.x1,
+                cell.value_line.y1,
+            )
+            if cell.value_line is not None
+            else label_bbox
+        )
+
+        if cell.association == "ambiguous":
+            candidates.append(
+                ClassifiedCandidate(
+                    category="QA_REVIEW",
+                    confidence=cell.confidence,
+                    reason_codes=[
+                        *cell.reason_codes,
+                        f"alternates: {', '.join(repr(v) for v in cell.alternate_values)}",
+                    ],
+                    source_page=cell.page_number,
+                    evidence=cell.label_text,
+                    region_type="FORM_FIELD_LABEL",
+                    label=cell.label_text,
+                    value=None,
+                    bbox=label_bbox,
+                    extraction_method=cell.label_line.extraction_method,
+                )
+            )
+            continue
+
+        if cell.value_text is None:
+            candidates.append(
+                ClassifiedCandidate(
+                    category="QA_REVIEW",
+                    confidence=cell.confidence,
+                    reason_codes=list(cell.reason_codes),
+                    source_page=cell.page_number,
+                    evidence=cell.label_text,
+                    region_type="FORM_FIELD_LABEL",
+                    label=cell.label_text,
+                    value=None,
+                    bbox=label_bbox,
+                    extraction_method=cell.label_line.extraction_method,
+                )
+            )
+            continue
+
+        field_key = cell.field_key
+        if field_key and field_key in FIELD_KEY_TO_V3_COLUMN:
+            category = "CONTRACT_SUMMARY"
+        elif field_key:
+            category = "GENERAL_ACCEPTED_FIELD"
+        else:
+            category = "GENERAL_ACCEPTED_FIELD"
+
+        candidates.append(
+            ClassifiedCandidate(
+                category=category,  # type: ignore[arg-type]
+                confidence=cell.confidence,
+                reason_codes=[
+                    "form_cell_association",
+                    *([f"field_key_{field_key}"] if field_key else []),
+                    *cell.reason_codes,
+                ],
+                source_page=cell.page_number,
+                evidence=f"{cell.label_text} -> {cell.value_text}",
+                region_type="FORM_FIELD_VALUE",
+                label=cell.label_text,
+                value=cell.value_text,
+                bbox=value_bbox,
+                extraction_method=(
+                    cell.value_line.extraction_method
+                    if cell.value_line is not None
+                    else cell.label_line.extraction_method
+                ),
+            )
+        )
+    return candidates
+
+
 def route_page_regions(
     regions: list[StructuralRegion],
 ) -> list[ClassifiedCandidate]:
@@ -257,10 +393,13 @@ def route_page_regions(
     for label in label_regions:
         match = _FORM_LABEL_ITEM_RE.match(label.text)
         label_text = match.group("label") if match else label.text
+        field_key = match_label(label_text)
 
-        best_value: StructuralRegion | None = None
-        best_reasons: list[str] = []
-        best_distance = float("inf")
+        # Every geometrically-plausible, non-prose value candidate for this
+        # label, closest first - not just the single nearest one, so
+        # semantic validation and ambiguity detection have something to
+        # choose between.
+        scored: list[tuple[float, StructuralRegion, list[str]]] = []
         for value in value_regions:
             if value.block_index in claimed_value_indices:
                 continue
@@ -278,19 +417,106 @@ def route_page_regions(
                 and not _is_degenerate_bbox(value.bbox)
                 else value.block_index - label.block_index
             )
-            if distance < best_distance:
-                best_distance = distance
-                best_value = value
-                best_reasons = reasons
+            scored.append((distance, value, reasons))
+        scored.sort(key=lambda item: item[0])
 
-        if best_value is None:
+        if field_key is not None:
+            # Field-specific semantic validation: only a value that
+            # actually looks like the kind of thing this label asks for is
+            # eligible - this is what stops a solicitation-number-shaped
+            # string from being accepted as "Date Issued" purely because
+            # it was the nearest available candidate.
+            validated = []
+            rejected_reasons: list[str] = []
+            for distance, value, reasons in scored:
+                result = validate_value(field_key, value.text)
+                if result.is_valid:
+                    validated.append((distance, value, reasons, result.reason))
+                else:
+                    rejected_reasons.append(f"{value.text!r}:{result.reason}")
+
+            if not validated:
+                candidates.append(
+                    ClassifiedCandidate(
+                        category="QA_REVIEW",
+                        confidence=0.35,
+                        reason_codes=[
+                            "form_field_label_no_semantically_valid_value_nearby",
+                            f"field_key_{field_key}",
+                            *rejected_reasons[:3],
+                        ],
+                        source_page=label.page_number,
+                        evidence=label.text,
+                        region_type=label.region_type,
+                        label=label_text,
+                        value=None,
+                        bbox=label.bbox,
+                        extraction_method=label.extraction_method,
+                    )
+                )
+                continue
+
+            if len(validated) >= 2 and (validated[1][0] - validated[0][0]) < _AMBIGUITY_DISTANCE_MARGIN:
+                # Two (or more) candidates are both plausible and nearly
+                # equidistant - guessing here is exactly what produced the
+                # confirmed wrong pairings. Report both, don't pick.
+                top_two = ", ".join(f"{v.text!r}" for _, v, _, _ in validated[:2])
+                candidates.append(
+                    ClassifiedCandidate(
+                        category="QA_REVIEW",
+                        confidence=0.5,
+                        reason_codes=[
+                            "ambiguous_multiple_validated_candidates",
+                            f"field_key_{field_key}",
+                            f"candidates: {top_two}",
+                        ],
+                        source_page=label.page_number,
+                        evidence=label.text,
+                        region_type=label.region_type,
+                        label=label_text,
+                        value=None,
+                        bbox=label.bbox,
+                        extraction_method=label.extraction_method,
+                    )
+                )
+                continue
+
+            distance, best_value, best_reasons, validation_reason = validated[0]
+            claimed_value_indices.add(best_value.block_index)
+            category = (
+                "CONTRACT_SUMMARY" if field_key in FIELD_KEY_TO_V3_COLUMN else "GENERAL_ACCEPTED_FIELD"
+            )
+            candidates.append(
+                ClassifiedCandidate(
+                    category=category,  # type: ignore[arg-type]
+                    confidence=min(label.confidence, best_value.confidence) + 0.15,
+                    reason_codes=[
+                        "form_field_label_value_pair",
+                        f"field_key_{field_key}",
+                        "semantic_validation_passed",
+                        validation_reason,
+                        *best_reasons,
+                    ],
+                    source_page=label.page_number,
+                    evidence=f"{label.text} -> {best_value.text}",
+                    region_type="FORM_FIELD_VALUE",
+                    label=label_text,
+                    value=best_value.text,
+                    bbox=best_value.bbox,
+                    extraction_method=best_value.extraction_method,
+                )
+            )
+            continue
+
+        # No recognized field vocabulary for this label: keep the prior,
+        # simpler behavior (closest geometric match) - still requires a
+        # non-empty, non-prose candidate to exist at all.
+        if not scored:
             candidates.append(
                 ClassifiedCandidate(
                     category="QA_REVIEW",
                     confidence=0.4,
-                    reason_codes=[
-                        "form_field_label_no_identifier_shaped_value_nearby"
-                    ],
+                    reason_codes=["form_field_label_no_identifier_shaped_value_nearby"],
                     source_page=label.page_number,
                     evidence=label.text,
                     region_type=label.region_type,
@@ -302,20 +528,13 @@ def route_page_regions(
             )
             continue
 
+        distance, best_value, best_reasons = scored[0]
         claimed_value_indices.add(best_value.block_index)
-        category = (
-            "CONTRACT_SUMMARY"
-            if _matches_contract_summary_label(label_text)
-            else "GENERAL_ACCEPTED_FIELD"
-        )
         candidates.append(
             ClassifiedCandidate(
-                category=category,  # type: ignore[arg-type]
+                category="GENERAL_ACCEPTED_FIELD",
                 confidence=min(label.confidence, best_value.confidence) + 0.1,
-                reason_codes=[
-                    "form_field_label_value_pair",
-                    *best_reasons,
-                ],
+                reason_codes=["form_field_label_value_pair", "no_recognized_field_vocabulary", *best_reasons],
                 source_page=label.page_number,
                 evidence=f"{label.text} -> {best_value.text}",
                 region_type="FORM_FIELD_VALUE",
