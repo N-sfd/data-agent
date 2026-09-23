@@ -23,6 +23,8 @@ rows: DFARS/GSAR have no master reference file, so those rows are
 
 from __future__ import annotations
 
+import re
+
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
@@ -31,9 +33,38 @@ from app.models.document_clause_reference import DocumentClauseReference
 from app.models.far_master_clause import FarMasterClause
 from app.schemas.candidate_classification import ClassifiedCandidate
 
+_ALTERNATE_RE = re.compile(r"Alternate\s+([IVXLC\d]+)", re.IGNORECASE)
+_DEVIATION_RE = re.compile(r"\(DEVIATION[^)]*\)", re.IGNORECASE)
+_EFFECTIVE_DATE_RE = re.compile(r"\(\s*([A-Za-z]{3,9}\.?\s+\d{4})\s*\)")
+
 
 def _citation_context_for(candidate: ClassifiedCandidate) -> str:
     return "incidental" if candidate.category == "FAR_REFERENCE" else "listing"
+
+
+def _extract_alternate(title: str) -> str | None:
+    match = _ALTERNATE_RE.search(title)
+    return match.group(1).upper() if match else None
+
+
+def _extract_deviation(title: str) -> str | None:
+    match = _DEVIATION_RE.search(title)
+    return match.group(0) if match else None
+
+
+def _extract_effective_date(title: str) -> str | None:
+    # First parenthetical date in the title is the BASE clause's effective
+    # date; a second one (after "Alternate N") belongs to the alternate, not
+    # captured here — matches the ground truth's single Effective Date column.
+    match = _EFFECTIVE_DATE_RE.search(title)
+    return match.group(1).strip() if match else None
+
+
+def _classification_basis(candidate: ClassifiedCandidate) -> str:
+    for reason in candidate.reason_codes:
+        if reason.startswith("classification_basis_"):
+            return reason[len("classification_basis_"):].upper()
+    return "AMBIGUOUS"
 
 
 def _enrich_far(
@@ -50,7 +81,14 @@ def _enrich_far(
 
     title_matches = True
     if title and master.clause_title:
-        title_matches = title.strip().lower() == master.clause_title.strip().lower()
+        # Compare only the title portion — the candidate's title commonly
+        # carries a trailing "(MON YYYY)"/Alternate/DEVIATION tail that the
+        # FAR Master's own clause_title never includes.
+        normalized_title = _EFFECTIVE_DATE_RE.sub("", title)
+        normalized_title = _ALTERNATE_RE.sub("", normalized_title)
+        normalized_title = _DEVIATION_RE.sub("", normalized_title)
+        normalized_title = normalized_title.strip(" .-")
+        title_matches = normalized_title.lower() == master.clause_title.strip().lower()
     date_matches = True
     if effective_date and master.effective_date:
         date_matches = (
@@ -83,24 +121,36 @@ def build_clause_references(
         )
         far_master_by_number = {row.far_number: row for row in master_rows}
 
-    rows: list[DocumentClauseReference] = []
-    seen: set[tuple[str, str]] = set()
-
-    for index, candidate in enumerate(far_candidates):
+    # Canonical clause identity per the quality-gate follow-up: Regulation +
+    # Clause Number + Alternate/Deviation + Effective Date. Repeated textual
+    # mentions of the SAME clause (e.g. the "FAR Clause / Title and Date"
+    # table header repeating per page) collapse to one V3 row; a genuinely
+    # different Alternate or a differently-dated citation is its own row.
+    # Highest-confidence occurrence wins when the same identity recurs.
+    best_by_identity: dict[tuple[str, str, str | None, str | None], ClassifiedCandidate] = {}
+    for candidate in far_candidates:
         regulation = candidate.regulation or "FAR"
-        dedupe_key = (regulation, candidate.clause_number)
-        if dedupe_key in seen:
-            continue
-        seen.add(dedupe_key)
+        title = candidate.value or ""
+        alternate = _extract_alternate(title)
+        effective_date = _extract_effective_date(title)
+        identity = (regulation, candidate.clause_number, alternate, effective_date)
+        existing = best_by_identity.get(identity)
+        if existing is None or candidate.confidence > existing.confidence:
+            best_by_identity[identity] = candidate
 
+    rows: list[DocumentClauseReference] = []
+    for index, (identity, candidate) in enumerate(best_by_identity.items()):
+        regulation, clause_number, alternate, effective_date = identity
         context = _citation_context_for(candidate)
         title = candidate.value
+        basis = _classification_basis(candidate)
+        deviation = _extract_deviation(title or "")
 
         if regulation == "FAR":
             far_master_match_status, qa_status = _enrich_far(
-                clause_number=candidate.clause_number,
+                clause_number=clause_number,
                 title=title,
-                effective_date=None,
+                effective_date=effective_date,
                 far_master_by_number=far_master_by_number,
             )
         else:
@@ -110,16 +160,30 @@ def build_clause_references(
             far_master_match_status = "not_applicable"
             qa_status = "Verified" if candidate.confidence >= 0.6 else "Needs Review"
 
+        if context == "listing" and basis not in ("EXPLICIT_LISTING", "LISTING_CONTEXT"):
+            # Belt-and-suspenders: the scanner should never emit
+            # listing_context=True without one of these bases, but a
+            # missing/AMBIGUOUS basis must never silently pass as a
+            # confirmed incorporated clause.
+            qa_status = "Needs Review"
+
         rows.append(
             DocumentClauseReference(
                 document_id=document.id,
                 row_index=index,
                 clause_family=regulation,
                 citation_context=context,
-                clause_number=candidate.clause_number,
+                clause_number=clause_number,
                 title=title or "",
+                alternate=alternate,
+                deviation=deviation,
+                effective_date=effective_date,
                 incorporation_type=(
-                    "Incorporated by Reference" if context == "listing" else None
+                    "Incorporated in Full Text"
+                    if basis == "LISTING_CONTEXT"
+                    else "Incorporated by Reference"
+                    if basis == "EXPLICIT_LISTING"
+                    else None
                 ),
                 reference_type=("Narrative reference" if context == "incidental" else None),
                 subject_context=(candidate.evidence if context == "incidental" else None),
@@ -131,6 +195,7 @@ def build_clause_references(
                     "page_number": candidate.source_page,
                     "source_text": candidate.evidence,
                     "reason_codes": candidate.reason_codes,
+                    "classification_basis": basis,
                 },
             )
         )

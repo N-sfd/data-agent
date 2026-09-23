@@ -176,6 +176,24 @@ def _slin_parent(clin: str, seen_numeric_clins: set[str]) -> tuple[str | None, s
     return None, None
 
 
+def _row_has_supporting_content(row: object, first_value: str) -> bool:
+    """A real CLIN row always has SOMETHING beyond the bare number - a
+    description, quantity, or amount. Guards against generic table
+    detection mis-splitting an unrelated narrative paragraph (e.g. an
+    address block "1800 F St NW, Washington, D.C. 20405" detected as a
+    table whose first cell happens to be the 4-digit-shaped "1800") into a
+    spurious CLIN row - confirmed false positive, not a hypothetical one."""
+
+    if isinstance(row, dict):
+        values = list(row.values())
+    elif isinstance(row, (list, tuple)):
+        values = list(row)
+    else:
+        return False
+    remaining = [str(v).strip() for v in values if v is not None and str(v).strip() != first_value]
+    return any(remaining)
+
+
 def parse_clin_rows_from_tables(
     *,
     page: DocumentPage,
@@ -189,9 +207,26 @@ def parse_clin_rows_from_tables(
         headers = [str(h) for h in (table.get("headers") or [])]
         rows = table.get("rows") or []
 
+        header_haystack = " ".join(headers).lower()
+        header_hit = any(keyword in header_haystack for keyword in _CLIN_HEADER_KEYWORDS)
+        clin_shaped_row_count = sum(
+            1
+            for row in rows
+            if (first := _row_first_value(row)) is not None
+            and _CLIN_NUMBER_PATTERN.match(first)
+        )
+        # Same eligibility gate as detect_repeated_records: a table is only
+        # CLIN-relevant if its headers say so, or at least 2 of its rows
+        # are independently CLIN-number-shaped - one coincidental 4-digit
+        # match in an otherwise unrelated table is not enough evidence.
+        if not (header_hit or clin_shaped_row_count >= 2):
+            continue
+
         for row in rows:
             first_value = _row_first_value(row)
             if not first_value or not _CLIN_NUMBER_PATTERN.match(first_value):
+                continue
+            if not _row_has_supporting_content(row, first_value):
                 continue
 
             mapped = _map_row_by_headers(headers, row)

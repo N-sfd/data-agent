@@ -66,12 +66,18 @@ def test_listing_context_reported_when_regions_supplied() -> None:
     assert citations[0].listing_context is True
 
 
-def test_listing_context_none_when_regions_not_supplied() -> None:
+def test_listing_context_false_when_no_regions_and_no_section_i_evidence() -> None:
+    # Quality-gate follow-up: an unsupported/unknown signal must never
+    # default to True (routes as if it were an incorporated clause). With
+    # neither a region signal nor a "SECTION I"-style heading anywhere in
+    # the document, the citation safely defaults to False/AMBIGUOUS, which
+    # routes identically to the old `None` (both are falsy to the router).
     page = _page(8, "52.202-1 Definitions JUN 2020")
 
     citations = scan_pages_for_clause_citations(pages=[page])
 
-    assert citations[0].listing_context is None
+    assert citations[0].listing_context is False
+    assert citations[0].classification_basis == "AMBIGUOUS"
 
 
 def test_toc_line_referencing_clause_number_is_dropped_not_far_reference() -> None:

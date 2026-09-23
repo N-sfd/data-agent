@@ -173,7 +173,10 @@ def route_clause_citations(
             citation.clause_family,
             listing_context=citation.listing_context,
         )
-        reasons = [f"clause_family_{citation.clause_family.lower()}"]
+        reasons = [
+            f"clause_family_{citation.clause_family.lower()}",
+            f"classification_basis_{citation.classification_basis.lower()}",
+        ]
         if citation.listing_context is True:
             reasons.append("listing_context_clause_citation_scanner")
             confidence = 0.88

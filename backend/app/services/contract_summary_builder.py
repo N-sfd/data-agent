@@ -25,6 +25,7 @@ does an upsert, not delete-then-insert-many.
 from __future__ import annotations
 
 import re
+from collections.abc import Callable
 from dataclasses import dataclass
 
 from sqlalchemy import select
@@ -115,27 +116,51 @@ def _from_form_candidates(
 
 # --- Narrative-pattern extraction for the 7 columns with no existing
 # label/value extraction logic. Deliberately conservative: a pattern must
-# match literal source phrasing; no inference across unrelated sentences. ---
+# match literal source phrasing; no inference across unrelated sentences.
+#
+# Quality-gate follow-up: the NORMALIZED VALUE is always the specific
+# captured token (a number, a dollar amount, a vehicle name) — never the
+# whole matched sentence. The sentence-level context is preserved
+# separately as evidence. When a pattern's captured group can't be
+# confidently normalized to a short value, the field stays blank/Needs
+# Review rather than falling back to dumping the sentence into Value. ---
+
+_WORD_TO_NUMBER = {
+    "one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6,
+    "seven": 7, "eight": 8, "nine": 9, "ten": 10, "eleven": 11, "twelve": 12,
+}
+
+
+def _to_number(token: str) -> int | None:
+    token = token.strip().lower()
+    if token.isdigit():
+        return int(token)
+    return _WORD_TO_NUMBER.get(token)
+
 
 _BASE_PERIOD_RE = re.compile(
     r"(?P<years>\w+|\d+)[- ]year base period", re.IGNORECASE
 )
 _OPTION_PERIOD_RE = re.compile(
-    r"(?P<count>one|two|three|four|five|six|\d+)\s+option period", re.IGNORECASE
+    r"(?P<count>one|two|three|four|five|six|\d+)\s+option period"
+    r"(?:s)?(?:\s+of\s+(?P<option_years>\w+|\d+)\s+years?)?",
+    re.IGNORECASE,
 )
 _MAX_DURATION_RE = re.compile(
     r"(?:extend|cumulative term).{0,60}?(?:to\s+)?(?P<years>\w+|\d+)\s+years",
     re.IGNORECASE,
 )
 _MINIMUM_GUARANTEE_RE = re.compile(
-    r"minimum\s+guarantee[^.$]{0,60}?\$[\d,]+(?:\.\d{2})?", re.IGNORECASE
+    r"minimum\s+guarante(?:e|ed)[^.$]{0,60}?(?P<amount>\$[\d,]+(?:\.\d{2})?)",
+    re.IGNORECASE,
 )
 _TASK_ORDER_RANGE_RE = re.compile(
-    r"task order[s]?[^.]{0,40}?(?:minimum|maximum|range)[^.]{0,120}?\$[\d,]+",
+    r"task order[s]?[^.]{0,40}?(?:minimum|maximum|range)[^.]{0,120}?"
+    r"(?P<amount>\$[\d,]+(?:\.\d{2})?)",
     re.IGNORECASE,
 )
 _SIZE_STANDARD_RE = re.compile(
-    r"size standard[^.]{0,80}?(\$[\d,.]+\s*(?:million|billion)?|\d[\d,]*\s*employees)",
+    r"size standard[^.]{0,80}?(?P<amount>\$[\d,.]+\s*(?:million|billion)?|\d[\d,]*\s*employees)",
     re.IGNORECASE,
 )
 
@@ -150,22 +175,35 @@ _VEHICLE_PATTERNS: tuple[re.Pattern[str], ...] = (
 )
 
 
+def _context_around(text: str, match: re.Match) -> str:
+    start = max(0, text.rfind(".", 0, match.start()) + 1)
+    end = text.find(".", match.end())
+    end = end + 1 if end != -1 else min(len(text), match.end() + 120)
+    return text[start:end].strip()
+
+
 def _search_pages(
-    pages: list[DocumentPage], pattern: re.Pattern[str]
+    pages: list[DocumentPage],
+    pattern: re.Pattern[str],
+    *,
+    value_from_match: Callable[[re.Match], str | None],
 ) -> _FieldValue | None:
     for page in pages:
         text = page.final_text or ""
         match = pattern.search(text)
-        if match:
-            snippet = match.group(0).strip()
-            start = max(0, match.start() - 40)
-            end = min(len(text), match.end() + 40)
-            return _FieldValue(
-                value=snippet,
-                page=page.page_number,
-                evidence=text[start:end].strip(),
-                confidence=0.6,
-            )
+        if not match:
+            continue
+        value = value_from_match(match)
+        if not value:
+            # Matched the surrounding phrasing but couldn't normalize a
+            # clean value from it — do not fall back to the raw sentence.
+            continue
+        return _FieldValue(
+            value=value,
+            page=page.page_number,
+            evidence=_context_around(text, match),
+            confidence=0.6,
+        )
     return None
 
 
@@ -173,32 +211,52 @@ def _extract_narrative_columns(pages: list[DocumentPage]) -> dict[str, _FieldVal
     found: dict[str, _FieldValue] = {}
 
     for pattern in _VEHICLE_PATTERNS:
-        hit = _search_pages(pages, pattern)
+        hit = _search_pages(pages, pattern, value_from_match=lambda m: m.group(0).strip())
         if hit:
             found["Contract Vehicle"] = hit
             break
 
-    base = _search_pages(pages, _BASE_PERIOD_RE)
+    def _years_value(m: re.Match) -> str | None:
+        number = _to_number(m.group("years"))
+        return f"{number} years" if number else None
+
+    base = _search_pages(pages, _BASE_PERIOD_RE, value_from_match=_years_value)
     if base:
         found["Base Period"] = base
 
-    options = _search_pages(pages, _OPTION_PERIOD_RE)
+    def _options_value(m: re.Match) -> str | None:
+        count = _to_number(m.group("count"))
+        if not count:
+            return None
+        option_years = m.groupdict().get("option_years")
+        years_number = _to_number(option_years) if option_years else None
+        if years_number:
+            return f"{count} option period(s) of {years_number} years"
+        return f"{count} option period(s)"
+
+    options = _search_pages(pages, _OPTION_PERIOD_RE, value_from_match=_options_value)
     if options:
         found["Options"] = options
 
-    max_duration = _search_pages(pages, _MAX_DURATION_RE)
+    max_duration = _search_pages(pages, _MAX_DURATION_RE, value_from_match=_years_value)
     if max_duration:
         found["Max Duration"] = max_duration
 
-    min_guarantee = _search_pages(pages, _MINIMUM_GUARANTEE_RE)
+    min_guarantee = _search_pages(
+        pages, _MINIMUM_GUARANTEE_RE, value_from_match=lambda m: m.group("amount")
+    )
     if min_guarantee:
         found["Minimum Guarantee"] = min_guarantee
 
-    task_order_range = _search_pages(pages, _TASK_ORDER_RANGE_RE)
+    task_order_range = _search_pages(
+        pages, _TASK_ORDER_RANGE_RE, value_from_match=lambda m: m.group("amount")
+    )
     if task_order_range:
         found["Task Order Range"] = task_order_range
 
-    size_standard = _search_pages(pages, _SIZE_STANDARD_RE)
+    size_standard = _search_pages(
+        pages, _SIZE_STANDARD_RE, value_from_match=lambda m: m.group("amount").strip()
+    )
     if size_standard:
         found["Size Standard"] = size_standard
 

@@ -18,7 +18,11 @@ from sqlalchemy.orm import Session
 from app.models.document import Document
 from app.models.document_page import DocumentPage
 from app.services.all_fields_builder import build_all_fields, persist_all_fields
-from app.services.attachment_builder import build_attachments, persist_attachments
+from app.services.attachment_builder import (
+    build_attachments,
+    build_attachments_from_section_j,
+    persist_attachments,
+)
 from app.services.clause_builder import build_clause_references, persist_clause_references
 from app.services.clin_builder import build_clins, persist_clins
 from app.services.contract_summary_builder import (
@@ -58,7 +62,9 @@ def run_and_persist_v3_extraction(
     clin_rows = build_clins(document=document, clin_rows=classification.clin_rows)
     funding_rows = build_funding_lines(document=document, candidates=candidates)
     performance_rows = build_performance_delivery(document=document, candidates=candidates)
-    attachment_rows = build_attachments(document=document, candidates=candidates)
+    attachment_rows = build_attachments_from_section_j(document=document, pages=pages)
+    if attachment_rows is None:
+        attachment_rows = build_attachments(document=document, candidates=candidates)
     clause_rows = build_clause_references(
         database=database, document=document, candidates=candidates
     )

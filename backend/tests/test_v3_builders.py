@@ -188,9 +188,10 @@ def test_build_clause_references_matches_far_master(db_session):
             regulation="FAR",
             clause_number="52.204-21",
             label="52.204-21",
-            value="Basic Safeguarding of Covered Contractor Information Systems",
-            evidence="52.204-21 Basic Safeguarding of Covered Contractor Information Systems",
+            value="Basic Safeguarding of Covered Contractor Information Systems (Nov 2021)",
+            evidence="52.204-21 Basic Safeguarding of Covered Contractor Information Systems (Nov 2021)",
             confidence=0.9,
+            reason_codes=["classification_basis_explicit_listing"],
         )
     ]
     rows = build_clause_references(database=db_session, document=_document(), candidates=candidates)
@@ -299,7 +300,7 @@ def test_build_contract_summary_maps_form_candidates_and_narrative():
     summary = build_contract_summary(document=_document(), pages=pages, candidates=candidates)
     assert summary.contract_number == "47QRCA25DSF07"
     assert summary.contract_vehicle is not None
-    assert "five year" in (summary.base_period or "")
+    assert summary.base_period == "5 years"
     assert "option period" in (summary.options or "")
 
 
