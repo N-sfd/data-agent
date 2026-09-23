@@ -578,7 +578,11 @@ export default function TargetResults({
       </div>
 
       {documentId && (
-        <V3Results documentId={documentId} documentName={documentName} />
+        <V3Results
+          documentId={documentId}
+          documentName={documentName}
+          onOpenSource={(request) => handleOpenSource(request)}
+        />
       )}
 
       <div className="pt-2">

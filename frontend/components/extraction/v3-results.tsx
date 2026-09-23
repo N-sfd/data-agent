@@ -3,6 +3,7 @@
 import { ChevronDown, Download } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 
+import type { SourceViewRequest } from "@/components/source-verification-panel";
 import {
   downloadV3DatasetCsv,
   downloadV3ExportXlsx,
@@ -13,7 +14,25 @@ import {
 interface V3ResultsProps {
   documentId: string;
   documentName?: string;
+  onOpenSource?: (request: SourceViewRequest) => void;
 }
+
+// Per-dataset (label, value) column keys used to build the source-
+// verification request when a row is clicked — the two most identifying
+// columns of that dataset, not every column.
+const IDENTITY_COLUMNS: Record<V3TabId, [string, string]> = {
+  contract_summary: ["contract_number", "contractor"],
+  clins: ["clin", "description"],
+  funding: ["funding_level", "funding_status"],
+  performance_delivery: ["record_type", "requirement"],
+  attachments: ["attachment_reference", "title_description"],
+  clauses: ["clause_number", "clause_title"],
+  far_references: ["far_reference", "subject_context"],
+  dfars: ["clause_number", "clause_title"],
+  all_fields: ["normalized_field", "value"],
+  qa_review: ["qa_check", "details"],
+  source_documents: ["source_document", "role"],
+};
 
 type V3TabId =
   | "contract_summary"
@@ -215,7 +234,11 @@ function QaBadge({ value }: { value: unknown }) {
   );
 }
 
-export default function V3Results({ documentId, documentName }: V3ResultsProps) {
+export default function V3Results({
+  documentId,
+  documentName,
+  onOpenSource,
+}: V3ResultsProps) {
   const [doc, setDoc] = useState<NormalizedV3Document | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -381,25 +404,61 @@ export default function V3Results({ documentId, documentName }: V3ResultsProps) 
                 </td>
               </tr>
             ) : (
-              activeRows.map((row, index) => (
-                <tr key={index} className="hover:bg-surface-soft/60">
-                  {activeColumns.map(([key]) => (
-                    <td
-                      key={key}
-                      className="max-w-xs truncate whitespace-nowrap px-3 py-2 text-foreground"
-                      title={row[key] == null ? "" : String(row[key])}
-                    >
-                      {key === "qa_status" ? (
-                        <QaBadge value={row[key]} />
-                      ) : row[key] == null ? (
-                        <span className="text-text-muted">—</span>
-                      ) : (
-                        String(row[key])
-                      )}
-                    </td>
-                  ))}
-                </tr>
-              ))
+              activeRows.map((row, index) => {
+                const sourcePage = row["source_page"];
+                const canOpenSource =
+                  Boolean(onOpenSource) &&
+                  typeof sourcePage === "number" &&
+                  sourcePage > 0;
+                const [labelKey, valueKey] = IDENTITY_COLUMNS[activeTab];
+                return (
+                  <tr
+                    key={index}
+                    onClick={
+                      canOpenSource
+                        ? () => {
+                            const evidence = row["evidence"];
+                            onOpenSource?.({
+                              id: `${activeTab}-${index}`,
+                              pageNumber: sourcePage as number,
+                              highlightText:
+                                typeof evidence === "string" ? evidence : null,
+                              label:
+                                row[labelKey] != null
+                                  ? String(row[labelKey])
+                                  : undefined,
+                              value:
+                                row[valueKey] != null
+                                  ? String(row[valueKey])
+                                  : undefined,
+                            });
+                          }
+                        : undefined
+                    }
+                    className={
+                      canOpenSource
+                        ? "cursor-pointer hover:bg-surface-soft/60"
+                        : "hover:bg-surface-soft/60"
+                    }
+                  >
+                    {activeColumns.map(([key]) => (
+                      <td
+                        key={key}
+                        className="max-w-xs truncate whitespace-nowrap px-3 py-2 text-foreground"
+                        title={row[key] == null ? "" : String(row[key])}
+                      >
+                        {key === "qa_status" ? (
+                          <QaBadge value={row[key]} />
+                        ) : row[key] == null ? (
+                          <span className="text-text-muted">—</span>
+                        ) : (
+                          String(row[key])
+                        )}
+                      </td>
+                    ))}
+                  </tr>
+                );
+              })
             )}
           </tbody>
         </table>
