@@ -110,6 +110,29 @@ function dedupeClauseTables(tables: TableTargetResult[]): TableTargetResult[] {
   return Array.from(seen.values());
 }
 
+const STATUS_LABEL: Record<NonNullable<TargetResultsProps["status"]>, string> = {
+  complete: "Extraction complete",
+  processing: "Extraction in progress",
+  failed: "Extraction failed",
+  partial: "Partial results",
+};
+
+const STATUS_TONE: Record<NonNullable<TargetResultsProps["status"]>, string> = {
+  complete: "bg-success/10 text-success",
+  processing: "bg-primary/10 text-primary",
+  failed: "bg-danger/10 text-danger",
+  partial: "bg-warning/10 text-warning",
+};
+
+function formatDuration(ms: number): string {
+  if (ms < 1000) return "<1s";
+  const totalSeconds = Math.round(ms / 1000);
+  if (totalSeconds < 60) return `${totalSeconds}s`;
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${minutes}m ${seconds}s`;
+}
+
 const METHOD_FILTER_OPTIONS = [
   { value: "all", label: "All methods" },
   { value: "native", label: "Native" },
@@ -522,57 +545,22 @@ export default function TargetResults({
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap items-end justify-between gap-3">
-        <ResultSummaryBar
-          documentName={documentName ?? "Document"}
-          status={status}
-          fieldsExtracted={workbookRows.all.length}
-          tablesExtracted={genuineTables.length + lineItemTables.length}
-          highConfidence={confidenceCounts.high}
-          mediumConfidence={confidenceCounts.medium}
-          lowConfidence={confidenceCounts.low}
-          validationWarnings={workbookRows.needs_review.length}
-          processingDurationMs={processingDurationMs}
-        />
-        <div className="relative" ref={exportMenuRef}>
-          <button
-            type="button"
-            onClick={() => setExportMenuOpen((open) => !open)}
-            className="btn-primary text-sm"
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="min-w-0">
+          <h2 className="truncate text-base font-semibold text-foreground">
+            {documentName ?? "Document"}
+          </h2>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <span
+            className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold ${STATUS_TONE[status]}`}
           >
-            <Download className="h-4 w-4" />
-            Export
-            <ChevronDown className="h-4 w-4" />
-          </button>
-          {exportMenuOpen && (
-            <div className="absolute right-0 top-full z-10 mt-1 w-52 rounded-lg border border-border bg-surface p-1 shadow-lg">
-              {/* Excel/Document Fields CSV/Line Items CSV route through
-                  authenticated backend endpoints (export.read) and 401 in
-                  any browser session without a valid credential. Audit CSV
-                  and JSON are built entirely from data already loaded in
-                  this page, so they always work. Re-add the backend-backed
-                  options once export auth is actually provisioned. */}
-              <button
-                type="button"
-                onClick={() => {
-                  exportAuditCsv();
-                  setExportMenuOpen(false);
-                }}
-                className="block w-full rounded-md px-3 py-2 text-left text-xs text-foreground hover:bg-surface-soft"
-              >
-                Extraction Audit CSV (debug)
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  exportFieldsJson();
-                  setExportMenuOpen(false);
-                }}
-                className="block w-full rounded-md px-3 py-2 text-left text-xs text-foreground hover:bg-surface-soft"
-              >
-                Download JSON
-              </button>
-            </div>
+            {STATUS_LABEL[status]}
+          </span>
+          {processingDurationMs != null && (
+            <span className="text-xs text-text-secondary">
+              in {formatDuration(processingDurationMs)}
+            </span>
           )}
         </div>
       </div>
@@ -592,13 +580,68 @@ export default function TargetResults({
           onClick={() => setShowLegacyAudit((open) => !open)}
           className="text-xs font-medium text-text-secondary underline decoration-dotted hover:text-foreground"
         >
-          {showLegacyAudit ? "Hide" : "Show"} legacy field audit (debug —
-          superseded by V3 above)
+          {showLegacyAudit ? "Hide" : "Show"} Processing Details / Legacy
+          Extraction Diagnostics
         </button>
       </div>
 
       {showLegacyAudit && (
       <>
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <ResultSummaryBar
+          documentName={documentName ?? "Document"}
+          status={status}
+          fieldsExtracted={workbookRows.all.length}
+          tablesExtracted={genuineTables.length + lineItemTables.length}
+          highConfidence={confidenceCounts.high}
+          mediumConfidence={confidenceCounts.medium}
+          lowConfidence={confidenceCounts.low}
+          validationWarnings={workbookRows.needs_review.length}
+          processingDurationMs={processingDurationMs}
+        />
+        <div className="relative" ref={exportMenuRef}>
+          <button
+            type="button"
+            onClick={() => setExportMenuOpen((open) => !open)}
+            className="btn-secondary text-sm"
+          >
+            <Download className="h-4 w-4" />
+            Legacy Export
+            <ChevronDown className="h-4 w-4" />
+          </button>
+          {exportMenuOpen && (
+            <div className="absolute right-0 top-full z-10 mt-1 w-56 rounded-lg border border-border bg-surface p-1 shadow-lg">
+              {/* Excel/Document Fields CSV/Line Items CSV route through
+                  authenticated backend endpoints (export.read) and 401 in
+                  any browser session without a valid credential. Audit CSV
+                  and JSON are built entirely from data already loaded in
+                  this page, so they always work. Re-add the backend-backed
+                  options once export auth is actually provisioned. */}
+              <button
+                type="button"
+                onClick={() => {
+                  exportAuditCsv();
+                  setExportMenuOpen(false);
+                }}
+                className="block w-full rounded-md px-3 py-2 text-left text-xs text-foreground hover:bg-surface-soft"
+              >
+                Download Legacy Extraction Audit (CSV)
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  exportFieldsJson();
+                  setExportMenuOpen(false);
+                }}
+                className="block w-full rounded-md px-3 py-2 text-left text-xs text-foreground hover:bg-surface-soft"
+              >
+                Download JSON
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
+
       <div className="flex gap-1 overflow-x-auto border-b border-border pb-px">
         {WORKBOOK_TABS.map((tab) => (
           <button

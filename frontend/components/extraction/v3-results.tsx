@@ -4,6 +4,9 @@ import { ChevronDown, Download } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import type { SourceViewRequest } from "@/components/source-verification-panel";
+import V3ContractSummaryPanel from "@/components/extraction/v3-contract-summary-panel";
+import V3DatasetTable from "@/components/extraction/v3-dataset-table";
+import { isNeedsReview } from "@/components/extraction/v3-qa-badge";
 import {
   downloadV3DatasetCsv,
   downloadV3ExportXlsx,
@@ -22,23 +25,6 @@ interface V3ResultsProps {
    * signal that the job re-ran, since `documentId` alone doesn't change. */
   refreshKey?: string | number;
 }
-
-// Per-dataset (label, value) column keys used to build the source-
-// verification request when a row is clicked — the two most identifying
-// columns of that dataset, not every column.
-const IDENTITY_COLUMNS: Record<V3TabId, [string, string]> = {
-  contract_summary: ["contract_number", "contractor"],
-  clins: ["clin", "description"],
-  funding: ["funding_level", "funding_status"],
-  performance_delivery: ["record_type", "requirement"],
-  attachments: ["attachment_reference", "title_description"],
-  clauses: ["clause_number", "clause_title"],
-  far_references: ["far_reference", "subject_context"],
-  dfars: ["clause_number", "clause_title"],
-  all_fields: ["normalized_field", "value"],
-  qa_review: ["qa_check", "details"],
-  source_documents: ["source_document", "role"],
-};
 
 type V3TabId =
   | "contract_summary"
@@ -67,28 +53,27 @@ const TABS: { id: V3TabId; label: string; dataset: string }[] = [
   { id: "source_documents", label: "Source Documents", dataset: "source-documents" },
 ];
 
+// Per-dataset (label, value) column keys used to build the source-
+// verification request when a row is clicked — the two most identifying
+// columns of that dataset, not every column.
+const IDENTITY_COLUMNS: Record<V3TabId, [string, string]> = {
+  contract_summary: ["contract_number", "contractor"],
+  clins: ["clin", "description"],
+  funding: ["funding_level", "funding_status"],
+  performance_delivery: ["record_type", "requirement"],
+  attachments: ["attachment_reference", "title_description"],
+  clauses: ["clause_number", "clause_title"],
+  far_references: ["far_reference", "subject_context"],
+  dfars: ["clause_number", "clause_title"],
+  all_fields: ["normalized_field", "value"],
+  qa_review: ["qa_check", "details"],
+  source_documents: ["source_document", "role"],
+};
+
 // column key -> display header, per dataset. Mirrors
 // backend/app/services/v3_export_builder.py's header lists exactly.
 const COLUMNS: Record<V3TabId, [string, string][]> = {
-  contract_summary: [
-    ["contract_number", "Contract Number"],
-    ["solicitation_rfp", "Solicitation / RFP"],
-    ["contract_vehicle", "Contract Vehicle"],
-    ["agency_office", "Agency / Office"],
-    ["contractor", "Contractor"],
-    ["award_date", "Award Date"],
-    ["ceiling_max_aggregate", "Ceiling / Max Aggregate"],
-    ["minimum_guarantee", "Minimum Guarantee"],
-    ["base_period", "Base Period"],
-    ["options", "Options"],
-    ["max_duration", "Max Duration"],
-    ["task_order_range", "Task Order Range"],
-    ["naics", "NAICS"],
-    ["size_standard", "Size Standard"],
-    ["source_page", "Source Page"],
-    ["evidence", "Evidence"],
-    ["qa_status", "QA Status"],
-  ],
+  contract_summary: [],
   clins: [
     ["clin", "CLIN"],
     ["option_base", "Option/Base"],
@@ -195,6 +180,21 @@ const COLUMNS: Record<V3TabId, [string, string][]> = {
   ],
 };
 
+// Export menu is deliberately a fixed, explicit list (not "every dataset")
+// per the accepted checkpoint spec — QA Review / Source Documents are
+// reviewed in-app, not exported standalone.
+const CSV_EXPORTS: { dataset: string; label: string }[] = [
+  { dataset: "all-fields", label: "All Fields CSV" },
+  { dataset: "clins", label: "CLINs CSV" },
+  { dataset: "funding", label: "Funding CSV" },
+  { dataset: "performance-delivery", label: "Performance Delivery CSV" },
+  { dataset: "attachments", label: "Attachments CSV" },
+  { dataset: "clauses", label: "Clauses CSV" },
+  { dataset: "far-references", label: "FAR References CSV" },
+  { dataset: "dfars", label: "DFARS CSV" },
+  { dataset: "contract-summary", label: "Contract Summary CSV" },
+];
+
 function rowsFor(doc: NormalizedV3Document, tab: V3TabId): Record<string, unknown>[] {
   switch (tab) {
     case "contract_summary":
@@ -224,21 +224,46 @@ function rowsFor(doc: NormalizedV3Document, tab: V3TabId): Record<string, unknow
   }
 }
 
-function QaBadge({ value }: { value: unknown }) {
-  const text = value == null ? "" : String(value);
-  const lowered = text.toLowerCase();
-  const tone = lowered.includes("verified") || lowered.includes("pass")
-    ? "bg-success/15 text-success"
-    : lowered.includes("review")
-      ? "bg-warning/15 text-warning"
-      : "bg-surface-soft text-text-secondary";
-  if (!text) return null;
-  return (
-    <span className={`inline-block rounded-full px-2 py-0.5 text-xs font-medium ${tone}`}>
-      {text}
-    </span>
-  );
-}
+// QA Review's own `qa_check` values (see backend/app/services/
+// qa_review_builder.py) map onto the dataset tab they describe, so a
+// reviewer can jump straight from a flagged rollup row to the records it's
+// about.
+const QA_CHECK_TO_TAB: Record<string, V3TabId> = {
+  "Contract Summary": "contract_summary",
+  CLINs: "clins",
+  Funding: "funding",
+  "Performance / Delivery": "performance_delivery",
+  Attachments: "attachments",
+  Clauses: "clauses",
+  "FAR References": "far_references",
+  DFARS: "dfars",
+  "All Fields": "all_fields",
+};
+
+const SUMMARY_STRIP: { tab: V3TabId; label: string }[] = [
+  { tab: "contract_summary", label: "Contract Summary" },
+  { tab: "clins", label: "CLINs" },
+  { tab: "funding", label: "Funding" },
+  { tab: "performance_delivery", label: "Performance" },
+  { tab: "attachments", label: "Attachments" },
+  { tab: "clauses", label: "Clauses" },
+  { tab: "far_references", label: "FAR References" },
+  { tab: "dfars", label: "DFARS" },
+];
+
+// Datasets whose rows carry a per-record qa_status — used both to total
+// "Needs Review" in the summary strip and to decide whether a dataset
+// table should offer the Verified/Needs Review filter at all.
+const QA_STATUS_DATASETS: V3TabId[] = [
+  "clins",
+  "funding",
+  "performance_delivery",
+  "attachments",
+  "clauses",
+  "far_references",
+  "dfars",
+  "all_fields",
+];
 
 export default function V3Results({
   documentId,
@@ -251,14 +276,15 @@ export default function V3Results({
   const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<V3TabId>("contract_summary");
   const [exportMenuOpen, setExportMenuOpen] = useState(false);
+  const [retryTick, setRetryTick] = useState(0);
   const exportMenuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     let cancelled = false;
 
     // The V3 persistence stage runs AFTER the legacy extraction batches
-    // finish (last stage in the same job, ~3-10s of its own), so the
-    // `refreshKey` change that fires this effect can land before V3 data
+    // finish (last stage in the same job, ~3-10s of its own), so a fetch
+    // triggered right when that job completes can land before V3 data
     // actually exists yet — not a genuinely-empty document, just a fetch
     // that raced the job's own last stage. A totally empty document is
     // implausible (even a sparse contract has SOME All Fields/Contract
@@ -288,12 +314,14 @@ export default function V3Results({
             setLoading(false);
             return;
           }
-        } catch (err) {
+        } catch {
           if (cancelled) return;
           if (attempt === RETRY_DELAYS_MS.length) {
-            setError(
-              err instanceof Error ? err.message : "Failed to load V3 results.",
-            );
+            // Real backend failures (404/500/network) should never leak
+            // raw status text into the UI — the Retry action is the
+            // recovery path, and the actual error is still visible in
+            // devtools/network.
+            setError("Unable to load V3 canonical results.");
             setLoading(false);
             return;
           }
@@ -306,7 +334,7 @@ export default function V3Results({
     return () => {
       cancelled = true;
     };
-  }, [documentId, refreshKey]);
+  }, [documentId, refreshKey, retryTick]);
 
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
@@ -330,36 +358,56 @@ export default function V3Results({
     return counts;
   }, [doc]);
 
+  const needsReviewTotal = useMemo(() => {
+    if (!doc) return 0;
+    let total = 0;
+    for (const tab of QA_STATUS_DATASETS) {
+      for (const row of rowsFor(doc, tab)) {
+        if (isNeedsReview(row["qa_status"])) total += 1;
+      }
+    }
+    if (doc.contract_summary && isNeedsReview(doc.contract_summary.qa_status)) {
+      total += 1;
+    }
+    return total;
+  }, [doc]);
+
   if (loading) {
     return (
       <div className="rounded-xl border border-border bg-surface-soft p-6 text-sm text-text-secondary">
-        Loading V3 canonical results...
+        Preparing canonical V3 results...
       </div>
     );
   }
 
   if (error || !doc) {
     return (
-      <div className="rounded-xl border border-border bg-surface-soft p-6 text-sm text-danger">
-        {error ?? "V3 results are not available for this document yet."}
+      <div className="space-y-3 rounded-xl border border-border bg-surface-soft p-6 text-sm">
+        <p className="text-danger">
+          {error ?? "Unable to load V3 canonical results."}
+        </p>
+        <button
+          type="button"
+          onClick={() => setRetryTick((tick) => tick + 1)}
+          className="btn-secondary text-xs"
+        >
+          Retry
+        </button>
       </div>
     );
   }
 
-  const activeColumns = COLUMNS[activeTab];
-  const activeRows = rowsFor(doc, activeTab);
-  const activeDataset = TABS.find((tab) => tab.id === activeTab)?.dataset ?? "all-fields";
-
   return (
-    <div className="space-y-3">
+    <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h3 className="text-sm font-semibold text-foreground">
-            V3 Canonical Extraction — {documentName ?? doc.document_filename}
+          <h3 className="text-base font-semibold text-foreground">
+            V3 Canonical Extraction
           </h3>
           <p className="text-xs text-text-secondary">
-            Structure-classified, source-grounded datasets — the canonical
-            business export for this contract.
+            {documentName ?? doc.document_filename} — structure-classified,
+            source-grounded datasets — the canonical business export for this
+            contract.
           </p>
         </div>
         <div className="relative" ref={exportMenuRef}>
@@ -369,7 +417,7 @@ export default function V3Results({
             className="btn-primary text-sm"
           >
             <Download className="h-4 w-4" />
-            Export V3
+            Export
             <ChevronDown className="h-4 w-4" />
           </button>
           {exportMenuOpen && (
@@ -377,26 +425,62 @@ export default function V3Results({
               <button
                 type="button"
                 onClick={() => {
-                  downloadV3DatasetCsv(documentId, activeDataset);
-                  setExportMenuOpen(false);
-                }}
-                className="block w-full rounded-md px-3 py-2 text-left text-xs text-foreground hover:bg-surface-soft"
-              >
-                {TABS.find((tab) => tab.id === activeTab)?.label} CSV
-              </button>
-              <button
-                type="button"
-                onClick={() => {
                   downloadV3ExportXlsx(documentId, `${doc.document_filename}_V3`);
                   setExportMenuOpen(false);
                 }}
-                className="block w-full rounded-md px-3 py-2 text-left text-xs text-foreground hover:bg-surface-soft"
+                className="block w-full rounded-md px-3 py-2 text-left text-xs font-semibold text-foreground hover:bg-surface-soft"
               >
-                Complete Excel (all 12 sheets)
+                Complete V3 Excel
               </button>
+              <div className="my-1 border-t border-border" />
+              {CSV_EXPORTS.map((item) => (
+                <button
+                  key={item.dataset}
+                  type="button"
+                  onClick={() => {
+                    downloadV3DatasetCsv(documentId, item.dataset);
+                    setExportMenuOpen(false);
+                  }}
+                  className="block w-full rounded-md px-3 py-2 text-left text-xs text-foreground hover:bg-surface-soft"
+                >
+                  {item.label}
+                </button>
+              ))}
             </div>
           )}
         </div>
+      </div>
+
+      <div className="grid grid-cols-2 gap-3 rounded-xl border border-border bg-surface p-4 sm:grid-cols-4 lg:grid-cols-9">
+        {SUMMARY_STRIP.map((item) => (
+          <button
+            key={item.tab}
+            type="button"
+            onClick={() => setActiveTab(item.tab)}
+            className="text-left"
+          >
+            <p className="text-lg font-medium tabular-nums text-foreground">
+              {item.tab === "contract_summary"
+                ? doc.contract_summary
+                  ? "Available"
+                  : "Not found"
+                : (tabCounts[item.tab] ?? 0)}
+            </p>
+            <p className="mt-0.5 text-xs text-text-secondary">{item.label}</p>
+          </button>
+        ))}
+        <button
+          type="button"
+          onClick={() => setActiveTab("qa_review")}
+          className="text-left"
+        >
+          <p
+            className={`text-lg font-medium tabular-nums ${needsReviewTotal > 0 ? "text-warning" : "text-foreground"}`}
+          >
+            {needsReviewTotal}
+          </p>
+          <p className="mt-0.5 text-xs text-text-secondary">Needs Review</p>
+        </button>
       </div>
 
       <div className="flex gap-1 overflow-x-auto border-b border-border pb-px">
@@ -414,96 +498,106 @@ export default function V3Results({
           >
             {tab.label}
             <span className="ml-1.5 text-xs text-text-muted">
-              ({tabCounts[tab.id] ?? 0})
+              ({tab.id === "contract_summary"
+                ? doc.contract_summary
+                  ? 1
+                  : 0
+                : (tabCounts[tab.id] ?? 0)})
             </span>
           </button>
         ))}
       </div>
 
-      <div className="overflow-x-auto rounded-xl border border-border">
-        <table className="min-w-full divide-y divide-border text-sm">
-          <thead className="bg-surface-soft">
-            <tr>
-              {activeColumns.map(([key, label]) => (
-                <th
-                  key={key}
-                  className="whitespace-nowrap px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-text-secondary"
-                >
-                  {label}
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-border">
-            {activeRows.length === 0 ? (
+      {activeTab === "contract_summary" ? (
+        doc.contract_summary ? (
+          <V3ContractSummaryPanel
+            summary={doc.contract_summary}
+            onOpenSource={onOpenSource}
+          />
+        ) : (
+          <div className="rounded-xl border border-border bg-surface-soft px-4 py-10 text-center text-sm text-text-secondary">
+            No source-supported records found.
+          </div>
+        )
+      ) : activeTab === "qa_review" ? (
+        <div className="space-y-2 rounded-xl border border-border">
+          <table className="w-full min-w-max divide-y divide-border text-sm">
+            <thead className="bg-surface-soft">
               <tr>
-                <td
-                  colSpan={activeColumns.length}
-                  className="px-3 py-6 text-center text-sm text-text-muted"
-                >
-                  No records for this dataset.
-                </td>
-              </tr>
-            ) : (
-              activeRows.map((row, index) => {
-                const sourcePage = row["source_page"];
-                const canOpenSource =
-                  Boolean(onOpenSource) &&
-                  typeof sourcePage === "number" &&
-                  sourcePage > 0;
-                const [labelKey, valueKey] = IDENTITY_COLUMNS[activeTab];
-                return (
-                  <tr
-                    key={index}
-                    onClick={
-                      canOpenSource
-                        ? () => {
-                            const evidence = row["evidence"];
-                            onOpenSource?.({
-                              id: `${activeTab}-${index}`,
-                              pageNumber: sourcePage as number,
-                              highlightText:
-                                typeof evidence === "string" ? evidence : null,
-                              label:
-                                row[labelKey] != null
-                                  ? String(row[labelKey])
-                                  : undefined,
-                              value:
-                                row[valueKey] != null
-                                  ? String(row[valueKey])
-                                  : undefined,
-                            });
-                          }
-                        : undefined
-                    }
-                    className={
-                      canOpenSource
-                        ? "cursor-pointer hover:bg-surface-soft/60"
-                        : "hover:bg-surface-soft/60"
-                    }
+                {COLUMNS.qa_review.map(([key, label]) => (
+                  <th
+                    key={key}
+                    className="whitespace-nowrap px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-text-secondary"
                   >
-                    {activeColumns.map(([key]) => (
-                      <td
-                        key={key}
-                        className="max-w-xs truncate whitespace-nowrap px-3 py-2 text-foreground"
-                        title={row[key] == null ? "" : String(row[key])}
-                      >
-                        {key === "qa_status" ? (
-                          <QaBadge value={row[key]} />
-                        ) : row[key] == null ? (
-                          <span className="text-text-muted">—</span>
-                        ) : (
-                          String(row[key])
+                    {label}
+                  </th>
+                ))}
+                <th className="px-3 py-2" />
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-border">
+              {rowsFor(doc, "qa_review").length === 0 ? (
+                <tr>
+                  <td
+                    colSpan={COLUMNS.qa_review.length + 1}
+                    className="px-3 py-8 text-center text-sm text-text-muted"
+                  >
+                    No source-supported records found.
+                  </td>
+                </tr>
+              ) : (
+                rowsFor(doc, "qa_review").map((row, index) => {
+                  const targetTab = QA_CHECK_TO_TAB[String(row["qa_check"] ?? "")];
+                  return (
+                    <tr key={index} className="align-top">
+                      {COLUMNS.qa_review.map(([key]) => (
+                        <td
+                          key={key}
+                          className="max-w-sm px-3 py-2 text-foreground"
+                        >
+                          {key === "result" ? (
+                            <span
+                              className={
+                                String(row[key] ?? "").toUpperCase().startsWith("PASS")
+                                  ? "font-medium text-success"
+                                  : "font-medium text-warning"
+                              }
+                            >
+                              {String(row[key] ?? "")}
+                            </span>
+                          ) : (
+                            String(row[key] ?? "")
+                          )}
+                        </td>
+                      ))}
+                      <td className="px-3 py-2 text-right">
+                        {targetTab && (
+                          <button
+                            type="button"
+                            onClick={() => setActiveTab(targetTab)}
+                            className="text-xs font-medium text-primary hover:underline"
+                          >
+                            View dataset →
+                          </button>
                         )}
                       </td>
-                    ))}
-                  </tr>
-                );
-              })
-            )}
-          </tbody>
-        </table>
-      </div>
+                    </tr>
+                  );
+                })
+              )}
+            </tbody>
+          </table>
+        </div>
+      ) : (
+        <V3DatasetTable
+          datasetId={activeTab}
+          columns={COLUMNS[activeTab]}
+          rows={rowsFor(doc, activeTab)}
+          qaStatusKey={QA_STATUS_DATASETS.includes(activeTab) ? "qa_status" : null}
+          identityColumns={IDENTITY_COLUMNS[activeTab]}
+          onOpenSource={onOpenSource}
+        />
+      )}
     </div>
   );
 }
