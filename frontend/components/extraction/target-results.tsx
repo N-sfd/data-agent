@@ -9,6 +9,7 @@ import {
   type FieldRow,
   type FieldRowStatus,
 } from "@/components/extraction/field-row";
+import ExtractionSummaryBar from "@/components/extraction/extraction-summary-bar";
 import FieldsWorkbookGrid from "@/components/extraction/fields-workbook-grid";
 import ResultSummaryBar from "@/components/extraction/result-summary-bar";
 import SourceVerificationDrawer from "@/components/extraction/source-verification-drawer";
@@ -587,7 +588,25 @@ export default function TargetResults({
 
       {showLegacyAudit && (
       <>
-      <div className="flex flex-wrap items-end justify-between gap-3">
+      <div>
+        <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-text-teal">
+          Extraction Results (legacy)
+        </p>
+        <p className="mt-1 text-lg font-medium text-foreground">
+          Structured data workbook
+        </p>
+        <p className="mt-1 max-w-2xl text-sm text-text-secondary">
+          Full-width spreadsheet of accepted fields, superseded by V3
+          Canonical Extraction above. Kept for debugging/compatibility.
+          Click any row to open source verification on demand.
+        </p>
+      </div>
+
+      <div className="mt-4">
+        <ExtractionSummaryBar result={result} />
+      </div>
+
+      <div className="mt-4 flex flex-wrap items-end justify-between gap-3">
         <ResultSummaryBar
           documentName={documentName ?? "Document"}
           status={status}

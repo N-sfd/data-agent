@@ -12,7 +12,6 @@ import WorkflowBreadcrumb from "@/components/workflow-breadcrumb";
 import ExtractionResultsWorkspace from "@/components/extraction/extraction-results-workspace";
 import ProcessingDetailsDrawer from "@/components/extraction/processing-details-drawer";
 import TargetResults from "@/components/extraction/target-results";
-import ExtractionSummaryBar from "@/components/extraction/extraction-summary-bar";
 import AnalysisRequest from "@/components/analysis-request";
 import UniversalResults from "@/components/universal-results";
 import type { SourceViewRequest } from "@/components/source-verification-panel";
@@ -1191,26 +1190,7 @@ function NewExtractionPageContent() {
               ref={targetResultRef}
               className="extraction-workspace-inner animate-fade-in"
             >
-              <div className="flex flex-wrap items-end justify-between gap-3">
-                <div>
-                  <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-text-teal">
-                    Extraction Results
-                  </p>
-                  <p className="mt-1 text-lg font-medium text-foreground">
-                    Structured data workbook
-                  </p>
-                  <p className="mt-1 max-w-2xl text-sm text-text-secondary">
-                    Full-width spreadsheet of accepted fields. Click any row to
-                    open source verification on demand.
-                  </p>
-                </div>
-              </div>
-
-              <div className="mt-4">
-                <ExtractionSummaryBar result={targetResult} />
-              </div>
-
-              <div className="mt-4 min-w-0">
+              <div className="min-w-0">
                 <TargetResults
                   result={targetResult}
                   targets={(schemaDiscovery?.targets ?? []).filter(

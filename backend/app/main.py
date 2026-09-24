@@ -20,7 +20,7 @@ from app.api import (
 from app.core.config import get_settings
 from app.core.observability import RequestIdMiddleware
 from app.core.security_headers import SecurityHeadersMiddleware
-from app.core.version import resolve_git_sha
+from app.core.version import get_version_metadata, resolve_git_sha
 from app.database.base import Base
 from app.database.migrate import (
     ensure_detected_target_columns,
@@ -314,12 +314,23 @@ async def root() -> dict[str, str]:
 
 @app.get("/version")
 async def version() -> dict[str, str]:
-    """Deployment fingerprint for release certification."""
+    """Deployment fingerprint for release certification.
 
+    Every field below is captured once at process startup
+    (app/core/version.py) — it describes the artifact THIS running
+    process actually loaded, not whatever the repository's current HEAD
+    happens to be. `started_at` is the tell for a stale process: if it's
+    much older than the last deploy/commit, this process is serving old
+    code and should be restarted, not trusted.
+    """
+
+    metadata = get_version_metadata()
     return {
-        "git_sha": resolve_git_sha(),
+        # Back-compat aliases for existing callers/scripts.
+        "git_sha": metadata["git_commit_sha"],
         "environment": settings.app_env,
         "service": "data-agent",
+        **metadata,
     }
 
 
