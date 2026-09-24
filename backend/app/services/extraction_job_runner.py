@@ -1,3 +1,4 @@
+import asyncio
 from datetime import datetime, timezone
 import time
 
@@ -47,6 +48,22 @@ EXTRACTION_BATCH_SIZE = 50
 EMPTY_STRUCTURES_WARNING = (
     "Processing completed, but no extractable structures were detected."
 )
+
+
+def run_in_worker_thread(job_runner, *args) -> None:
+    """BackgroundTasks entry point for the async job runners below.
+
+    The runners do long stretches of synchronous work (DB writes, regex
+    extraction over multi-MB documents). Scheduled directly as async
+    background tasks they run on the server's event loop, which — behind
+    the BaseHTTPMiddleware stack — stalls delivery of the job-start
+    response body until the job finishes: headers arrive instantly but the
+    body can lag 30s+, long enough for Render's proxy to cut it and the
+    browser to see an empty 202. As a sync callable, Starlette runs this
+    in its threadpool, so the job gets its own event loop and the request
+    loop stays free.
+    """
+    asyncio.run(job_runner(*args))
 
 
 def _chunk(items: list[str], size: int) -> list[list[str]]:

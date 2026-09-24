@@ -10,6 +10,7 @@ from app.schemas.extraction_job import (
 )
 from app.services.extraction_job_runner import (
     run_extraction_job,
+    run_in_worker_thread,
     run_processing_job,
 )
 
@@ -58,7 +59,7 @@ async def start_processing_job(
     database.commit()
     database.refresh(job)
 
-    background_tasks.add_task(run_processing_job, job.id)
+    background_tasks.add_task(run_in_worker_thread, run_processing_job, job.id)
 
     return _to_response(job)
 
@@ -85,6 +86,7 @@ async def start_extraction_job(
     database.refresh(job)
 
     background_tasks.add_task(
+        run_in_worker_thread,
         run_extraction_job,
         job.id,
         request.target_ids,

@@ -7,7 +7,10 @@ from sqlalchemy.orm import Session
 
 from app.models.document import Document
 from app.models.extraction_job import ExtractionJob
-from app.services.extraction_job_runner import run_processing_job
+from app.services.extraction_job_runner import (
+    run_in_worker_thread,
+    run_processing_job,
+)
 from app.services.ingestion_provenance import (
     empty_provenance,
     merge_provenance,
@@ -61,7 +64,7 @@ def enqueue_processing_job(
     database.add(job)
     database.commit()
     database.refresh(job)
-    background_tasks.add_task(run_processing_job, job.id)
+    background_tasks.add_task(run_in_worker_thread, run_processing_job, job.id)
     return job.id
 
 
