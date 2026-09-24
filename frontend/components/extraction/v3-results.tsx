@@ -1,12 +1,14 @@
 "use client";
 
 import { ChevronDown, Download } from "lucide-react";
+import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import type { SourceViewRequest } from "@/components/source-verification-panel";
 import V3ContractSummaryPanel from "@/components/extraction/v3-contract-summary-panel";
 import V3DatasetTable from "@/components/extraction/v3-dataset-table";
 import { isNeedsReview } from "@/components/extraction/v3-qa-badge";
+import { ApiError } from "@/lib/api";
 import {
   downloadV3DatasetCsv,
   downloadV3ExportXlsx,
@@ -274,6 +276,7 @@ export default function V3Results({
   const [doc, setDoc] = useState<NormalizedV3Document | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [authRequired, setAuthRequired] = useState(false);
   const [activeTab, setActiveTab] = useState<V3TabId>("contract_summary");
   const [exportMenuOpen, setExportMenuOpen] = useState(false);
   const [retryTick, setRetryTick] = useState(0);
@@ -305,6 +308,7 @@ export default function V3Results({
     async function load() {
       setLoading(true);
       setError(null);
+      setAuthRequired(false);
       for (let attempt = 0; attempt <= RETRY_DELAYS_MS.length; attempt += 1) {
         try {
           const data = await getNormalizedV3Document(documentId);
@@ -314,8 +318,20 @@ export default function V3Results({
             setLoading(false);
             return;
           }
-        } catch {
+        } catch (err) {
           if (cancelled) return;
+          // The V3 endpoint requires documents.view. Retrying can't fix a
+          // missing/insufficient credential, so say what's needed right away.
+          if (err instanceof ApiError && (err.status === 401 || err.status === 403)) {
+            setError(
+              err.status === 401
+                ? "Sign-in required to view V3 canonical results."
+                : "Your access key doesn't have permission to view V3 canonical results.",
+            );
+            setAuthRequired(true);
+            setLoading(false);
+            return;
+          }
           if (attempt === RETRY_DELAYS_MS.length) {
             // Real backend failures (404/500/network) should never leak
             // raw status text into the UI — the Retry action is the
@@ -386,6 +402,15 @@ export default function V3Results({
         <p className="text-danger">
           {error ?? "Unable to load V3 canonical results."}
         </p>
+        {authRequired ? (
+          <p className="text-text-secondary">
+            Add a service API key on the{" "}
+            <Link href="/api-keys" className="font-medium underline">
+              API keys
+            </Link>{" "}
+            page, then retry.
+          </p>
+        ) : null}
         <button
           type="button"
           onClick={() => setRetryTick((tick) => tick + 1)}
