@@ -1389,6 +1389,7 @@ async def get_global_audit_log(
 async def get_document(
     document_id: str,
     database: Session = Depends(get_database),
+    actor: ActorContext = Depends(require_permission("documents.view")),
 ) -> UploadedDocumentResponse:
     document = database.get(Document, document_id)
 

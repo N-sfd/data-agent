@@ -328,3 +328,79 @@ def test_rbac_enforced_csv_xlsx_line_items_require_real_auth() -> None:
                 path, headers={"Authorization": f"Bearer {raw_key}"}
             )
             assert authenticated.status_code == 200, (path, authenticated.text)
+
+
+def test_v3_endpoints_reject_unauthenticated_when_rbac_enforced() -> None:
+    """Release-blocking regression: a fully unauthenticated caller — no
+    Authorization header, no X-Actor-Id — must never reach another
+    actor's canonical V3 document data merely by knowing a document_id.
+    Confirmed via a live production probe that these routes previously
+    reached the database lookup (404 "not found") with zero credentials
+    instead of ever raising 401/403; gated the same way reviewed_export.py
+    already gates its own CSV/XLSX/JSON surface."""
+
+    upload = client.post(
+        "/api/documents/upload",
+        files={"file": (f"rc-v3-auth-{uuid4()}.pdf", _pdf(), "application/pdf")},
+    )
+    document_id = upload.json()["document_id"]
+
+    database = SessionLocal()
+    try:
+        raw_key = f"rc-v3-service-key-{uuid4()}"
+        database.add(
+            Actor(
+                id=f"actor-rc-v3-service-{uuid4()}",
+                actor_type="service",
+                display_name="RC V3 Export Service",
+                role="admin",
+                api_key_hash=hash_api_key(raw_key),
+                active=True,
+            )
+        )
+        database.commit()
+    finally:
+        database.close()
+
+    endpoints = [
+        f"/api/documents/{document_id}/v3",
+        f"/api/documents/{document_id}/v3/all-fields.csv",
+        f"/api/documents/{document_id}/v3/export.xlsx",
+        f"/api/documents/{document_id}",
+    ]
+
+    enforced = get_settings().model_copy(update={"rbac_enforced": True})
+    with patch("app.core.auth.get_settings", return_value=enforced):
+        for path in endpoints:
+            unauthenticated = client.get(path)
+            assert unauthenticated.status_code == 401, (
+                f"{path} must reject an unauthenticated caller under "
+                f"enforced RBAC, got {unauthenticated.status_code}"
+            )
+
+            authenticated = client.get(
+                path, headers={"Authorization": f"Bearer {raw_key}"}
+            )
+            assert authenticated.status_code == 200, (path, authenticated.text)
+
+
+def test_v3_endpoints_still_open_in_local_dev_default() -> None:
+    """The permission gate must not regress local/dev usability: with
+    RBAC not enforced (this app's default outside production), the
+    existing dev-fallback admin actor still resolves and these routes
+    keep working exactly as they did before this fix, unauthenticated."""
+
+    upload = client.post(
+        "/api/documents/upload",
+        files={"file": (f"rc-v3-dev-{uuid4()}.pdf", _pdf(), "application/pdf")},
+    )
+    document_id = upload.json()["document_id"]
+
+    for path in (
+        f"/api/documents/{document_id}/v3",
+        f"/api/documents/{document_id}/v3/all-fields.csv",
+        f"/api/documents/{document_id}/v3/export.xlsx",
+        f"/api/documents/{document_id}",
+    ):
+        response = client.get(path)
+        assert response.status_code == 200, (path, response.text)

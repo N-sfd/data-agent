@@ -1,10 +1,27 @@
 """Canonical V3 export API — the primary Results/export surface
-(docs/v3-implementation-plan.md). Deliberately NOT behind `require_permission`
-(unlike reviewed_export.py's endpoints): those 401 in the browser session the
-primary Results page runs in (see frontend/components/extraction/
-target-results.tsx's own comment on why it avoids them), which is exactly
-the gap this rewiring closes — the V3 pipeline runs inside the same
-unauthenticated job flow the frontend already calls successfully.
+(docs/v3-implementation-plan.md).
+
+Quality-gate finding (security, release-blocking): these routes were
+previously reachable with zero credentials — a random, unauthenticated
+caller with only a document_id got back another user's full canonical V3
+data. Gated the same way the codebase already gates comparable surfaces
+(reviewed_export.py's export.read, target_corrections.py's
+documents.view): `/v3` (the JSON the Results UI reads) requires
+`documents.view` — granted to every role including `viewer` — and the
+CSV/XLSX downloads require `export.read` (viewer does NOT have this,
+matching reviewed_export.py's own split). This mirrors the existing RBAC
+design, not a new one: `effective_rbac_enforced` is unconditionally True
+in production and permissive in local dev, exactly as it already behaves
+for every other gated endpoint in this app.
+
+Known, deliberately out-of-scope for this pass: several OTHER
+document-scoped read endpoints across the app (contract_analysis.py,
+page_extraction.py, universal_extraction.py, and the base `GET
+/api/documents/{id}`) have the same historical gap. `GET
+/api/documents/{id}` is fixed alongside this file since it was the other
+endpoint specifically verified against production; the rest need their
+own dedicated, individually-tested audit rather than a blanket change
+bundled into this fix.
 """
 
 from __future__ import annotations
@@ -13,6 +30,7 @@ from fastapi import APIRouter, HTTPException, Response
 from fastapi import Depends
 from sqlalchemy.orm import Session
 
+from app.core.auth import ActorContext, require_permission
 from app.database.dependencies import get_database
 from app.schemas.v3_document import NormalizedV3Document
 from app.services.v3_export_builder import DATASET_NAMES, build_dataset_csv, build_v3_xlsx
@@ -25,6 +43,7 @@ router = APIRouter()
 async def get_v3_document(
     document_id: str,
     database: Session = Depends(get_database),
+    actor: ActorContext = Depends(require_permission("documents.view")),
 ) -> NormalizedV3Document:
     try:
         return get_normalized_v3_document(database, document_id)
@@ -37,6 +56,7 @@ async def get_v3_dataset_csv(
     document_id: str,
     dataset: str,
     database: Session = Depends(get_database),
+    actor: ActorContext = Depends(require_permission("export.read")),
 ) -> Response:
     if dataset not in DATASET_NAMES:
         raise HTTPException(
@@ -62,6 +82,7 @@ async def get_v3_dataset_csv(
 async def get_v3_export_xlsx(
     document_id: str,
     database: Session = Depends(get_database),
+    actor: ActorContext = Depends(require_permission("export.read")),
 ) -> Response:
     try:
         doc = get_normalized_v3_document(database, document_id)
