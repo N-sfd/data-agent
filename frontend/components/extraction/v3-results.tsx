@@ -8,7 +8,7 @@ import type { SourceViewRequest } from "@/components/source-verification-panel";
 import V3ContractSummaryPanel from "@/components/extraction/v3-contract-summary-panel";
 import V3DatasetTable from "@/components/extraction/v3-dataset-table";
 import { isNeedsReview } from "@/components/extraction/v3-qa-badge";
-import { ApiError } from "@/lib/api";
+import { ApiError, COLD_START_RETRY_DELAYS_MS } from "@/lib/api";
 import {
   downloadV3DatasetCsv,
   downloadV3ExportXlsx,
@@ -305,19 +305,33 @@ export default function V3Results({
       );
     }
 
+    // Render's free tier sleeps when idle; while it wakes, its proxy answers
+    // with 502/503 (or the fetch fails outright) for 30-90s. That is a
+    // transient failure, not a missing document, so it gets the same long
+    // cold-start window the rest of the app uses. Real 4xx errors (e.g. 404)
+    // won't fix themselves by waiting and fail fast.
+    function isTransient(err: unknown): boolean {
+      return !(err instanceof ApiError) || err.status >= 500;
+    }
+
     async function load() {
       setLoading(true);
       setError(null);
       setAuthRequired(false);
-      for (let attempt = 0; attempt <= RETRY_DELAYS_MS.length; attempt += 1) {
+      let emptyAttempts = 0;
+      let failedAttempts = 0;
+      while (true) {
+        let delay: number;
         try {
           const data = await getNormalizedV3Document(documentId);
           if (cancelled) return;
-          if (!isEmpty(data) || attempt === RETRY_DELAYS_MS.length) {
+          if (!isEmpty(data) || emptyAttempts === RETRY_DELAYS_MS.length) {
             setDoc(data);
             setLoading(false);
             return;
           }
+          delay = RETRY_DELAYS_MS[emptyAttempts];
+          emptyAttempts += 1;
         } catch (err) {
           if (cancelled) return;
           // The V3 endpoint requires documents.view. Retrying can't fix a
@@ -332,7 +346,7 @@ export default function V3Results({
             setLoading(false);
             return;
           }
-          if (attempt === RETRY_DELAYS_MS.length) {
+          if (!isTransient(err) || failedAttempts === COLD_START_RETRY_DELAYS_MS.length) {
             // Real backend failures (404/500/network) should never leak
             // raw status text into the UI — the Retry action is the
             // recovery path, and the actual error is still visible in
@@ -341,8 +355,11 @@ export default function V3Results({
             setLoading(false);
             return;
           }
+          delay = COLD_START_RETRY_DELAYS_MS[failedAttempts];
+          failedAttempts += 1;
         }
-        await new Promise((resolve) => setTimeout(resolve, RETRY_DELAYS_MS[attempt]));
+        await new Promise((resolve) => setTimeout(resolve, delay));
+        if (cancelled) return;
       }
     }
 
