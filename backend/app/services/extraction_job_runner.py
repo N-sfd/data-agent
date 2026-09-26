@@ -36,6 +36,7 @@ from app.services.schema_discovery import discover_document_schema
 from app.services.target_extraction_service import extract_by_targets
 from app.services.target_result_store import persist_target_extraction_results
 from app.services.v3_orchestrator import run_and_persist_v3_extraction
+from app.staging.resolver import resolve_and_persist_profile
 from app.schemas.document_target import ScalarTargetResult, TableTargetResult
 
 settings = get_settings()
@@ -552,6 +553,24 @@ async def run_extraction_job(
                 error_category=type(exc).__name__,
                 error=str(exc),
             )
+
+        # Pin the staging profile (docs: app/staging/resolver.py) for this
+        # extraction. Runs even when V3 failed — the workbook must still
+        # render (with an explicit outcome), never go blank.
+        try:
+            staging_record = await run_in_threadpool(
+                resolve_and_persist_profile, database, document
+            )
+            log_event(
+                "staging_profile_resolved",
+                stage="v3_classification",
+                profile_id=staging_record.profile_id,
+                profile_version=staging_record.profile_version,
+                document_family=staging_record.document_family,
+            )
+        except Exception as exc:  # noqa: BLE001 - resolved lazily on first read instead
+            database.rollback()
+            warnings.append(f"Staging profile resolution failed: {exc}")
 
         history = list((job.result_json or {}).get("stage_history") or [])
         job.result_json = {

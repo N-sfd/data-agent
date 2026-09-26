@@ -28,6 +28,7 @@ from app.schemas.v3_document import (
     NormalizedV3Document,
     PerformanceDeliveryRow,
     QaReviewRow,
+    RowProvenance,
     SourceDocumentRow,
 )
 from app.services.extraction_outcome import build_extraction_outcome
@@ -45,6 +46,17 @@ def _evidence_text(evidence_json: dict | None) -> str:
     if not evidence_json:
         return ""
     return str(evidence_json.get("source_text") or "")
+
+
+def _row_provenance(
+    kind: str, row_id: int, evidence_json: dict | None, extraction_method: str | None = None
+) -> RowProvenance:
+    bbox = (evidence_json or {}).get("bbox")
+    return RowProvenance(
+        row_id=f"{kind}:{row_id}",
+        bbox=[float(v) for v in bbox] if isinstance(bbox, list) and len(bbox) == 4 else None,
+        extraction_method=extraction_method,
+    )
 
 
 def _all_fields(database: Session, document: Document) -> list[AllFieldsRow]:
@@ -66,6 +78,9 @@ def _all_fields(database: Session, document: Document) -> list[AllFieldsRow]:
             evidence=_evidence_text(row.evidence_json),
             extraction_method=row.extraction_method,
             qa_status=(row.evidence_json or {}).get("qa_status", "Needs Review"),
+            row_provenance=_row_provenance(
+                "field", row.id, row.evidence_json, row.extraction_method
+            ),
         )
         for row in rows
     ]
@@ -103,6 +118,7 @@ def _clins(database: Session, document_id: str) -> list[ClinRow]:
                 source_page=_evidence_page(row.evidence_json),
                 evidence=_evidence_text(row.evidence_json),
                 qa_status=row.qa_status,
+                row_provenance=_row_provenance("clin", row.id, row.evidence_json, "table"),
             )
         )
     return result
@@ -125,6 +141,7 @@ def _funding(database: Session, document_id: str) -> list[FundingRow]:
             source_page=_evidence_page(row.evidence_json),
             evidence=_evidence_text(row.evidence_json),
             qa_status=row.qa_status,
+            row_provenance=_row_provenance("funding", row.id, row.evidence_json),
         )
         for row in rows
     ]
@@ -149,6 +166,7 @@ def _performance_delivery(
             source_page=_evidence_page(row.evidence_json),
             evidence=_evidence_text(row.evidence_json),
             qa_status=row.qa_status,
+            row_provenance=_row_provenance("performance", row.id, row.evidence_json),
         )
         for row in rows
     ]
@@ -168,6 +186,7 @@ def _attachments(database: Session, document_id: str) -> list[AttachmentRow]:
             source_page=_evidence_page(row.evidence_json),
             evidence=_evidence_text(row.evidence_json),
             qa_status=row.qa_status,
+            row_provenance=_row_provenance("attachment", row.id, row.evidence_json),
         )
         for row in rows
     ]
@@ -194,6 +213,7 @@ def _to_clause_row(row: DocumentClauseReference) -> ClauseRow:
         source_page=_evidence_page(row.evidence_json),
         evidence=_evidence_text(row.evidence_json),
         qa_status=row.qa_status,
+        row_provenance=_row_provenance("clause", row.id, row.evidence_json),
     )
 
 
@@ -206,6 +226,7 @@ def _to_far_reference_row(row: DocumentClauseReference) -> FarReferenceRow:
         evidence=_evidence_text(row.evidence_json),
         contract_clause=row.contract_clause,
         qa_status=row.qa_status,
+        row_provenance=_row_provenance("clause", row.id, row.evidence_json),
     )
 
 
@@ -238,6 +259,7 @@ def _contract_summary(
         source_page=row.source_page,
         evidence=row.evidence,
         qa_status=row.qa_status,
+        field_provenance=dict(row.field_provenance_json or {}),
     )
 
 

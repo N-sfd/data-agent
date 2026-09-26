@@ -42,6 +42,7 @@ from app.models.document_contract_summary import DocumentContractSummary
 from app.models.document_page import DocumentPage
 from app.schemas.candidate_classification import ClassifiedCandidate
 from app.services.contract_summary_fields import FIELD_KEY_TO_V3_COLUMN
+from app.services.evidence_geometry import pdf_point_bbox
 
 V3_COLUMNS = (
     "Contract Number",
@@ -84,6 +85,8 @@ class _FieldValue:
     page: int
     evidence: str
     confidence: float
+    bbox: list[float] | None = None
+    extraction_method: str = "narrative_pattern"
 
 
 def _field_key_of(candidate: ClassifiedCandidate) -> str | None:
@@ -116,6 +119,8 @@ def _from_form_candidates(
             page=candidate.source_page,
             evidence=candidate.evidence,
             confidence=candidate.confidence,
+            bbox=pdf_point_bbox(candidate),
+            extraction_method="form_field",
         )
     return by_column
 
@@ -318,6 +323,8 @@ def build_contract_summary(
                 "page": hit.page,
                 "evidence": hit.evidence,
                 "confidence": hit.confidence,
+                "bbox": hit.bbox,
+                "extraction_method": hit.extraction_method,
             }
 
     populated = sum(1 for column in V3_COLUMNS if by_column.get(column))

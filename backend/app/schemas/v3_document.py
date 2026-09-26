@@ -6,7 +6,17 @@ need a name-mapping step to build an export.
 
 from __future__ import annotations
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
+
+
+class RowProvenance(BaseModel):
+    """Internal provenance the staging workbook adapter needs (row identity,
+    PDF-point bbox, extraction method). Excluded from serialization so the
+    /v3 JSON and the V3 CSV/XLSX exports are unchanged."""
+
+    row_id: str
+    bbox: list[float] | None = None
+    extraction_method: str | None = None
 
 
 class AllFieldsRow(BaseModel):
@@ -18,6 +28,7 @@ class AllFieldsRow(BaseModel):
     evidence: str
     extraction_method: str
     qa_status: str
+    row_provenance: RowProvenance | None = Field(default=None, exclude=True)
 
 
 class ClinRow(BaseModel):
@@ -40,6 +51,7 @@ class ClinRow(BaseModel):
     source_page: int | None = None
     evidence: str | None = None
     qa_status: str | None = None
+    row_provenance: RowProvenance | None = Field(default=None, exclude=True)
 
 
 class FundingRow(BaseModel):
@@ -52,6 +64,7 @@ class FundingRow(BaseModel):
     source_page: int | None = None
     evidence: str | None = None
     qa_status: str | None = None
+    row_provenance: RowProvenance | None = Field(default=None, exclude=True)
 
 
 class PerformanceDeliveryRow(BaseModel):
@@ -64,6 +77,7 @@ class PerformanceDeliveryRow(BaseModel):
     source_page: int | None = None
     evidence: str | None = None
     qa_status: str | None = None
+    row_provenance: RowProvenance | None = Field(default=None, exclude=True)
 
 
 class AttachmentRow(BaseModel):
@@ -73,6 +87,7 @@ class AttachmentRow(BaseModel):
     source_page: int | None = None
     evidence: str | None = None
     qa_status: str | None = None
+    row_provenance: RowProvenance | None = Field(default=None, exclude=True)
 
 
 class ClauseRow(BaseModel):
@@ -85,6 +100,7 @@ class ClauseRow(BaseModel):
     source_page: int | None = None
     evidence: str | None = None
     qa_status: str | None = None
+    row_provenance: RowProvenance | None = Field(default=None, exclude=True)
 
 
 class FarReferenceRow(BaseModel):
@@ -95,6 +111,7 @@ class FarReferenceRow(BaseModel):
     evidence: str | None = None
     contract_clause: str | None = None
     qa_status: str | None = None
+    row_provenance: RowProvenance | None = Field(default=None, exclude=True)
 
 
 class SourceDocumentRow(BaseModel):
@@ -130,6 +147,9 @@ class ContractSummaryRow(BaseModel):
     source_page: int | None = None
     evidence: str | None = None
     qa_status: str | None = None
+    # Per-column {page, evidence, confidence, bbox, extraction_method},
+    # keyed by V3 column header. Internal only — never exported.
+    field_provenance: dict[str, dict] = Field(default_factory=dict, exclude=True)
 
 
 class ExtractionOutcome(BaseModel):

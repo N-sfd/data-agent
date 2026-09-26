@@ -18,6 +18,17 @@ export interface SourceViewRequest {
   value?: string;
   confidence?: number;
   verified?: boolean;
+  /** Staging-cell provenance: text that locates the value's record on the
+   * page (form label, CLIN number) — disambiguates repeated values such
+   * as "0.00" so the cell itself is highlighted, not the first match. */
+  anchorText?: string | null;
+  /** PDF-point bbox [x0, y0, x1, y1] of the value's source region. */
+  region?: [number, number, number, number] | null;
+  /** Shown in the drawer alongside the page. */
+  evidenceText?: string | null;
+  extractionMethod?: string | null;
+  reviewStatus?: string | null;
+  reviewReasons?: string[];
 }
 
 interface SourceVerificationPanelProps {
@@ -27,8 +38,16 @@ interface SourceVerificationPanelProps {
   request: SourceViewRequest | null;
 }
 
-function renderCacheKey(page: number, highlight: string | null): string {
-  return `${page}::${highlight ?? ""}`;
+interface HighlightTarget {
+  text: string | null;
+  anchor: string | null;
+  region: [number, number, number, number] | null;
+}
+
+const NO_HIGHLIGHT: HighlightTarget = { text: null, anchor: null, region: null };
+
+function renderCacheKey(page: number, target: HighlightTarget): string {
+  return `${page}::${target.text ?? ""}::${target.anchor ?? ""}::${target.region?.join(",") ?? ""}`;
 }
 
 export default function SourceVerificationPanel({
@@ -38,7 +57,7 @@ export default function SourceVerificationPanel({
   request,
 }: SourceVerificationPanelProps) {
   const [currentPage, setCurrentPage] = useState(1);
-  const [highlightText, setHighlightText] = useState<string | null>(null);
+  const [highlight, setHighlight] = useState<HighlightTarget>(NO_HIGHLIGHT);
   const [pageRender, setPageRender] = useState<PageRender | null>(null);
   const [renderLoading, setRenderLoading] = useState(false);
   const [renderError, setRenderError] = useState("");
@@ -60,14 +79,18 @@ export default function SourceVerificationPanel({
   useEffect(() => {
     if (!request) return;
     setCurrentPage(request.pageNumber);
-    setHighlightText(request.highlightText ?? null);
+    setHighlight({
+      text: request.highlightText ?? null,
+      anchor: request.anchorText ?? null,
+      region: request.region ?? null,
+    });
   }, [request]);
 
   useEffect(() => {
     if (!documentId) return;
 
     let active = true;
-    const cacheKey = renderCacheKey(currentPage, highlightText);
+    const cacheKey = renderCacheKey(currentPage, highlight);
     const cached = renderCacheRef.current.get(cacheKey);
 
     if (cached) {
@@ -80,11 +103,11 @@ export default function SourceVerificationPanel({
       if (!cached) setRenderError("");
 
       try {
-        const render = await getPageRender(
-          documentId,
-          currentPage,
-          highlightText ?? undefined,
-        );
+        const render = await getPageRender(documentId, currentPage, {
+          highlight: highlight.text,
+          anchor: highlight.anchor,
+          region: highlight.region,
+        });
         if (!active) return;
 
         renderCacheRef.current.set(cacheKey, render);
@@ -95,7 +118,7 @@ export default function SourceVerificationPanel({
         // instant, without ever keeping more than one page mounted.
         const nextPage = currentPage + 1;
         if (nextPage <= pageCount) {
-          const nextKey = renderCacheKey(nextPage, null);
+          const nextKey = renderCacheKey(nextPage, NO_HIGHLIGHT);
           if (!renderCacheRef.current.has(nextKey)) {
             getPageRender(documentId, nextPage)
               .then((nextRender) => {
@@ -124,7 +147,7 @@ export default function SourceVerificationPanel({
     return () => {
       active = false;
     };
-  }, [documentId, currentPage, highlightText, pageCount]);
+  }, [documentId, currentPage, highlight, pageCount]);
 
   // Once a highlighted render loads, make sure the highlighted region is
   // actually within the visible scroll area (matters once zoomed in).
@@ -193,7 +216,7 @@ export default function SourceVerificationPanel({
 
   function handleJumpToResult(pageNumber: number) {
     setCurrentPage(pageNumber);
-    setHighlightText(lastQuery);
+    setHighlight({ text: lastQuery, anchor: null, region: null });
   }
 
   const selectedLabel = request?.label?.trim();

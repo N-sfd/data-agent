@@ -1286,3 +1286,16 @@ def _map_contract_type_to_family(
         return "contract", DOCUMENT_FAMILIES["contract"][0]
 
     return "unknown", "Unknown / General Document"
+
+
+def classify_document_family(text: str) -> tuple[str, str, float]:
+    """Public, deterministic (keyword-only, no AI) document-family
+    classification — (family_key, family_label, confidence)."""
+
+    return _classify_document_family(text)
+
+
+def family_for_document_type(document_type: str, confidence: float) -> tuple[str, str]:
+    """Maps an AI-classified `Document.document_type` to a family key."""
+
+    return _map_contract_type_to_family(document_type, confidence)

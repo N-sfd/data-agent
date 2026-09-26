@@ -365,6 +365,57 @@ async def get_page_blocks(
     ]
 
 
+def parse_region(region: str | None) -> "fitz.Rect | None":
+    if not region:
+        return None
+    try:
+        values = [float(part) for part in region.split(",")]
+    except ValueError:
+        return None
+    if len(values) != 4:
+        return None
+    rect = fitz.Rect(*values)
+    return None if rect.is_empty or rect.is_infinite else rect
+
+
+def _distance(a: "fitz.Rect", b: "fitz.Rect") -> tuple[int, float, float]:
+    """Sort key: any match sharing the reference's line beats every match
+    on another line (a CLIN's amount sits far right of its CLIN number,
+    while the previous row's amount can be closer in straight-line
+    distance); then nearest line; then nearest horizontally."""
+    overlap = min(a.y1, b.y1) - max(a.y0, b.y0)
+    same_line = overlap > 0.5 * min(a.height, b.height)
+    dy = abs((a.y0 + a.y1) / 2 - (b.y0 + b.y1) / 2)
+    dx = abs((a.x0 + a.x1) / 2 - (b.x0 + b.x1) / 2)
+    return (0 if same_line else 1, dy, dx)
+
+
+def locate_highlight(
+    page: "fitz.Page",
+    *,
+    highlight: str | None,
+    anchor: str | None,
+    region: "fitz.Rect | None",
+) -> "fitz.Rect | None":
+    anchor_rect: fitz.Rect | None = None
+    if anchor:
+        anchor_rects = page.search_for(anchor[:HIGHLIGHT_SEARCH_LIMIT])
+        if region is not None:
+            anchor_rects = [r for r in anchor_rects if r.intersects(region)] or anchor_rects
+        anchor_rect = anchor_rects[0] if anchor_rects else None
+    reference = region or anchor_rect
+
+    if highlight:
+        rects = page.search_for(highlight[:HIGHLIGHT_SEARCH_LIMIT])
+        if rects:
+            if reference is None:
+                return rects[0]
+            inside = [r for r in rects if region is not None and r.intersects(region)]
+            return min(inside or rects, key=lambda r: _distance(r, reference))
+
+    return reference
+
+
 @router.get(
     "/{document_id}/pages/{page_number}/render",
     response_model=PageRenderResponse,
@@ -373,8 +424,15 @@ async def render_document_page(
     document_id: str,
     page_number: int,
     highlight: str | None = None,
+    anchor: str | None = None,
+    region: str | None = None,
     database: Session = Depends(get_database),
 ) -> PageRenderResponse:
+    """`highlight` is the text to box. For staging-cell verification,
+    `anchor` (text locating the value's record, e.g. a form label or CLIN
+    number) and/or `region` ("x0,y0,x1,y1" in PDF points) disambiguate
+    which occurrence of `highlight` is meant; when `highlight` isn't found
+    at all, the region/anchor itself is boxed instead."""
     document = database.get(Document, document_id)
 
     if document is None:
@@ -443,21 +501,22 @@ async def render_document_page(
             + base64.b64encode(image_bytes).decode("ascii")
         )
 
-        highlight_box = None
-
-        if highlight:
-            rects = page.search_for(
-                highlight[:HIGHLIGHT_SEARCH_LIMIT]
-            )
-
-            if rects:
-                rect = rects[0]
-                highlight_box = {
-                    "x0": rect.x0,
-                    "y0": rect.y0,
-                    "x1": rect.x1,
-                    "y1": rect.y1,
-                }
+        highlight_rect = locate_highlight(
+            page,
+            highlight=highlight,
+            anchor=anchor,
+            region=parse_region(region),
+        )
+        highlight_box = (
+            {
+                "x0": highlight_rect.x0,
+                "y0": highlight_rect.y0,
+                "x1": highlight_rect.x1,
+                "y1": highlight_rect.y1,
+            }
+            if highlight_rect is not None
+            else None
+        )
 
         return PageRenderResponse(
             page_number=page_number,

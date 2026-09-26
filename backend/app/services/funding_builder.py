@@ -20,6 +20,7 @@ from app.models.document import Document
 from app.models.document_funding_line import DocumentFundingLine
 from app.schemas.candidate_classification import ClassifiedCandidate
 from app.services.clin_block_detector import ParsedClinRow
+from app.services.evidence_geometry import pdf_point_bbox
 
 _AMOUNT_RE = re.compile(r"\$[\d,]+(?:\.\d{2})?")
 _CLIN_RE = re.compile(r"\b\d{4,6}[A-Z]{0,2}\b")
@@ -83,6 +84,7 @@ def build_funding_lines(
                 confidence=candidate.confidence,
                 evidence_json={
                     "page_number": candidate.source_page,
+                    "bbox": pdf_point_bbox(candidate),
                     "source_text": evidence,
                     "reason_codes": candidate.reason_codes,
                 },

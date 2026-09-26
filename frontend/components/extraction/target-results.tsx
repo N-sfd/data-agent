@@ -15,8 +15,8 @@ import ResultSummaryBar from "@/components/extraction/result-summary-bar";
 import SourceVerificationDrawer from "@/components/extraction/source-verification-drawer";
 import TableResult from "@/components/extraction/table-result";
 import ValidationIssuesPanel from "@/components/extraction/validation-issues-panel";
-import V3Results from "@/components/extraction/v3-results";
 import type { SourceViewRequest } from "@/components/source-verification-panel";
+import StagingWorkbook from "@/components/staging/staging-workbook";
 import {
   isBusinessFieldRow,
   isKeyContractRow,
@@ -567,10 +567,11 @@ export default function TargetResults({
       </div>
 
       {documentId && (
-        <V3Results
+        <StagingWorkbook
           documentId={documentId}
           documentName={documentName}
           onOpenSource={(request) => handleOpenSource(request)}
+          selectedSourceId={sourceRequest?.id ?? null}
           refreshKey={`${result.scalars.length}-${result.tables.length}-${result.warnings.length}`}
         />
       )}
@@ -596,8 +597,8 @@ export default function TargetResults({
           Structured data workbook
         </p>
         <p className="mt-1 max-w-2xl text-sm text-text-secondary">
-          Full-width spreadsheet of accepted fields, superseded by V3
-          Canonical Extraction above. Kept for debugging/compatibility.
+          Full-width spreadsheet of accepted fields, superseded by the
+          Professional Staging Workbook above. Kept for debugging/compatibility.
           Click any row to open source verification on demand.
         </p>
       </div>

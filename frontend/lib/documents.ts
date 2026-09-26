@@ -334,14 +334,28 @@ export async function getContractAnalysis(
   return apiFetch(`/api/documents/${documentId}/analyze-contract`);
 }
 
+export interface PageHighlightOptions {
+  highlight?: string | null;
+  /** Text locating the record the highlight belongs to (see backend
+   * page_extraction.locate_highlight). */
+  anchor?: string | null;
+  /** PDF-point bbox of the source region. */
+  region?: [number, number, number, number] | null;
+}
+
 export async function getPageRender(
   documentId: string,
   pageNumber: number,
-  highlight?: string,
+  options: PageHighlightOptions | string = {},
 ): Promise<PageRender> {
-  const params = highlight
-    ? `?${new URLSearchParams({ highlight })}`
-    : "";
+  const { highlight, anchor, region } =
+    typeof options === "string" ? { highlight: options } : options;
+  const query = new URLSearchParams();
+  if (highlight) query.set("highlight", highlight);
+  if (anchor) query.set("anchor", anchor);
+  if (region) query.set("region", region.join(","));
+  const queryString = query.toString();
+  const params = queryString ? `?${queryString}` : "";
 
   return apiFetch(
     `/api/documents/${documentId}/pages/${pageNumber}/render${params}`,

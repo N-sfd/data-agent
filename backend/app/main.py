@@ -15,6 +15,7 @@ from app.api import (
     system,
     target_corrections,
     universal_extraction,
+    staging_workbook,
     v3_export,
 )
 from app.core.config import get_settings
@@ -53,6 +54,7 @@ from app.models import (  # noqa: F401
     document_contract_summary as document_contract_summary_model,
 )
 from app.models import document_qa_review as document_qa_review_model  # noqa: F401
+from app.models import document_staging_workbook as document_staging_workbook_model  # noqa: F401
 from app.models import far_master_clause as far_master_clause_model  # noqa: F401
 from app.models import (  # noqa: F401
     document_delivery_schedule as document_delivery_schedule_model,
@@ -216,6 +218,18 @@ app.include_router(
     v3_export.router,
     prefix="/api/documents",
     tags=["V3 Export"],
+)
+
+app.include_router(
+    staging_workbook.router,
+    prefix="/api/documents",
+    tags=["Staging Workbook"],
+)
+
+app.include_router(
+    staging_workbook.profiles_router,
+    prefix="/api/staging-profiles",
+    tags=["Staging Workbook"],
 )
 
 app.include_router(

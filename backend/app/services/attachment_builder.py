@@ -23,6 +23,7 @@ from app.models.document import Document
 from app.models.document_attachment import DocumentAttachment
 from app.models.document_page import DocumentPage
 from app.schemas.candidate_classification import ClassifiedCandidate
+from app.services.evidence_geometry import pdf_point_bbox
 
 _REFERENCE_RE = re.compile(
     r"\b(Attachment|Exhibit|Appendix)\s+\(?([A-Za-z0-9.\-]+)\)?", re.IGNORECASE
@@ -182,6 +183,7 @@ def build_attachments(
                 confidence=candidate.confidence,
                 evidence_json={
                     "page_number": candidate.source_page,
+                    "bbox": pdf_point_bbox(candidate),
                     "source_text": evidence,
                     "reason_codes": candidate.reason_codes,
                 },

@@ -57,12 +57,25 @@ def _record_counts(doc: NormalizedV3Document) -> tuple[int, int]:
 def build_extraction_outcome(
     doc: NormalizedV3Document, provenance: dict | None
 ) -> ExtractionOutcome:
+    record_count, needs_review_count = _record_counts(doc)
+    return build_outcome_from_counts(
+        record_count=record_count,
+        needs_review_count=needs_review_count,
+        provenance=provenance,
+    )
+
+
+def build_outcome_from_counts(
+    *, record_count: int, needs_review_count: int, provenance: dict | None
+) -> ExtractionOutcome:
+    """Shared by the V3 view and every staging profile: counts are of
+    business records (never QA Review / Source Documents rows)."""
+
     v3_record = (provenance or {}).get("v3_extraction") or None
     inspection = (v3_record or {}).get("source_inspection") or {}
     embedded_names = [
         str(item.get("name")) for item in inspection.get("embedded_files") or []
     ]
-    record_count, needs_review_count = _record_counts(doc)
 
     if inspection.get("kind") == SOURCE_KIND_PDF_PORTFOLIO:
         return ExtractionOutcome(

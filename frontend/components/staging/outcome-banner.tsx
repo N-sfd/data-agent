@@ -2,7 +2,7 @@
 
 import { AlertTriangle, CheckCircle2, FileQuestion, Info, XCircle } from "lucide-react";
 
-import type { V3ExtractionOutcome } from "@/lib/v3-export";
+import type { ExtractionOutcome } from "@/lib/staging-workbook";
 
 const TONE: Record<string, { box: string; icon: typeof Info }> = {
   populated: { box: "border-success/30 bg-success/10 text-success", icon: CheckCircle2 },
@@ -16,7 +16,7 @@ const TONE: Record<string, { box: string; icon: typeof Info }> = {
 /** Explains the document's extraction outcome (backend
  * app/services/extraction_outcome.py) so an empty workbook is never shown
  * without a reason. */
-export default function V3OutcomeBanner({ outcome }: { outcome: V3ExtractionOutcome }) {
+export default function OutcomeBanner({ outcome }: { outcome: ExtractionOutcome }) {
   const tone = TONE[outcome.status] ?? TONE.pending;
   const Icon = tone.icon;
   return (

@@ -68,11 +68,11 @@ describe("SourceVerificationPanel", () => {
     );
     expect(screen.getByText(/Page 1 of 3/)).toBeInTheDocument();
     expect(screen.getByText("Source Verification")).toBeInTheDocument();
-    expect(getPageRenderMock).toHaveBeenCalledWith(
-      "doc-1",
-      1,
-      "Contract Number: W912DR-26-C-0042",
-    );
+    expect(getPageRenderMock).toHaveBeenCalledWith("doc-1", 1, {
+      highlight: "Contract Number: W912DR-26-C-0042",
+      anchor: null,
+      region: null,
+    });
   });
 
   it("navigates to the correct page automatically when a different result is selected", async () => {
@@ -107,7 +107,11 @@ describe("SourceVerificationPanel", () => {
     );
     // Page 8 may also have been prefetched in the background — assert the
     // page-7 fetch happened, not that it was necessarily the last call.
-    expect(getPageRenderMock).toHaveBeenCalledWith("doc-1", 7, "Vendor Name: Acme");
+    expect(getPageRenderMock).toHaveBeenCalledWith("doc-1", 7, {
+      highlight: "Vendor Name: Acme",
+      anchor: null,
+      region: null,
+    });
   });
 
   it("shows a graceful error for an invalid/out-of-range page instead of crashing", async () => {
@@ -146,6 +150,33 @@ describe("SourceVerificationPanel", () => {
 
     await waitFor(() =>
       expect(screen.getByText(/no longer available/i)).toBeInTheDocument(),
+    );
+  });
+
+  it("passes a staging cell's anchor and region so the cell itself is highlighted", async () => {
+    getPageRenderMock.mockResolvedValue(makeRender({ page_number: 3 }));
+
+    render(
+      <SourceVerificationPanel
+        documentId="doc-1"
+        documentName="Contract.pdf"
+        pageCount={10}
+        request={request({
+          id: "clins:clin:2:contract.clin.max_amount",
+          pageNumber: 3,
+          highlightText: "0.00",
+          anchorText: "10301",
+          region: [20, 400, 580, 412],
+        })}
+      />,
+    );
+
+    await waitFor(() =>
+      expect(getPageRenderMock).toHaveBeenCalledWith("doc-1", 3, {
+        highlight: "0.00",
+        anchor: "10301",
+        region: [20, 400, 580, 412],
+      }),
     );
   });
 });

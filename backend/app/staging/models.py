@@ -1,0 +1,198 @@
+"""Universal Professional Staging Workbook model — the profile-independent
+envelope every staging profile (contract_v3, generic_business_document, and
+later invoice, purchase_order, …) is rendered through.
+
+This is a VIEW over the strongly-typed persisted domain tables (for
+contract_v3: the V3 tables), assembled at read time by a profile adapter.
+It is never persisted as generic JSON.
+
+    StagingWorkbook
+    ├── profile (id, version, dataset/column definitions, exports)
+    ├── outcome (explicit — never a blank workbook)
+    ├── datasets[]
+    │   └── records[]
+    │       └── cells{canonical_field: StagingCell}
+    │           ├── provenance (where the value came from)
+    │           ├── validation (which checks ran, which failed)
+    │           └── review_status (Verified | Needs Review | Missing)
+    ├── qa_summary
+    └── processing_metadata
+"""
+
+from __future__ import annotations
+
+from typing import Literal
+
+from pydantic import BaseModel, Field
+
+# The only three user-facing cell states. Internal statuses (rejected,
+# noise, superseded) never become staging cells at all.
+ReviewStatus = Literal["Verified", "Needs Review", "Missing"]
+
+VERIFIED: ReviewStatus = "Verified"
+NEEDS_REVIEW: ReviewStatus = "Needs Review"
+MISSING: ReviewStatus = "Missing"
+
+SourceType = Literal["pdf", "image", "html", "docx", "xlsx", "text", "system"]
+
+ValueType = Literal["text", "money", "number", "integer", "date", "code", "boolean"]
+
+Cardinality = Literal["single", "repeating"]
+
+# business: extracted business data. source/qa: always-derivable
+# inspection datasets that never count as "found something".
+DatasetRole = Literal["business", "source", "qa"]
+
+
+class SourceLocator(BaseModel):
+    """Structural address of a value inside a non-paginated or structured
+    source. Unused for PDF today; reserved so HTML (Phase C) and future
+    DOCX/XLSX sources plug in without a schema redesign."""
+
+    dom_path: str | None = None  # e.g. "html>body>main>table[2]>tbody>tr[4]>td[3]"
+    element_id: str | None = None
+    section_path: list[str] = Field(default_factory=list)  # heading trail
+    table_index: int | None = None
+    row_index: int | None = None
+    column_index: int | None = None
+    sheet_name: str | None = None
+    cell_ref: str | None = None  # e.g. "B7" for spreadsheets
+
+
+class CellProvenance(BaseModel):
+    """Where a staging value came from. Every field is optional because not
+    every source can supply every coordinate — but whatever the extraction
+    source DID provide (page, bbox, evidence, locator) is preserved."""
+
+    source_document_id: str
+    source_filename: str
+    source_type: SourceType
+    source_page: int | None = None
+    # PDF points, (x0, y0, x1, y1), top-left origin — PyMuPDF's space.
+    source_bbox: tuple[float, float, float, float] | None = None
+    evidence_text: str | None = None
+    extraction_method: str | None = None
+    source_locator: SourceLocator | None = None
+    # Stable id of the region/record this value was read from, e.g.
+    # "clin:3" — lets the UI group cells that share one source region.
+    source_region_id: str | None = None
+    # Source-verification hints: text that locates the region on the page
+    # (a form label, a CLIN number) and the exact text of this cell within
+    # it. Used to highlight the cell rather than the whole record.
+    anchor_text: str | None = None
+    highlight_text: str | None = None
+
+
+class ValidationCheck(BaseModel):
+    check: str
+    passed: bool
+    message: str | None = None
+
+
+class CellValidation(BaseModel):
+    status: Literal["passed", "failed", "not_checked"]
+    checks: list[ValidationCheck] = Field(default_factory=list)
+
+
+class StagingCell(BaseModel):
+    canonical_field: str
+    display_label: str
+    value: str | float | int | bool | None = None
+    raw_value: str | None = None
+    value_type: ValueType = "text"
+    provenance: CellProvenance | None = None
+    validation: CellValidation = Field(
+        default_factory=lambda: CellValidation(status="not_checked")
+    )
+    # None for an optional, legitimately-empty column of a repeating
+    # record (e.g. a CLIN with no FOB) — that is not "Missing".
+    review_status: ReviewStatus | None = None
+    review_reasons: list[str] = Field(default_factory=list)
+
+
+class StagingRecord(BaseModel):
+    record_id: str
+    cells: dict[str, StagingCell]
+    record_status: ReviewStatus | None = None
+    # Optional cross-link, e.g. a QA Review row pointing at the dataset it
+    # summarizes. Profile-provided, so the UI needs no per-profile mapping.
+    links_to_dataset: str | None = None
+
+
+class StagingColumn(BaseModel):
+    canonical_field: str
+    key: str
+    display_label: str
+    value_type: ValueType = "text"
+    expected: bool = False
+
+
+class StagingDataset(BaseModel):
+    dataset_id: str
+    display_name: str
+    cardinality: Cardinality
+    role: DatasetRole = "business"
+    description: str | None = None
+    columns: list[StagingColumn]
+    records: list[StagingRecord]
+    # Canonical fields that best identify a record (used for row labels).
+    identity_fields: list[str] = Field(default_factory=list)
+
+
+class ExportCapability(BaseModel):
+    capability_id: str  # "professional_excel" | "dataset_csv" | later "oracle_*"
+    label: str
+    format: Literal["xlsx", "csv", "json", "xml"]
+    # API path. Profiles declare it with a "{document_id}" placeholder; the
+    # workbook served to the client has it substituted.
+    href: str
+    # Set for exports of a single dataset.
+    dataset_id: str | None = None
+
+
+class ProfileDescriptor(BaseModel):
+    profile_id: str
+    profile_version: int
+    display_name: str
+    description: str
+    document_families: list[str]
+    export_capabilities: list[ExportCapability]
+    # Destinations this profile's canonical fields can later be mapped to.
+    # Declared now, implemented in Phase E.
+    oracle_mapping_capability: Literal["planned", "available", "none"] = "none"
+
+
+class ExtractionOutcomeModel(BaseModel):
+    status: str
+    title: str
+    message: str
+    details: list[str] = Field(default_factory=list)
+    record_count: int = 0
+    needs_review_count: int = 0
+
+
+class QaSummary(BaseModel):
+    verified: int = 0
+    needs_review: int = 0
+    missing: int = 0
+    record_count: int = 0
+
+
+class ProcessingMetadata(BaseModel):
+    document_family: str | None = None
+    document_family_label: str | None = None
+    resolution_reasons: list[str] = Field(default_factory=list)
+    resolved_at: str | None = None
+    page_count: int | None = None
+    source_type: SourceType | None = None
+    transcription_available: bool = False
+
+
+class StagingWorkbook(BaseModel):
+    document_id: str
+    document_filename: str
+    profile: ProfileDescriptor
+    outcome: ExtractionOutcomeModel
+    datasets: list[StagingDataset]
+    qa_summary: QaSummary
+    processing_metadata: ProcessingMetadata

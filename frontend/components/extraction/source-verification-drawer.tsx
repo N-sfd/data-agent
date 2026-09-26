@@ -104,6 +104,39 @@ export default function SourceVerificationDrawer({
             request={request}
           />
 
+          {!activeRow && request && (request.evidenceText || request.reviewStatus) && (
+            <div className="space-y-3 border-t border-border px-5 py-4 text-sm">
+              {request.reviewStatus && (
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-wide text-text-muted">
+                    Review status
+                  </p>
+                  <p className="mt-1 font-medium text-foreground">{request.reviewStatus}</p>
+                  {request.reviewReasons && request.reviewReasons.length > 0 && (
+                    <ul className="mt-1 list-disc space-y-0.5 pl-5 text-xs text-text-secondary">
+                      {request.reviewReasons.map((reason) => (
+                        <li key={reason}>{reason}</li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              )}
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-wide text-text-muted">
+                  Source evidence
+                </p>
+                <p className="mt-1 whitespace-pre-wrap text-text-secondary">
+                  {request.evidenceText || "—"}
+                </p>
+              </div>
+              {request.extractionMethod && (
+                <p className="text-xs text-text-muted">
+                  Extraction method: {request.extractionMethod}
+                </p>
+              )}
+            </div>
+          )}
+
           {activeRow && (
             <div className="space-y-3 border-t border-border px-5 py-4 text-sm">
               <div>
