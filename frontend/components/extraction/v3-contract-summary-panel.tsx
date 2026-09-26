@@ -94,7 +94,11 @@ export default function V3ContractSummaryPanel({
                   <div key={key}>
                     <dt className="text-xs text-text-secondary">{label}</dt>
                     {value == null ? (
-                      <dd className="text-sm text-text-muted">Not found</dd>
+                      <dd>
+                        <span className="inline-block rounded-full bg-surface-soft px-2 py-0.5 text-xs font-medium text-text-muted">
+                          Missing
+                        </span>
+                      </dd>
                     ) : clickable ? (
                       <dd>
                         <button

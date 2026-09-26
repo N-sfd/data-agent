@@ -132,6 +132,17 @@ class ContractSummaryRow(BaseModel):
     qa_status: str | None = None
 
 
+class ExtractionOutcome(BaseModel):
+    """See app/services/extraction_outcome.py for the status vocabulary."""
+
+    status: str
+    title: str
+    message: str
+    details: list[str] = []
+    record_count: int = 0
+    needs_review_count: int = 0
+
+
 class NormalizedV3Document(BaseModel):
     document_id: str
     document_filename: str
@@ -146,3 +157,6 @@ class NormalizedV3Document(BaseModel):
     source_documents: list[SourceDocumentRow]
     qa_review: list[QaReviewRow]
     contract_summary: ContractSummaryRow | None
+    # Filled in by v3_reader after the datasets are assembled; None only
+    # while that assembly is in progress.
+    extraction_outcome: ExtractionOutcome | None = None

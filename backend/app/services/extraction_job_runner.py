@@ -498,6 +498,9 @@ async def run_extraction_job(
         # isolated — a failure here is logged and surfaced in the job's
         # warnings, but never fails the job or drops the kv_* results above.
         v3_started = time.perf_counter()
+        # Read back by extraction_outcome.py so Results can tell "V3 ran and
+        # found nothing" apart from "V3 failed" or "V3 never ran".
+        v3_record: dict = {"status": "failed", "error": None, "source_inspection": None}
         _append_stage(job, "v3_classification")
         database.commit()
         try:
@@ -516,6 +519,15 @@ async def run_extraction_job(
             )
             stage_timings["v3_ms"] = int((time.perf_counter() - v3_started) * 1000)
             warnings.extend(v3_summary.warnings)
+            v3_record = {
+                "status": "completed",
+                "error": None,
+                "source_inspection": (
+                    v3_summary.source_inspection.to_dict()
+                    if v3_summary.source_inspection is not None
+                    else None
+                ),
+            }
             log_event(
                 "v3_extraction_complete",
                 stage="v3_classification",
@@ -532,6 +544,7 @@ async def run_extraction_job(
             database.rollback()
             warning = f"V3 canonical extraction failed: {exc}"
             warnings.append(warning)
+            v3_record["error"] = type(exc).__name__
             log_event(
                 "v3_extraction_failed",
                 stage="v3_classification",
@@ -564,6 +577,7 @@ async def run_extraction_job(
                 "scalars_extracted": len(scalars),
                 "tables_extracted": len(tables),
                 "stage_timings_ms": stage_timings,
+                "v3_extraction": v3_record,
             },
         )
 

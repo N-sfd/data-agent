@@ -127,6 +127,24 @@ export interface V3ContractSummaryRow {
   qa_status: string | null;
 }
 
+/** Mirrors backend ExtractionOutcome (app/services/extraction_outcome.py). */
+export type V3OutcomeStatus =
+  | "populated"
+  | "needs_review"
+  | "no_supported_fields"
+  | "special_source"
+  | "failed"
+  | "pending";
+
+export interface V3ExtractionOutcome {
+  status: V3OutcomeStatus;
+  title: string;
+  message: string;
+  details: string[];
+  record_count: number;
+  needs_review_count: number;
+}
+
 export interface NormalizedV3Document {
   document_id: string;
   document_filename: string;
@@ -141,6 +159,8 @@ export interface NormalizedV3Document {
   source_documents: V3SourceDocumentRow[];
   qa_review: V3QaReviewRow[];
   contract_summary: V3ContractSummaryRow | null;
+  /** Absent only from backends that predate extraction outcomes. */
+  extraction_outcome?: V3ExtractionOutcome | null;
 }
 
 export async function getNormalizedV3Document(

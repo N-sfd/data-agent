@@ -39,6 +39,7 @@ from app.services.performance_delivery_builder import (
     persist_performance_delivery,
 )
 from app.services.qa_review_builder import build_qa_review, persist_qa_review
+from app.services.source_inspection import SourceInspection
 from app.services.v3_pipeline import classify_document
 
 
@@ -54,6 +55,7 @@ class V3ExtractionSummary:
     pages_classified: int
     pages_with_geometry: int
     warnings: list[str] = field(default_factory=list)
+    source_inspection: SourceInspection | None = None
 
 
 def run_and_persist_v3_extraction(
@@ -124,4 +126,5 @@ def run_and_persist_v3_extraction(
         pages_classified=classification.pages_classified,
         pages_with_geometry=classification.pages_with_geometry,
         warnings=classification.warnings,
+        source_inspection=classification.source_inspection,
     )

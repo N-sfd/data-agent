@@ -41,9 +41,9 @@ describe("V3ContractSummaryPanel", () => {
     expect(screen.getByText("$2,500.00")).toBeInTheDocument();
   });
 
-  it("shows 'Not found' for empty fields rather than fabricating a value", () => {
+  it("shows 'Missing' for empty fields rather than fabricating a value", () => {
     render(<V3ContractSummaryPanel summary={summary()} />);
-    const notFound = screen.getAllByText("Not found");
+    const notFound = screen.getAllByText("Missing");
     // agency_office, task_order_range, naics are all null in the fixture.
     expect(notFound.length).toBe(3);
   });
@@ -63,7 +63,7 @@ describe("V3ContractSummaryPanel", () => {
 
   it("does not render empty fields as clickable", () => {
     render(<V3ContractSummaryPanel summary={summary()} onOpenSource={vi.fn()} />);
-    const notFoundEls = screen.getAllByText("Not found");
+    const notFoundEls = screen.getAllByText("Missing");
     for (const el of notFoundEls) {
       expect(el.closest("button")).toBeNull();
     }

@@ -43,6 +43,7 @@ from app.services.clin_block_detector import ParsedClinRow, parse_clin_rows
 from app.services.document_storage import DocumentStorageError, ensure_local_copy
 from app.services.form_cell_associator import associate_form_cells
 from app.services.line_model import LogicalLine, best_available_lines
+from app.services.source_inspection import SourceInspection, inspect_pdf
 from app.services.structure_classifier import build_document_context, classify_page_regions
 
 
@@ -54,6 +55,9 @@ class V3ClassificationResult:
     pages_classified: int
     pages_with_geometry: int
     warnings: list[str] = field(default_factory=list)
+    # None when the source file couldn't be opened as a PDF (HTML/DOCX/…
+    # or storage unavailable) — "not inspected", not "standard".
+    source_inspection: SourceInspection | None = None
 
 
 def _open_source_pdf(document: Document):
@@ -103,6 +107,8 @@ def classify_document(
             "persisted OCR line layer / text-only classification for "
             "native-text pages on this document."
         )
+
+    source_inspection = inspect_pdf(fitz_doc) if fitz_doc is not None else None
 
     lines_by_page: dict[int, list[LogicalLine]] = {}
     pages_with_geometry = 0
@@ -181,4 +187,5 @@ def classify_document(
         pages_classified=len(pages),
         pages_with_geometry=pages_with_geometry,
         warnings=warnings,
+        source_inspection=source_inspection,
     )

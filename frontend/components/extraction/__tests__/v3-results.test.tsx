@@ -94,3 +94,110 @@ describe("V3Results transient failures", () => {
     expect(getDoc).toHaveBeenCalledTimes(1);
   });
 });
+
+function emptyDoc(
+  outcome: Awaited<ReturnType<typeof getNormalizedV3Document>>["extraction_outcome"],
+) {
+  return {
+    document_id: "doc-1",
+    document_filename: "Contract.pdf",
+    all_fields: [],
+    clins: [],
+    funding: [],
+    performance_delivery: [],
+    attachments: [],
+    clauses: [],
+    far_references: [],
+    dfars: [],
+    source_documents: [
+      {
+        source_document: "SF1442 Award.pdf",
+        role: "Embedded in Contract.pdf",
+        pages: 0,
+        extraction_status: "Not extracted (embedded file)",
+      },
+    ],
+    qa_review: [],
+    contract_summary: null,
+    extraction_outcome: outcome,
+  };
+}
+
+describe("V3Results extraction outcomes", () => {
+  beforeEach(() => {
+    getDoc.mockReset();
+  });
+
+  it("explains a PDF Portfolio instead of showing an empty workbook, without retrying", async () => {
+    getDoc.mockResolvedValue(
+      emptyDoc({
+        status: "special_source",
+        title: "PDF Portfolio: embedded documents need extraction",
+        message: "This file is an Adobe PDF Portfolio.",
+        details: ["SF1442 Award.pdf"],
+        record_count: 0,
+        needs_review_count: 0,
+      }),
+    );
+
+    render(<V3Results documentId="doc-1" />);
+
+    expect(
+      await screen.findByText("PDF Portfolio: embedded documents need extraction"),
+    ).toBeInTheDocument();
+    // Opens on Source Documents, which lists the embedded file.
+    expect(screen.getByText("Not extracted (embedded file)")).toBeInTheDocument();
+    expect(getDoc).toHaveBeenCalledTimes(1);
+  });
+
+  it("states that no supported fields were found rather than rendering blank", async () => {
+    getDoc.mockResolvedValue(
+      emptyDoc({
+        status: "no_supported_fields",
+        title: "No supported business values identified",
+        message: "The document was processed, but no fields were identified.",
+        details: [],
+        record_count: 0,
+        needs_review_count: 0,
+      }),
+    );
+
+    render(<V3Results documentId="doc-1" />);
+
+    expect(
+      await screen.findByText("No supported business values identified"),
+    ).toBeInTheDocument();
+    expect(getDoc).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not show a banner for a fully populated result", async () => {
+    getDoc.mockResolvedValue({
+      ...emptyDoc({
+        status: "populated",
+        title: "Extraction complete",
+        message: "1 source-supported record(s) staged.",
+        details: [],
+        record_count: 1,
+        needs_review_count: 0,
+      }),
+      all_fields: [
+        {
+          category: "General",
+          normalized_field: "UEID",
+          value: "LLKXZRFEQMR3",
+          source_file: "Contract.pdf",
+          source_page: 1,
+          evidence: "UEI: LLKXZRFEQMR3",
+          extraction_method: "deterministic",
+          qa_status: "Verified",
+        },
+      ],
+    });
+
+    render(<V3Results documentId="doc-1" />);
+
+    // Opens on the first dataset that has records.
+    expect(await screen.findByText("LLKXZRFEQMR3")).toBeInTheDocument();
+    expect(screen.queryByRole("status")).toBeNull();
+  });
+});

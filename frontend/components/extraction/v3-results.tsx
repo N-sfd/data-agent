@@ -7,6 +7,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { SourceViewRequest } from "@/components/source-verification-panel";
 import V3ContractSummaryPanel from "@/components/extraction/v3-contract-summary-panel";
 import V3DatasetTable from "@/components/extraction/v3-dataset-table";
+import V3OutcomeBanner from "@/components/extraction/v3-outcome-banner";
 import { isNeedsReview } from "@/components/extraction/v3-qa-badge";
 import { ApiError, COLD_START_RETRY_DELAYS_MS } from "@/lib/api";
 import {
@@ -198,6 +199,13 @@ const CSV_EXPORTS: { dataset: string; label: string }[] = [
 ];
 
 function rowsFor(doc: NormalizedV3Document, tab: V3TabId): Record<string, unknown>[] {
+  return datasetRows(doc, tab) ?? [];
+}
+
+function datasetRows(
+  doc: NormalizedV3Document,
+  tab: V3TabId,
+): Record<string, unknown>[] | undefined {
   switch (tab) {
     case "contract_summary":
       return doc.contract_summary ? [doc.contract_summary as unknown as Record<string, unknown>] : [];
@@ -241,6 +249,19 @@ const QA_CHECK_TO_TAB: Record<string, V3TabId> = {
   DFARS: "dfars",
   "All Fields": "all_fields",
 };
+
+// Tab to open first: the first dataset with records, or — when nothing was
+// staged — Source Documents, which always explains what was read.
+function initialTab(doc: NormalizedV3Document): V3TabId {
+  if (doc.contract_summary) return "contract_summary";
+  const withRecords = TABS.find(
+    (tab) =>
+      tab.id !== "qa_review" &&
+      tab.id !== "source_documents" &&
+      rowsFor(doc, tab.id).length > 0,
+  );
+  return withRecords?.id ?? "source_documents";
+}
 
 const SUMMARY_STRIP: { tab: V3TabId; label: string }[] = [
   { tab: "contract_summary", label: "Contract Summary" },
@@ -288,19 +309,21 @@ export default function V3Results({
     // The V3 persistence stage runs AFTER the legacy extraction batches
     // finish (last stage in the same job, ~3-10s of its own), so a fetch
     // triggered right when that job completes can land before V3 data
-    // actually exists yet — not a genuinely-empty document, just a fetch
-    // that raced the job's own last stage. A totally empty document is
-    // implausible (even a sparse contract has SOME All Fields/Contract
-    // Summary data), so retry a few times with a delay rather than
-    // showing a false "no data" state.
+    // actually exists yet. The backend reports that as outcome "pending";
+    // retry a few times before showing the pending explanation. An empty
+    // document with any other outcome is a real, explained result.
     const RETRY_DELAYS_MS = [2500, 4000, 6000];
 
-    function isEmpty(data: NormalizedV3Document): boolean {
+    function isPending(data: NormalizedV3Document): boolean {
+      if (data.extraction_outcome) {
+        return data.extraction_outcome.status === "pending";
+      }
+      // Backends without outcomes: fall back to the old emptiness check.
       return (
-        data.all_fields.length === 0 &&
-        data.clins.length === 0 &&
-        data.clauses.length === 0 &&
-        data.attachments.length === 0 &&
+        (data.all_fields ?? []).length === 0 &&
+        (data.clins ?? []).length === 0 &&
+        (data.clauses ?? []).length === 0 &&
+        (data.attachments ?? []).length === 0 &&
         !data.contract_summary
       );
     }
@@ -325,8 +348,9 @@ export default function V3Results({
         try {
           const data = await getNormalizedV3Document(documentId);
           if (cancelled) return;
-          if (!isEmpty(data) || emptyAttempts === RETRY_DELAYS_MS.length) {
+          if (!isPending(data) || emptyAttempts === RETRY_DELAYS_MS.length) {
             setDoc(data);
+            setActiveTab(initialTab(data));
             setLoading(false);
             return;
           }
@@ -408,7 +432,7 @@ export default function V3Results({
   if (loading) {
     return (
       <div className="rounded-xl border border-border bg-surface-soft p-6 text-sm text-text-secondary">
-        Preparing canonical V3 results...
+        Preparing staging workbook...
       </div>
     );
   }
@@ -444,12 +468,11 @@ export default function V3Results({
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h3 className="text-base font-semibold text-foreground">
-            V3 Canonical Extraction
+            Staging Workbook
           </h3>
           <p className="text-xs text-text-secondary">
-            {documentName ?? doc.document_filename} — structure-classified,
-            source-grounded datasets — the canonical business export for this
-            contract.
+            {documentName ?? doc.document_filename} — Contract profile (V3):
+            source-grounded datasets. Select a value to see its source evidence.
           </p>
         </div>
         <div className="relative" ref={exportMenuRef}>
@@ -493,6 +516,10 @@ export default function V3Results({
         </div>
       </div>
 
+      {doc.extraction_outcome && doc.extraction_outcome.status !== "populated" && (
+        <V3OutcomeBanner outcome={doc.extraction_outcome} />
+      )}
+
       <div className="grid grid-cols-2 gap-3 rounded-xl border border-border bg-surface p-4 sm:grid-cols-4 lg:grid-cols-9">
         {SUMMARY_STRIP.map((item) => (
           <button
@@ -505,7 +532,7 @@ export default function V3Results({
               {item.tab === "contract_summary"
                 ? doc.contract_summary
                   ? "Available"
-                  : "Not found"
+                  : "Missing"
                 : (tabCounts[item.tab] ?? 0)}
             </p>
             <p className="mt-0.5 text-xs text-text-secondary">{item.label}</p>

@@ -30,6 +30,7 @@ from app.schemas.v3_document import (
     QaReviewRow,
     SourceDocumentRow,
 )
+from app.services.extraction_outcome import build_extraction_outcome
 from app.services.source_documents_builder import build_source_documents
 
 
@@ -256,7 +257,7 @@ def _qa_review(database: Session, document_id: str) -> list[QaReviewRow]:
 
 def _source_documents(database: Session, document: Document) -> list[SourceDocumentRow]:
     rows = build_source_documents(database=database, document=document)
-    return [
+    result = [
         SourceDocumentRow(
             source_document=row.source_document,
             role=row.role,
@@ -265,6 +266,20 @@ def _source_documents(database: Session, document: Document) -> list[SourceDocum
         )
         for row in rows
     ]
+    # Files embedded inside this PDF (e.g. a PDF Portfolio's real documents)
+    # are part of the source set even though nothing has extracted them yet.
+    v3_record = (document.ingestion_provenance or {}).get("v3_extraction") or {}
+    inspection = v3_record.get("source_inspection") or {}
+    for item in inspection.get("embedded_files") or []:
+        result.append(
+            SourceDocumentRow(
+                source_document=str(item.get("name")),
+                role=f"Embedded in {document.original_filename}",
+                pages=0,
+                extraction_status="Not extracted (embedded file)",
+            )
+        )
+    return result
 
 
 def get_normalized_v3_document(
@@ -287,7 +302,7 @@ def get_normalized_v3_document(
         if row.citation_context == "incidental"
     ]
 
-    return NormalizedV3Document(
+    normalized = NormalizedV3Document(
         document_id=document.id,
         document_filename=document.original_filename,
         all_fields=_all_fields(database, document),
@@ -302,3 +317,7 @@ def get_normalized_v3_document(
         qa_review=_qa_review(database, document_id),
         contract_summary=_contract_summary(database, document_id, document),
     )
+    normalized.extraction_outcome = build_extraction_outcome(
+        normalized, document.ingestion_provenance
+    )
+    return normalized
