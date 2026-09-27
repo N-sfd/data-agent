@@ -36,6 +36,7 @@ from app.services.schema_discovery import discover_document_schema
 from app.services.target_extraction_service import extract_by_targets
 from app.services.target_result_store import persist_target_extraction_results
 from app.services.v3_orchestrator import run_and_persist_v3_extraction
+from app.source_structure.service import build_and_persist_source_structure
 from app.staging.resolver import resolve_and_persist_profile
 from app.schemas.document_target import ScalarTargetResult, TableTargetResult
 
@@ -553,6 +554,17 @@ async def run_extraction_job(
                 error_category=type(exc).__name__,
                 error=str(exc),
             )
+
+        # Schema-neutral structural candidates (app/source_structure/) for
+        # the staging profiles. Additive like V3: a failure is a warning.
+        try:
+            structure = await run_in_threadpool(
+                build_and_persist_source_structure, database, document
+            )
+            stage_timings["source_structure_ms"] = structure.stats.duration_ms
+        except Exception as exc:  # noqa: BLE001 - rebuilt lazily on first read instead
+            database.rollback()
+            warnings.append(f"Source structure extraction failed: {exc}")
 
         # Pin the staging profile (docs: app/staging/resolver.py) for this
         # extraction. Runs even when V3 failed — the workbook must still

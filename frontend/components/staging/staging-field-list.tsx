@@ -5,6 +5,7 @@ import {
   ReviewStatusBadge,
   cellSourceRequest,
   formatCellValue,
+  locationLabel,
 } from "@/components/staging/review-status";
 import type { StagingDataset } from "@/lib/staging-workbook";
 
@@ -29,7 +30,7 @@ export default function StagingFieldList({
       <table className="w-full min-w-[640px] divide-y divide-border text-sm">
         <thead className="bg-surface-soft">
           <tr>
-            {["Field", "Value", "Page", "Method", "Status"].map((label) => (
+            {["Field", "Value", "Location", "Method", "Status"].map((label) => (
               <th
                 key={label}
                 className="whitespace-nowrap px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-text-secondary"
@@ -74,7 +75,7 @@ export default function StagingFieldList({
                   )}
                 </td>
                 <td className="whitespace-nowrap px-3 py-2 tabular-nums text-text-secondary">
-                  {cell.provenance?.source_page ?? "—"}
+                  {locationLabel(cell)}
                 </td>
                 <td className="whitespace-nowrap px-3 py-2 text-xs text-text-secondary">
                   {cell.provenance?.extraction_method ?? "—"}

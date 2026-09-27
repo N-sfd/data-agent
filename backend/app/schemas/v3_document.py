@@ -16,6 +16,8 @@ class RowProvenance(BaseModel):
 
     row_id: str
     bbox: list[float] | None = None
+    # "pdf_points" or "ocr_pixels" (see app/services/evidence_geometry.py).
+    bbox_space: str = "pdf_points"
     extraction_method: str | None = None
 
 

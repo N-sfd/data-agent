@@ -256,7 +256,8 @@ export default function StagingWorkbook({
 
       {outcome.status !== "populated" && <OutcomeBanner outcome={outcome} />}
 
-      <div className="flex flex-wrap gap-x-6 gap-y-3 rounded-xl border border-border bg-surface p-4">
+      <div className="flex flex-col gap-4 rounded-xl border border-border bg-surface p-4 xl:flex-row xl:items-start">
+        <div className="flex flex-1 flex-wrap gap-x-6 gap-y-3">
         {businessDatasets.map((d) => (
           <button
             key={d.dataset_id}
@@ -271,7 +272,11 @@ export default function StagingWorkbook({
             <p className="mt-0.5 text-xs text-text-secondary">{d.display_name}</p>
           </button>
         ))}
-        <div className="ml-auto flex gap-6 border-l border-border pl-6">
+        </div>
+        {/* Value-state totals: their own row until there is room beside
+            the dataset counts, so they never wrap into a ragged column. */}
+        <div className="flex gap-6 border-t border-border pt-3 xl:border-l xl:border-t-0 xl:pl-6 xl:pt-0">
+
           {[
             ["Verified", qa.verified, "text-success"],
             ["Needs Review", qa.needs_review, qa.needs_review > 0 ? "text-warning" : "text-foreground"],

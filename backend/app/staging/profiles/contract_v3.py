@@ -20,6 +20,7 @@ from app.staging.profile import (
     RawRecord,
     StagingProfile,
 )
+from app.source_structure.ocr_geometry import PageGeometry
 from app.staging.provenance import make_provenance
 
 F = FieldDefinition
@@ -303,6 +304,7 @@ _QA_CHECK_TO_DATASET = {
 
 def _row_record(
     document: Document,
+    geometry: PageGeometry,
     kind: str,
     index: int,
     row,
@@ -318,7 +320,9 @@ def _row_record(
             document,
             page=row.source_page,
             evidence=row.evidence,
-            bbox=row_provenance.bbox if row_provenance else None,
+            bbox=geometry.pdf_bbox(row.source_page, row_provenance.bbox, row_provenance.bbox_space)
+            if row_provenance
+            else None,
             extraction_method=(row_provenance.extraction_method if row_provenance else None)
             or getattr(row, "extraction_method", None),
             region_id=region_id,
@@ -328,7 +332,9 @@ def _row_record(
     )
 
 
-def _summary_record(document: Document, doc: NormalizedV3Document) -> list[RawRecord]:
+def _summary_record(
+    document: Document, geometry: PageGeometry, doc: NormalizedV3Document
+) -> list[RawRecord]:
     summary = doc.contract_summary
     if summary is None:
         return []
@@ -341,7 +347,9 @@ def _summary_record(document: Document, doc: NormalizedV3Document) -> list[RawRe
             document,
             page=field_prov.get("page"),
             evidence=field_prov.get("evidence"),
-            bbox=field_prov.get("bbox"),
+            bbox=geometry.pdf_bbox(
+                field_prov.get("page"), field_prov.get("bbox"), field_prov.get("bbox_space")
+            ),
             extraction_method=field_prov.get("extraction_method"),
             region_id=f"contract_summary:{attr}",
         )
@@ -359,38 +367,39 @@ def _summary_record(document: Document, doc: NormalizedV3Document) -> list[RawRe
 
 def adapt_contract_v3(database: Session, document: Document) -> AdapterResult:
     doc = get_normalized_v3_document(database, document.id)
+    geometry = PageGeometry(database, document.id)
 
     records: dict[str, list[RawRecord]] = {
-        "contract_summary": _summary_record(document, doc),
+        "contract_summary": _summary_record(document, geometry, doc),
         "clins": [
-            _row_record(document, "clin", i, row, anchor=row.clin or None)
+            _row_record(document, geometry, "clin", i, row, anchor=row.clin or None)
             for i, row in enumerate(doc.clins)
         ],
         "funding": [
-            _row_record(document, "funding", i, row, anchor=row.clin or None)
+            _row_record(document, geometry, "funding", i, row, anchor=row.clin or None)
             for i, row in enumerate(doc.funding)
         ],
         "performance_delivery": [
-            _row_record(document, "performance", i, row)
+            _row_record(document, geometry, "performance", i, row)
             for i, row in enumerate(doc.performance_delivery)
         ],
         "attachments": [
-            _row_record(document, "attachment", i, row, anchor=row.attachment_reference or None)
+            _row_record(document, geometry, "attachment", i, row, anchor=row.attachment_reference or None)
             for i, row in enumerate(doc.attachments)
         ],
         "clauses": [
-            _row_record(document, "clause", i, row, anchor=row.clause_number or None)
+            _row_record(document, geometry, "clause", i, row, anchor=row.clause_number or None)
             for i, row in enumerate(doc.clauses)
         ],
         "far_references": [
-            _row_record(document, "far_reference", i, row) for i, row in enumerate(doc.far_references)
+            _row_record(document, geometry, "far_reference", i, row) for i, row in enumerate(doc.far_references)
         ],
         "dfars": [
-            _row_record(document, "dfars", i, row, anchor=row.clause_number or None)
+            _row_record(document, geometry, "dfars", i, row, anchor=row.clause_number or None)
             for i, row in enumerate(doc.dfars)
         ],
         "all_fields": [
-            _row_record(document, "field", i, row) for i, row in enumerate(doc.all_fields)
+            _row_record(document, geometry, "field", i, row) for i, row in enumerate(doc.all_fields)
         ],
         "source_documents": [
             RawRecord(record_id=f"source:{i}", values=row.model_dump())

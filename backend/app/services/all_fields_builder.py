@@ -25,7 +25,7 @@ from sqlalchemy.orm import Session
 from app.models.document import Document
 from app.models.document_metadata_field import DocumentMetadataField
 from app.schemas.candidate_classification import ClassifiedCandidate
-from app.services.evidence_geometry import pdf_point_bbox
+from app.services.evidence_geometry import evidence_bbox
 
 _SLUG_RE = re.compile(r"[^a-z0-9]+")
 
@@ -79,7 +79,7 @@ def build_all_fields(
                 extraction_method=_extraction_method_for(candidate),
                 evidence_json={
                     "page_number": candidate.source_page,
-                    "bbox": pdf_point_bbox(candidate),
+                    **evidence_bbox(candidate),
                     "source_text": candidate.evidence,
                     "category": "General",
                     "qa_status": qa_status,

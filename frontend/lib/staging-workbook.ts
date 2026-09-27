@@ -162,3 +162,53 @@ export async function downloadExport(
     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
   );
 }
+
+/** Mirrors backend app/source_structure/models.py (the subset the HTML
+ * evidence view reads). */
+export interface StructureTableCell {
+  row_index: number;
+  column_index: number;
+  text: string;
+  source_locator: SourceLocator | null;
+}
+
+export interface StructureTable {
+  candidate_id: string;
+  headers: string[];
+  rows: StructureTableCell[][];
+  source_locator: SourceLocator | null;
+  detection_method: string;
+}
+
+export interface StructureField {
+  raw_label: string;
+  raw_value: string;
+  label_text: string;
+  structural_relation: string;
+  evidence_text: string;
+  source_locator: SourceLocator | null;
+}
+
+export interface StructureRegion {
+  region_id: string;
+  region_type: string;
+  text: string;
+  source_locator: SourceLocator | null;
+}
+
+export interface RegionContext {
+  region: StructureRegion | null;
+  field: StructureField | null;
+  table: StructureTable | null;
+  row_index: number | null;
+  column_index: number | null;
+}
+
+export async function getRegionContext(
+  documentId: string,
+  regionId: string,
+): Promise<RegionContext> {
+  return apiFetch<RegionContext>(
+    `/api/documents/${documentId}/source-structure/regions/${encodeURIComponent(regionId)}`,
+  );
+}

@@ -55,6 +55,7 @@ def _row_provenance(
     return RowProvenance(
         row_id=f"{kind}:{row_id}",
         bbox=[float(v) for v in bbox] if isinstance(bbox, list) and len(bbox) == 4 else None,
+        bbox_space=(evidence_json or {}).get("bbox_space") or "pdf_points",
         extraction_method=extraction_method,
     )
 

@@ -232,8 +232,19 @@ function NewExtractionPageContent() {
           completed_at: doc.uploaded_at,
         });
         if (targets) setSchemaDiscovery(targets);
+        // The Staging Workbook renders inside Results and explains its own
+        // outcome, so a reopened document always gets a Results area even
+        // when the legacy target-extraction results are unavailable.
+        setTargetResult(
+          extractResults ?? {
+            document_id: doc.document_id,
+            scalars: [],
+            tables: [],
+            unresolved_targets: [],
+            warnings: [],
+          },
+        );
         if (extractResults) {
-          setTargetResult(extractResults);
           const focused =
             (focusFieldKey
               ? extractResults.scalars.find(

@@ -423,6 +423,23 @@ def extract_page(
                 if layout is not None and layout.words:
                     ocr_layout_payload = layout.to_json()
                     ocr_layout_payload["preprocess"] = preprocess_tags
+                    # Lets OCR pixel boxes be mapped back to PDF points
+                    # (app/source_structure/ocr_geometry.py).
+                    deskew = next(
+                        (
+                            float(tag.split("_", 1)[1])
+                            for tag in prepared.applied
+                            if tag.startswith("deskew_")
+                        ),
+                        0.0,
+                    )
+                    ocr_layout_payload["coordinate_space"] = {
+                        "unit": "px",
+                        "dpi": layout_dpi,
+                        "image_width": pixmap.width,
+                        "image_height": pixmap.height,
+                        "deskew_degrees": deskew,
+                    }
                     log_event(
                         "ocr_word_layout",
                         stage="rendering_ocr",

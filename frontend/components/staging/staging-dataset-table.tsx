@@ -7,6 +7,7 @@ import {
   ReviewStatusBadge,
   cellSourceRequest,
   formatCellValue,
+  locationLabel,
 } from "@/components/staging/review-status";
 import type { StagingDataset, StagingRecord } from "@/lib/staging-workbook";
 
@@ -23,16 +24,13 @@ interface StagingDatasetTableProps {
 const DEFAULT_PAGE_SIZE = 25;
 const EXPAND_THRESHOLD = 80;
 
-function recordEvidence(record: StagingRecord): { page: number | null; evidence: string } {
+function recordEvidence(record: StagingRecord): { location: string; evidence: string } {
   for (const cell of Object.values(record.cells)) {
     if (cell.provenance?.evidence_text || cell.provenance?.source_page) {
-      return {
-        page: cell.provenance.source_page,
-        evidence: cell.provenance.evidence_text ?? "",
-      };
+      return { location: locationLabel(cell), evidence: cell.provenance.evidence_text ?? "" };
     }
   }
-  return { page: null, evidence: "" };
+  return { location: "—", evidence: "" };
 }
 
 function resultTone(value: string): string {
@@ -147,7 +145,7 @@ export default function StagingDatasetTable({
                   {isBusiness && (
                     <>
                       <th className="whitespace-nowrap px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-text-secondary">
-                        Page
+                        Location
                       </th>
                       <th className="min-w-[220px] whitespace-nowrap px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-text-secondary">
                         Evidence
@@ -162,7 +160,7 @@ export default function StagingDatasetTable({
               </thead>
               <tbody className="divide-y divide-border">
                 {paged.map((record) => {
-                  const { page: sourcePage, evidence } = recordEvidence(record);
+                  const { location, evidence } = recordEvidence(record);
                   const isExpanded = expanded.has(record.record_id);
                   return (
                     <tr key={record.record_id} className="align-top hover:bg-surface-soft/60">
@@ -203,7 +201,7 @@ export default function StagingDatasetTable({
                       {isBusiness && (
                         <>
                           <td className="whitespace-nowrap px-3 py-2 tabular-nums text-text-secondary">
-                            {sourcePage ?? "—"}
+                            {location}
                           </td>
                           <td className="px-3 py-2 text-text-secondary">
                             <div

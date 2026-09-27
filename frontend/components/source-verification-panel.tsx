@@ -8,6 +8,8 @@ import PdfToolbar, { type SearchMatch } from "@/components/pdf-toolbar";
 import { getDocumentPages, getPageRender } from "@/lib/documents";
 import type { DocumentPage, PageRender } from "@/types/document";
 
+import type { SourceLocator } from "@/lib/staging-workbook";
+
 export interface SourceViewRequest {
   /** Stable id of the selected result (FieldRow.id / table id) — used by
    * the results list to keep the clicked row visually selected. */
@@ -29,6 +31,10 @@ export interface SourceViewRequest {
   extractionMethod?: string | null;
   reviewStatus?: string | null;
   reviewReasons?: string[];
+  /** "html" routes the drawer to the structural HTML evidence view. */
+  sourceType?: string | null;
+  regionId?: string | null;
+  locator?: SourceLocator | null;
 }
 
 interface SourceVerificationPanelProps {

@@ -132,7 +132,7 @@ def test_evidence_literal_returns_source_spelling_for_numbers():
 
 def test_builtin_profiles_are_versioned():
     keys = {p.key for p in registry.all_profiles()}
-    assert {"contract_v3@1", "generic_business_document@1"} <= keys
+    assert {"contract_v3@1", "generic_business_document@1", "generic_business_document@2"} <= keys
 
 
 def test_invoice_family_has_no_profile_yet_so_it_is_not_forced_into_contract():
@@ -271,7 +271,7 @@ def test_invoice_resolves_to_generic_profile_and_is_never_blank():
     assert response.status_code == 200, response.text
     body = response.json()
     assert body["profile"]["profile_id"] == "generic_business_document"
-    assert body["profile"]["profile_version"] == 1
+    assert body["profile"]["profile_version"] == 2
     assert body["processing_metadata"]["document_family"] == "invoice"
     assert body["outcome"]["status"] != "pending"
     dataset_ids = [d["dataset_id"] for d in body["datasets"]]
@@ -300,7 +300,7 @@ def test_profile_is_pinned_and_survives_reopen():
             select(DocumentStagingWorkbook).where(DocumentStagingWorkbook.document_id == document_id)
         ).all()
         assert len(rows) == 1
-        assert rows[0].profile_version == 1
+        assert rows[0].profile_version == 2  # latest generic profile
     finally:
         database.close()
 

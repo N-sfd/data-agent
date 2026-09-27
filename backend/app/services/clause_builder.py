@@ -32,7 +32,7 @@ from app.models.document import Document
 from app.models.document_clause_reference import DocumentClauseReference
 from app.models.far_master_clause import FarMasterClause
 from app.schemas.candidate_classification import ClassifiedCandidate
-from app.services.evidence_geometry import pdf_point_bbox
+from app.services.evidence_geometry import evidence_bbox
 
 _ALTERNATE_RE = re.compile(r"Alternate\s+([IVXLC\d]+)", re.IGNORECASE)
 _DEVIATION_RE = re.compile(r"\(DEVIATION[^)]*\)", re.IGNORECASE)
@@ -194,7 +194,7 @@ def build_clause_references(
                 confidence=candidate.confidence,
                 evidence_json={
                     "page_number": candidate.source_page,
-                    "bbox": pdf_point_bbox(candidate),
+                    **evidence_bbox(candidate),
                     "source_text": candidate.evidence,
                     "reason_codes": candidate.reason_codes,
                     "classification_basis": basis,

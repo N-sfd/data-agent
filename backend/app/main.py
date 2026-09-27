@@ -55,6 +55,7 @@ from app.models import (  # noqa: F401
 )
 from app.models import document_qa_review as document_qa_review_model  # noqa: F401
 from app.models import document_staging_workbook as document_staging_workbook_model  # noqa: F401
+from app.models import document_source_structure as document_source_structure_model  # noqa: F401
 from app.models import far_master_clause as far_master_clause_model  # noqa: F401
 from app.models import (  # noqa: F401
     document_delivery_schedule as document_delivery_schedule_model,

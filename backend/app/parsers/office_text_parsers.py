@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import csv
-import html
 import re
 from io import StringIO
 from pathlib import Path
@@ -40,21 +39,21 @@ def parse_csv_file(file_path: str | Path) -> dict:
 
 
 def parse_html_file(file_path: str | Path) -> dict:
+    """Readable, DOM-derived transcription (headings, paragraphs, list
+    items, table rows) — see app/source_structure/html_structure.py. The
+    structural candidates themselves are extracted from the DOM separately,
+    never from this flattened text."""
+
+    import uuid
+
+    from app.source_structure.html_structure import readable_dom_text
+
     path = Path(file_path)
-    raw = path.read_text(encoding="utf-8-sig", errors="replace")
-    # Lightweight strip — enough for ingest; intelligence uses plain text.
-    no_script = re.sub(
-        r"(?is)<(script|style)[^>]*>.*?</\1>",
-        " ",
-        raw,
-    )
-    text = re.sub(r"(?s)<[^>]+>", " ", no_script)
-    text = html.unescape(text)
-    text = re.sub(r"[ \t]+\n", "\n", text)
-    text = re.sub(r"\n{3,}", "\n\n", text)
-    text = re.sub(r"[ \t]{2,}", " ", text).strip()
+    text, tables = readable_dom_text(path.read_bytes())
+    for table in tables:
+        table.setdefault("table_id", str(uuid.uuid4()))
     paragraphs = [line for line in text.splitlines() if line.strip()]
-    return {"paragraphs": paragraphs, "tables": [], "text": text}
+    return {"paragraphs": paragraphs, "tables": tables, "text": text}
 
 
 def parse_rtf_file(file_path: str | Path) -> dict:

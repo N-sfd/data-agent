@@ -42,7 +42,7 @@ from app.models.document_contract_summary import DocumentContractSummary
 from app.models.document_page import DocumentPage
 from app.schemas.candidate_classification import ClassifiedCandidate
 from app.services.contract_summary_fields import FIELD_KEY_TO_V3_COLUMN
-from app.services.evidence_geometry import pdf_point_bbox
+from app.services.evidence_geometry import evidence_bbox
 
 V3_COLUMNS = (
     "Contract Number",
@@ -86,6 +86,7 @@ class _FieldValue:
     evidence: str
     confidence: float
     bbox: list[float] | None = None
+    bbox_space: str | None = None
     extraction_method: str = "narrative_pattern"
 
 
@@ -119,7 +120,8 @@ def _from_form_candidates(
             page=candidate.source_page,
             evidence=candidate.evidence,
             confidence=candidate.confidence,
-            bbox=pdf_point_bbox(candidate),
+            bbox=evidence_bbox(candidate)["bbox"],
+            bbox_space=evidence_bbox(candidate).get("bbox_space"),
             extraction_method="form_field",
         )
     return by_column
@@ -324,6 +326,7 @@ def build_contract_summary(
                 "evidence": hit.evidence,
                 "confidence": hit.confidence,
                 "bbox": hit.bbox,
+                "bbox_space": hit.bbox_space,
                 "extraction_method": hit.extraction_method,
             }
 

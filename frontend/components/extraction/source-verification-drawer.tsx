@@ -7,6 +7,7 @@ import type { FieldRow } from "@/components/extraction/field-row";
 import SourceVerificationPanel, {
   type SourceViewRequest,
 } from "@/components/source-verification-panel";
+import HtmlEvidencePanel from "@/components/staging/html-evidence-panel";
 
 interface SourceVerificationDrawerProps {
   open: boolean;
@@ -84,7 +85,9 @@ export default function SourceVerificationDrawer({
               {String(displayValue || "—")}
             </p>
             <p className="mt-0.5 text-xs text-text-muted">
-              Page {request?.pageNumber ?? "—"}
+              {request?.sourceType === "html"
+                ? "HTML source"
+                : `Page ${request?.pageNumber ?? "—"}`}
             </p>
           </div>
           <button
@@ -97,12 +100,16 @@ export default function SourceVerificationDrawer({
         </div>
 
         <div className="min-h-0 flex-1 overflow-y-auto">
-          <SourceVerificationPanel
-            documentId={documentId}
-            documentName={documentName}
-            pageCount={pageCount}
-            request={request}
-          />
+          {request?.sourceType === "html" ? (
+            <HtmlEvidencePanel documentId={documentId} request={request} />
+          ) : (
+            <SourceVerificationPanel
+              documentId={documentId}
+              documentName={documentName}
+              pageCount={pageCount}
+              request={request}
+            />
+          )}
 
           {!activeRow && request && (request.evidenceText || request.reviewStatus) && (
             <div className="space-y-3 border-t border-border px-5 py-4 text-sm">

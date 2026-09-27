@@ -6,11 +6,22 @@ downloading exports needs export.read.
 
 from __future__ import annotations
 
+import re
+
 from fastapi import APIRouter, Depends, HTTPException, Response
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.core.auth import ActorContext, require_permission
 from app.database.dependencies import get_database
+from app.models.document import Document
+from app.source_structure.models import (
+    FieldCandidate,
+    StructuredRegion,
+    StructuredSourceDocument,
+    TableCandidate,
+)
+from app.source_structure.service import get_or_build_source_structure
 from app.staging import registry
 from app.staging.engine import profile_descriptor
 from app.staging.export import build_dataset_csv, build_workbook_xlsx, find_dataset
@@ -78,3 +89,69 @@ async def list_staging_profiles(
     actor: ActorContext = Depends(require_permission("documents.view")),
 ) -> list[ProfileDescriptor]:
     return [profile_descriptor(p, "{document_id}") for p in registry.all_profiles()]
+
+
+class RegionContext(BaseModel):
+    """Everything needed to show where a staging value came from without
+    rendering the source: the region, its label/value candidate, or its
+    table with the originating cell marked."""
+
+    region: StructuredRegion | None = None
+    field: FieldCandidate | None = None
+    table: TableCandidate | None = None
+    row_index: int | None = None
+    column_index: int | None = None
+
+
+_CELL_ID = re.compile(r"^(?P<table>.+):r(?P<row>\d+)(?::c(?P<col>\d+))?$")
+
+
+@router.get("/{document_id}/source-structure", response_model=StructuredSourceDocument)
+async def read_source_structure(
+    document_id: str,
+    database: Session = Depends(get_database),
+    actor: ActorContext = Depends(require_permission("documents.view")),
+) -> StructuredSourceDocument:
+    document = database.get(Document, document_id)
+    if document is None:
+        raise HTTPException(status_code=404, detail="Document not found.")
+    return get_or_build_source_structure(database, document)
+
+
+@router.get(
+    "/{document_id}/source-structure/regions/{region_id:path}",
+    response_model=RegionContext,
+)
+async def read_region_context(
+    document_id: str,
+    region_id: str,
+    database: Session = Depends(get_database),
+    actor: ActorContext = Depends(require_permission("documents.view")),
+) -> RegionContext:
+    document = database.get(Document, document_id)
+    if document is None:
+        raise HTTPException(status_code=404, detail="Document not found.")
+    structure = get_or_build_source_structure(database, document)
+
+    cell = _CELL_ID.match(region_id)
+    if cell:
+        table = next((t for t in structure.table_candidates if t.candidate_id == cell.group("table")), None)
+        if table is not None:
+            return RegionContext(
+                table=table,
+                row_index=int(cell.group("row")),
+                column_index=int(cell.group("col")) if cell.group("col") else None,
+            )
+    field = next(
+        (
+            f
+            for f in structure.field_candidates
+            if f.candidate_id == region_id or region_id in f.source_region_ids
+        ),
+        None,
+    )
+    region = next((r for r in structure.regions if r.region_id == region_id), None)
+    table = next((t for t in structure.table_candidates if t.region_id == region_id), None)
+    if field is None and region is None and table is None:
+        raise HTTPException(status_code=404, detail=f"Region {region_id!r} not found.")
+    return RegionContext(region=region, field=field, table=table)

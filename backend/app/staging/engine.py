@@ -93,7 +93,12 @@ def _build_dataset(definition: DatasetDefinition, raws: list[RawRecord]) -> Stag
                 value=None if is_empty(value) else _display_value(value),
                 raw_value=None if is_empty(value) else str(value),
                 value_type=field_def.value_type,
-                provenance=provenance if not is_empty(value) else None,
+                # Metadata columns (how/where something was found, QA
+                # notes) describe the extraction, not a source value, so
+                # they carry no evidence link of their own.
+                provenance=provenance
+                if not is_empty(value) and field_def.grounding != "none"
+                else None,
                 validation=validation,
                 review_status=status,
                 review_reasons=reasons,
@@ -158,12 +163,15 @@ def _auto_qa_records(datasets: list[StagingDataset]) -> list[RawRecord]:
             for cell in record.cells.values()
             if cell.review_status == MISSING
         )
-        if not populated:
+        if not populated and dataset.cardinality == "single":
             result, details, action = (
                 "NOT FOUND",
                 "No source-supported records were identified.",
                 "Confirm against the source whether this data exists.",
             )
+        elif not populated:
+            # An optional repeating dataset can legitimately be empty.
+            result, details, action = ("NONE", "This document has no records of this kind.", "None.")
         elif flagged or missing:
             parts = [f"{len(populated)} record(s)"]
             if flagged:
@@ -227,7 +235,13 @@ def assemble_workbook(
     if profile.auto_qa_dataset:
         qa_definition = profile.dataset(profile.auto_qa_dataset)
         datasets = [
-            _build_dataset(qa_definition, _auto_qa_records(datasets))
+            _build_dataset(
+                qa_definition,
+                _auto_qa_records(datasets)
+                # Adapter-supplied QA rows (e.g. structure-level findings)
+                # follow the per-dataset checklist.
+                + adapter_result.records.get(profile.auto_qa_dataset, []),
+            )
             if dataset.dataset_id == profile.auto_qa_dataset
             else dataset
             for dataset in datasets

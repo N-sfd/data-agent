@@ -27,7 +27,7 @@ from app.models.document import Document
 from app.models.document_page import DocumentPage
 from app.models.document_performance_period import DocumentPerformancePeriod
 from app.schemas.candidate_classification import ClassifiedCandidate
-from app.services.evidence_geometry import pdf_point_bbox
+from app.services.evidence_geometry import evidence_bbox
 
 _DATE_RE = re.compile(r"\b\d{1,2}[/-]\d{1,2}[/-]\d{2,4}\b|\b\d{4}-\d{2}-\d{2}\b")
 _RELATIVE_TIMING_RE = re.compile(
@@ -136,7 +136,7 @@ def build_performance_delivery(
                 confidence=candidate.confidence,
                 evidence_json={
                     "page_number": candidate.source_page,
-                    "bbox": pdf_point_bbox(candidate),
+                    **evidence_bbox(candidate),
                     "source_text": evidence,
                     "reason_codes": reason_codes,
                 },

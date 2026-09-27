@@ -58,8 +58,10 @@ def generic_profile() -> StagingProfile:
 def _register_builtin_profiles() -> None:
     from app.staging.profiles.contract_v3 import CONTRACT_V3_PROFILE
     from app.staging.profiles.generic_business_document import GENERIC_PROFILE
+    from app.staging.profiles.generic_business_document_v1 import GENERIC_PROFILE_V1
 
     register(CONTRACT_V3_PROFILE)
+    register(GENERIC_PROFILE_V1)
     register(GENERIC_PROFILE)
 
 
