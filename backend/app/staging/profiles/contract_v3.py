@@ -469,4 +469,7 @@ CONTRACT_V3_PROFILE = StagingProfile(
         ),
     ),
     oracle_mapping_capability="planned",
+    # The V3 pipeline is sufficient; structure is still available on
+    # demand (e.g. the source-structure endpoints) but not built per job.
+    source_structure="optional",
 )

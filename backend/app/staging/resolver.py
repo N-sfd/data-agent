@@ -46,6 +46,10 @@ class ProfileResolution:
     family: str
     family_label: str
     reasons: list[str] = field(default_factory=list)
+    # True when a specific document family was established (keywords, AI
+    # classification or structural evidence). False means the generic
+    # fallback was chosen because nothing more specific could be shown.
+    confident: bool = False
 
 
 def _page_text(database: Session, document_id: str) -> str:
@@ -106,16 +110,26 @@ def resolve_profile(database: Session, document: Document) -> ProfileResolution:
     else:
         reasons.append(f"{profile.display_name} profile is registered for '{label}'.")
 
-    return ProfileResolution(profile=profile, family=family, family_label=label, reasons=reasons)
+    return ProfileResolution(
+        profile=profile,
+        family=family,
+        family_label=label,
+        reasons=reasons,
+        confident=family not in _INCONCLUSIVE,
+    )
 
 
 def resolve_and_persist_profile(
     database: Session, document: Document
 ) -> DocumentStagingWorkbook:
-    """(Re)pins the document's staging profile. Called when extraction runs;
-    commits."""
+    """(Re)pins the document's staging profile; commits."""
 
-    resolution = resolve_profile(database, document)
+    return persist_resolution(database, document, resolve_profile(database, document))
+
+
+def persist_resolution(
+    database: Session, document: Document, resolution: ProfileResolution
+) -> DocumentStagingWorkbook:
     record = database.scalars(
         select(DocumentStagingWorkbook).where(DocumentStagingWorkbook.document_id == document.id)
     ).first()

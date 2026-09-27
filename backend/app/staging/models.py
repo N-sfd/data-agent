@@ -94,6 +94,23 @@ class CellValidation(BaseModel):
     checks: list[ValidationCheck] = Field(default_factory=list)
 
 
+class SourceColumn(BaseModel):
+    """The original column a staged table value came from — kept so a later
+    profile/version can map it (e.g. "Part Number" → invoice.line.part_number)
+    without reparsing the source."""
+
+    raw_header: str | None = None
+    column_index: int
+    # First neutral structural role, if any (e.g. "numeric_amount_column").
+    structural_role: str | None = None
+    structural_roles: list[str] = Field(default_factory=list)
+
+
+class SourceColumnValue(SourceColumn):
+    raw_value: str
+    provenance: CellProvenance | None = None
+
+
 class StagingCell(BaseModel):
     canonical_field: str
     display_label: str
@@ -108,6 +125,8 @@ class StagingCell(BaseModel):
     # record (e.g. a CLIN with no FOB) — that is not "Missing".
     review_status: ReviewStatus | None = None
     review_reasons: list[str] = Field(default_factory=list)
+    # Set when the value came from a table column.
+    source_column: SourceColumn | None = None
 
 
 class StagingRecord(BaseModel):
@@ -117,6 +136,8 @@ class StagingRecord(BaseModel):
     # Optional cross-link, e.g. a QA Review row pointing at the dataset it
     # summarizes. Profile-provided, so the UI needs no per-profile mapping.
     links_to_dataset: str | None = None
+    # Every original column of a table-derived record, mapped or not.
+    source_columns: list[SourceColumnValue] = Field(default_factory=list)
 
 
 class StagingColumn(BaseModel):

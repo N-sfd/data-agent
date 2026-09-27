@@ -355,6 +355,14 @@ def test_html_document_uses_dom_provenance_without_page_numbers():
     assert context["table"]["headers"][2] == "Description"
     assert (context["row_index"], context["column_index"]) == (0, 2)
 
+    # Unmapped columns keep their identity: raw header, no role, value,
+    # provenance — mappable later without reparsing.
+    part = next(c for c in lines[0]["source_columns"] if c["raw_header"] == "Part Number")
+    assert part["structural_role"] is None
+    assert part["raw_value"] == "HX-2201"
+    assert part["provenance"]["source_locator"]["column_index"] == 1
+    assert cell["source_column"]["raw_header"] == "Description"
+
     # The tfoot total surfaces as a key field from the table's total row.
     keys = {r["cells"]["document.field.name"]["value"] for r in _dataset(workbook, "key_fields")["records"]}
     assert "Total" in keys

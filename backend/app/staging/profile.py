@@ -19,10 +19,21 @@ from app.models.document import Document
 from app.staging.models import (
     Cardinality,
     CellProvenance,
+    SourceColumn,
+    SourceColumnValue,
     DatasetRole,
     ExportCapability,
     ValueType,
 )
+
+# Whether a profile's adapter consumes the schema-neutral source structure
+# (app/source_structure/). The extraction job builds that structure only
+# when the resolved profile needs it (see app/staging/preparation.py):
+#   required  the adapter reads it — always built
+#   optional  the adapter works without it — built only if resolution
+#             wasn't confident (the document may really be generic)
+#   none      never used by this profile
+SourceStructureRequirement = Literal["required", "optional", "none"]
 
 # How a populated value must relate to its evidence to be Verified:
 #   evidence  the value itself must appear in the evidence text
@@ -91,6 +102,10 @@ class RawRecord:
     # Verified cells.
     builder_status: str | None = None
     links_to_dataset: str | None = None
+    # Table-derived records: the original column per mapped cell, and every
+    # original column value (mapped or not).
+    cell_source_columns: dict[str, SourceColumn] = field(default_factory=dict)
+    source_columns: list[SourceColumnValue] = field(default_factory=list)
 
 
 @dataclass
@@ -121,6 +136,7 @@ class StagingProfile:
     # qa.* fields) from the validated business datasets, instead of the
     # adapter supplying QA rows.
     auto_qa_dataset: str | None = None
+    source_structure: SourceStructureRequirement = "none"
 
     @property
     def key(self) -> str:

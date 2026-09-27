@@ -333,4 +333,5 @@ GENERIC_PROFILE_V1 = StagingProfile(
     ),
     oracle_mapping_capability="none",
     auto_qa_dataset="qa_review",
+    source_structure="none",
 )

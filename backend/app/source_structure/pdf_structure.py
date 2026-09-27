@@ -30,6 +30,7 @@ from app.source_structure.models import (
 from app.source_structure.ocr_geometry import OcrCoordinateSpace
 from app.source_structure.table_hints import annotate_table
 from app.source_structure.text_shapes import (
+    candidate_quality,
     infer_value_type,
     is_numeric_value,
     label_rejection,
@@ -455,7 +456,10 @@ def _field(
     hints = list(extra_hints or [])
     if not reasons:
         hints.append("label_noun_phrase_shape")
+    quality_score, quality_flags = candidate_quality(label_text, value_raw, relation)
     return FieldCandidate(
+        quality_score=quality_score,
+        quality_flags=quality_flags,
         candidate_id=ids.next("field"),
         raw_label=label_raw,
         raw_value=value_raw,

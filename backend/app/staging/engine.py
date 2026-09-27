@@ -102,6 +102,7 @@ def _build_dataset(definition: DatasetDefinition, raws: list[RawRecord]) -> Stag
                 validation=validation,
                 review_status=status,
                 review_reasons=reasons,
+                source_column=raw.cell_source_columns.get(field_def.key),
             )
 
         record_status = None
@@ -119,6 +120,7 @@ def _build_dataset(definition: DatasetDefinition, raws: list[RawRecord]) -> Stag
                 cells=cells,
                 record_status=record_status,
                 links_to_dataset=raw.links_to_dataset,
+                source_columns=raw.source_columns,
             )
         )
 

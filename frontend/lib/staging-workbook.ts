@@ -37,6 +37,19 @@ export interface ValidationCheck {
   message: string | null;
 }
 
+/** Original table column a staged value came from (backend SourceColumn). */
+export interface SourceColumn {
+  raw_header: string | null;
+  column_index: number;
+  structural_role: string | null;
+  structural_roles: string[];
+}
+
+export interface SourceColumnValue extends SourceColumn {
+  raw_value: string;
+  provenance: CellProvenance | null;
+}
+
 export interface StagingCell {
   canonical_field: string;
   display_label: string;
@@ -47,6 +60,7 @@ export interface StagingCell {
   validation: { status: "passed" | "failed" | "not_checked"; checks: ValidationCheck[] };
   review_status: ReviewStatus | null;
   review_reasons: string[];
+  source_column?: SourceColumn | null;
 }
 
 export interface StagingRecord {
@@ -54,6 +68,7 @@ export interface StagingRecord {
   cells: Record<string, StagingCell>;
   record_status: ReviewStatus | null;
   links_to_dataset: string | null;
+  source_columns?: SourceColumnValue[];
 }
 
 export interface StagingColumn {

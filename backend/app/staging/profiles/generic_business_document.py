@@ -27,7 +27,12 @@ from app.source_structure.models import FieldCandidate, TableCandidate, TableCel
 from app.source_structure.ocr_geometry import PageGeometry
 from app.source_structure.service import get_or_build_source_structure
 from app.source_structure.text_shapes import normalize_space
-from app.staging.models import CellProvenance, ExportCapability
+from app.staging.models import (
+    CellProvenance,
+    ExportCapability,
+    SourceColumn,
+    SourceColumnValue,
+)
 from app.staging.profile import (
     AdapterResult,
     DatasetDefinition,
@@ -199,6 +204,17 @@ def _cell_provenance(
     return provenance
 
 
+def _source_column(table: TableCandidate, column_index: int) -> SourceColumn:
+    roles = list(table.column_hints.get(column_index, []))
+    has_header = bool(table.header_cells)
+    return SourceColumn(
+        raw_header=table.headers[column_index] if has_header and column_index < len(table.headers) else None,
+        column_index=column_index,
+        structural_role=roles[0] if roles else None,
+        structural_roles=roles,
+    )
+
+
 def _is_line_item_table(table: TableCandidate) -> bool:
     hints = {h for hs in table.column_hints.values() for h in hs}
     return (
@@ -258,6 +274,7 @@ def _line_item_records(
 
         values: dict[str, object] = {"source_table": table_label}
         cell_provenance: dict[str, CellProvenance] = {}
+        cell_columns: dict[str, SourceColumn] = {}
         for key, column in (
             ("item_number", identifier),
             ("description", description),
@@ -271,6 +288,7 @@ def _line_item_records(
                 continue
             values[key] = cell.text
             cell_provenance[key] = _cell_provenance(document, table, row, cell, anchor)
+            cell_columns[key] = _source_column(table, cell.column_index)
         other = [
             f"{table.headers[c] if c < len(table.headers) else f'Column {c + 1}'}: {cell.text}"
             for c, cell in sorted(by_column.items())
@@ -286,6 +304,16 @@ def _line_item_records(
                 values=values,
                 provenance=_cell_provenance(document, table, row, row[0], anchor),
                 cell_provenance=cell_provenance,
+                cell_source_columns=cell_columns,
+                source_columns=[
+                    SourceColumnValue(
+                        **_source_column(table, cell.column_index).model_dump(),
+                        raw_value=cell.text,
+                        provenance=_cell_provenance(document, table, row, cell, anchor),
+                    )
+                    for cell in row
+                    if cell.text
+                ],
             )
         )
     return lines, totals
@@ -568,4 +596,5 @@ GENERIC_PROFILE = StagingProfile(
     ),
     oracle_mapping_capability="none",
     auto_qa_dataset="qa_review",
+    source_structure="required",
 )

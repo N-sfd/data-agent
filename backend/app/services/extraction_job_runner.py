@@ -36,8 +36,7 @@ from app.services.schema_discovery import discover_document_schema
 from app.services.target_extraction_service import extract_by_targets
 from app.services.target_result_store import persist_target_extraction_results
 from app.services.v3_orchestrator import run_and_persist_v3_extraction
-from app.source_structure.service import build_and_persist_source_structure
-from app.staging.resolver import resolve_and_persist_profile
+from app.staging.preparation import prepare_staging
 from app.schemas.document_target import ScalarTargetResult, TableTargetResult
 
 settings = get_settings()
@@ -555,34 +554,26 @@ async def run_extraction_job(
                 error=str(exc),
             )
 
-        # Schema-neutral structural candidates (app/source_structure/) for
-        # the staging profiles. Additive like V3: a failure is a warning.
+        # Pin the staging profile, then build the schema-neutral source
+        # structure only if that profile (or an uncertain resolution) needs
+        # it — see app/staging/preparation.py. Runs even when V3 failed so
+        # the workbook still renders with an explicit outcome. A failure is
+        # a warning: both steps are redone lazily on first read.
         try:
-            structure = await run_in_threadpool(
-                build_and_persist_source_structure, database, document
-            )
-            stage_timings["source_structure_ms"] = structure.stats.duration_ms
-        except Exception as exc:  # noqa: BLE001 - rebuilt lazily on first read instead
-            database.rollback()
-            warnings.append(f"Source structure extraction failed: {exc}")
-
-        # Pin the staging profile (docs: app/staging/resolver.py) for this
-        # extraction. Runs even when V3 failed — the workbook must still
-        # render (with an explicit outcome), never go blank.
-        try:
-            staging_record = await run_in_threadpool(
-                resolve_and_persist_profile, database, document
-            )
+            preparation = await run_in_threadpool(prepare_staging, database, document)
+            stage_timings.update(preparation.timings_ms)
             log_event(
-                "staging_profile_resolved",
+                "staging_prepared",
                 stage="v3_classification",
-                profile_id=staging_record.profile_id,
-                profile_version=staging_record.profile_version,
-                document_family=staging_record.document_family,
+                profile_id=preparation.record.profile_id,
+                profile_version=preparation.record.profile_version,
+                document_family=preparation.record.document_family,
+                source_structure_built=preparation.structure_built,
+                source_structure_reason=preparation.structure_reason,
             )
-        except Exception as exc:  # noqa: BLE001 - resolved lazily on first read instead
+        except Exception as exc:  # noqa: BLE001 - redone lazily on first read
             database.rollback()
-            warnings.append(f"Staging profile resolution failed: {exc}")
+            warnings.append(f"Staging preparation failed: {exc}")
 
         history = list((job.result_json or {}).get("stage_history") or [])
         job.result_json = {

@@ -103,6 +103,10 @@ class FieldCandidate(BaseModel):
     reasons: list[str] = Field(default_factory=list)
     validation_hints: list[str] = Field(default_factory=list)
     group_id: str | None = None  # KEY_VALUE_GROUP membership
+    # Non-blocking trust signals for accepted candidates (text_shapes.
+    # candidate_quality); profiles may require a minimum score.
+    quality_score: float = 1.0
+    quality_flags: list[str] = Field(default_factory=list)
 
 
 class TableCell(BaseModel):
@@ -125,6 +129,26 @@ ColumnHint = Literal[
 ]
 
 
+class TableContinuation(BaseModel):
+    """Metadata for merging a table that continues across pages. Recorded
+    now; tables are NOT merged here — a profile decides (e.g. multi-page
+    invoice lines). Header equality alone is never enough to merge."""
+
+    normalized_headers: list[str]
+    # Normalized headers joined, or "columns:N" when no header row exists.
+    header_signature: str
+    column_count: int
+    # Table extent as a fraction of page height (0 = top, 1 = bottom).
+    page_top_ratio: float | None = None
+    page_bottom_ratio: float | None = None
+    starts_near_page_top: bool = False
+    ends_near_page_bottom: bool = False
+    continuation_candidate: bool = False
+    previous_candidate_id: str | None = None
+    next_candidate_id: str | None = None
+    hint_reasons: list[str] = Field(default_factory=list)
+
+
 class TableCandidate(BaseModel):
     candidate_id: str
     region_id: str
@@ -142,6 +166,11 @@ class TableCandidate(BaseModel):
     structure_score: float = 0.0
     acceptance: Acceptance = "accepted"
     reasons: list[str] = Field(default_factory=list)
+    continuation: TableContinuation | None = None
+
+    @property
+    def table_id(self) -> str:
+        return self.candidate_id
 
 
 class StructureStats(BaseModel):

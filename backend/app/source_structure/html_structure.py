@@ -23,6 +23,7 @@ from app.source_structure.models import (
 )
 from app.source_structure.table_hints import annotate_table
 from app.source_structure.text_shapes import (
+    candidate_quality,
     infer_value_type,
     label_rejection,
     normalize_space,
@@ -166,7 +167,10 @@ class HtmlStructureExtractor:
         label_text = normalize_space(strip_label_separator(label_raw))
         reasons = [r for r in (label_rejection(label_text), value_rejection(value_raw)) if r]
         anchor = value_el if value_el is not None else label_el
+        quality_score, quality_flags = candidate_quality(label_text, value_raw, relation)
         candidate = FieldCandidate(
+            quality_score=quality_score,
+            quality_flags=quality_flags,
             candidate_id=self._id("field"),
             raw_label=label_raw,
             raw_value=value_raw,

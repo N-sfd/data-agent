@@ -24,6 +24,7 @@ from app.services.document_storage import DocumentStorageError, ensure_local_cop
 from app.source_structure.html_structure import extract_html_structure
 from app.source_structure.models import StructuredSourceDocument
 from app.source_structure.ocr_geometry import coordinate_space_for
+from app.source_structure.table_continuity import annotate_geometry, link_continuations
 from app.source_structure.pdf_structure import (
     extract_page_structure,
     native_words,
@@ -32,7 +33,7 @@ from app.source_structure.pdf_structure import (
 
 # Bump whenever extraction rules change; stored structures from an older
 # version are rebuilt on next use.
-EXTRACTOR_VERSION = 1
+EXTRACTOR_VERSION = 2  # 2: table continuation metadata, candidate quality flags
 
 _HTML_SUFFIXES = {".html", ".htm"}
 _RASTER_SUFFIXES = {".png", ".jpg", ".jpeg", ".tif", ".tiff", ".bmp", ".webp"}
@@ -91,9 +92,13 @@ def _build_pdf(document: Document, pages: list[DocumentPage], file_path: Path | 
                 extraction_method=method,
                 fitz_page=fitz_page,
             )
+            page_height = page.page_height or (fitz_page.rect.height if fitz_page else None)
+            for table in structure.tables:
+                annotate_geometry(table, page_height)
             result.regions.extend(structure.regions)
             result.field_candidates.extend(structure.fields)
             result.table_candidates.extend(structure.tables)
+        link_continuations(result.table_candidates)
     finally:
         if fitz_doc is not None:
             fitz_doc.close()
@@ -106,6 +111,8 @@ def _build_html(file_path: Path | None, result: StructuredSourceDocument) -> Non
     extractor = extract_html_structure(file_path.read_bytes())
     result.regions.extend(extractor.regions)
     result.field_candidates.extend(extractor.fields)
+    for table in extractor.tables:
+        annotate_geometry(table, None)
     result.table_candidates.extend(extractor.tables)
 
 

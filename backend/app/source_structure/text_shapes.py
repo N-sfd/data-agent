@@ -175,3 +175,46 @@ def infer_value_type(value: str) -> ValueTypeHint:
 
 def is_numeric_value(text: str) -> bool:
     return infer_value_type(text) in ("currency", "number", "percentage")
+
+
+_LOWERCASE_JOINERS = frozenset("of to and for per in on at by the or a an de".split())
+
+
+def candidate_quality(label_text: str, value: str, relation: str) -> tuple[float, list[str]]:
+    """Non-blocking quality signals for an ACCEPTED label/value candidate.
+
+    Acceptance says "structurally this is a label/value pair"; these flags
+    say how much a consuming profile should trust it (e.g. a bold
+    "INFORMATION" next to "AREA CODE" is structurally a pair but reads as
+    two form captions). Shape only — no vocabulary. Score = 1 − 0.2/flag.
+    """
+
+    flags: list[str] = []
+    words = label_text.split()
+    letters = [ch for ch in label_text if ch.isalpha()]
+    if len(words) == 1:
+        flags.append("single_word_label")
+    if len(letters) >= 2 and all(ch.isupper() for ch in letters) and len(words) >= 2:
+        flags.append("all_caps_label")
+    if any(w[0].islower() and w.lower() not in _LOWERCASE_JOINERS for w in words[1:] if w[:1].isalpha()):
+        flags.append("label_has_lowercase_words")
+
+    value_text = normalize_space(value)
+    value_words = value_text.split()
+    value_letters = [ch for ch in value_text if ch.isalpha()]
+    if (
+        2 <= len(value_words) <= 4
+        and value_letters
+        and all(ch.isupper() for ch in value_letters)
+        and not any(ch.isdigit() for ch in value_text)
+    ):
+        flags.append("value_looks_like_label")
+    lines = [line.strip() for line in (value or "").splitlines() if line.strip()]
+    if len(lines) >= 3 and all(len(line.split()) <= 2 for line in lines):
+        flags.append("value_is_list")
+    if value_text.endswith((",", ";", "-", "–")):
+        flags.append("value_truncated")
+    if relation == "left_right_typography":
+        flags.append("pairing_by_typography_only")
+
+    return round(max(0.0, 1.0 - 0.2 * len(flags)), 2), flags
