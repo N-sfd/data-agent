@@ -1,3 +1,4 @@
+import { getWorkspaceToken, WORKSPACE_HEADER } from "@/lib/workspace";
 export const API_URL =
   process.env.NEXT_PUBLIC_API_URL ?? "http://127.0.0.1:8001";
 
@@ -62,6 +63,10 @@ export async function fetchWithRetry(
 ): Promise<Response> {
   const headers = new Headers(init?.headers);
   if (typeof window !== "undefined") {
+    const workspace = getWorkspaceToken();
+    if (workspace && !headers.has(WORKSPACE_HEADER)) {
+      headers.set(WORKSPACE_HEADER, workspace);
+    }
     if (!headers.has("Authorization")) {
       const accessToken = window.localStorage.getItem(
         "data-agent-access-token",

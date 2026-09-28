@@ -13,9 +13,14 @@ class MockXhr {
   onerror: (() => void) | null = null;
   openedUrl = "";
   sentBody: unknown = null;
+  headers: Record<string, string> = {};
 
   open(_method: string, url: string) {
     this.openedUrl = url;
+  }
+
+  setRequestHeader(name: string, value: string) {
+    this.headers[name] = value;
   }
 
   send(body: unknown) {
@@ -48,6 +53,8 @@ describe("uploadFileWithProgress", () => {
     xhr.onload?.();
 
     await expect(promise).resolves.toEqual({ document_id: "abc-123" });
+    // The upload is owned by this browser's workspace (document isolation).
+    expect(xhr.headers["X-Workspace-Token"]).toMatch(/^[0-9a-f]{64}$/);
   });
 
   it("reports real fractional progress as bytes are sent", async () => {

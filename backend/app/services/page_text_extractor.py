@@ -227,6 +227,7 @@ def extract_page(
     ocr_error: str | None = None
     ocr_layout_payload: dict | None = None
     preprocess_tags: list[str] = []
+    ocr_text_page = None
 
     final_text = native_text
     final_blocks = native_block_data
@@ -450,13 +451,57 @@ def extract_page(
                         mean_conf=layout.mean_word_confidence,
                     )
             except Exception as exc:
+                # Without this layer the page has text but no positions:
+                # the transcript degrades to text-only and structure
+                # extraction has nothing to work with — log why.
                 log_event(
                     "ocr_word_layout",
                     stage="rendering_ocr",
                     status="error",
                     page=page_number,
                     error_category=type(exc).__name__,
+                    error=str(exc)[:500],
                 )
+
+            # The separate pytesseract pass can fail (e.g. time out on a
+            # slow CPU) after MuPDF's OCR already found every word and its
+            # box. Reuse those positions — no second OCR run — so the page
+            # never ends up with text but no geometry.
+            if ocr_layout_payload is None and ocr_text_page is not None and extraction_method == "ocr":
+                try:
+                    from app.services.ocr_word_layer import layout_from_textpage_words
+
+                    layout_dpi = min(_bounded_ocr_dpi(page, settings.ocr_dpi), 220)
+                    scale = layout_dpi / 72.0
+                    textpage_layout = layout_from_textpage_words(
+                        page.get_text("words", textpage=ocr_text_page), scale=scale
+                    )
+                    if textpage_layout is not None:
+                        ocr_layout_payload = textpage_layout.to_json()
+                        ocr_layout_payload["preprocess"] = ["source:mupdf_textpage"]
+                        ocr_layout_payload["coordinate_space"] = {
+                            "unit": "px",
+                            "dpi": layout_dpi,
+                            "image_width": round(page.rect.width * scale),
+                            "image_height": round(page.rect.height * scale),
+                            "deskew_degrees": 0.0,
+                        }
+                        log_event(
+                            "ocr_word_layout",
+                            stage="rendering_ocr",
+                            status="fallback_mupdf_textpage",
+                            page=page_number,
+                            word_count=len(textpage_layout.words),
+                        )
+                except Exception as exc:  # noqa: BLE001 — text stays; only positions are missing
+                    log_event(
+                        "ocr_word_layout",
+                        stage="rendering_ocr",
+                        status="error",
+                        page=page_number,
+                        error_category=type(exc).__name__,
+                        error=str(exc)[:500],
+                    )
 
         _release_native_memory()
 

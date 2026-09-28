@@ -155,6 +155,9 @@ def page_transcript(database: Session, document: Document, page_number: int) -> 
         "page_width": page.page_width,
         "page_height": page.page_height,
         "blocks": [],
+        # spatial: words with page boxes (highlightable) · text_only: text
+        # without positions · none: no text at all.
+        "positioning": "none",
         "warnings": warnings,
     }
     if source_type == "html":
@@ -171,6 +174,7 @@ def page_transcript(database: Session, document: Document, page_number: int) -> 
             for p in paragraphs
         ]
         result["word_count"] = len(text.split())
+        result["positioning"] = "text_only" if text.strip() else "none"
         return result
 
     fitz_doc = _open_source_pdf(document, source_type, warnings)
@@ -185,12 +189,54 @@ def page_transcript(database: Session, document: Document, page_number: int) -> 
     finally:
         if fitz_doc is not None:
             fitz_doc.close()
+    if not words:
+        # No positioned words (e.g. an OCR route that returned text only):
+        # show the engine's text, cleaned, as a text-only transcript. No
+        # boxes are invented, so nothing here can be highlighted.
+        text = page.final_text or ""
+        result["positioning"] = "text_only" if text.strip() else "none"
+        result["extraction_method"] = page.extraction_method or method
+        result["word_count"] = len(text.split())
+        result["blocks"] = _text_only_blocks(text)
+        if text.strip():
+            warnings.append(
+                "Source positioning was not available for this page. Transcript text is shown below; "
+                "source highlighting is unavailable."
+            )
+        return result
+
     structure = get_or_build_source_structure(database, document)
     tables = [t for t in structure.table_candidates if t.page == page_number]
+    result["positioning"] = "spatial"
     result["extraction_method"] = method
     result["word_count"] = len(words)
     result["blocks"] = [block.as_dict() for block in reconstruct_page(words, tables)]
     return result
+
+
+def _text_only_blocks(text: str) -> list[dict]:
+    """Engine text as paragraphs: layout padding collapsed to a column gap,
+    lines without any letter or digit (OCR specks, rules) dropped."""
+
+    paragraphs: list[list[str]] = [[]]
+    for raw in text.splitlines():
+        line = re.sub(r" {2,}", "   ", raw.strip())
+        if not re.search(r"[A-Za-z0-9]", line):
+            if paragraphs[-1]:
+                paragraphs.append([])
+            continue
+        paragraphs[-1].append(line)
+    return [
+        {
+            "kind": "paragraph",
+            "text": "\n".join(lines),
+            "bbox": None,
+            "lines": [{"text": line, "bbox": None, "words": []} for line in lines],
+            "table": None,
+        }
+        for lines in paragraphs
+        if lines
+    ]
 
 
 def _build_html(file_path: Path | None, result: StructuredSourceDocument) -> None:

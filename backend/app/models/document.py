@@ -187,6 +187,16 @@ class Document(Base):
         nullable=True,
     )
 
+    # Hash of the uploading browser workspace's secret token
+    # (core/document_access.py). Anonymous workspace callers may only reach
+    # documents they own; NULL (documents from before isolation) is
+    # reachable by real credentials (admins) only.
+    owner_workspace: Mapped[str | None] = mapped_column(
+        String(64),
+        nullable=True,
+        index=True,
+    )
+
     # Repository promotion — deliberately separate from Approve; see
     # services/document_status.py's compute_repository_status.
     promoted_by: Mapped[str | None] = mapped_column(

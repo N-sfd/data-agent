@@ -2,6 +2,7 @@
 schema-neutral label/value, table and region recovery from PDF (native and
 OCR) and HTML, with provenance — no business vocabulary."""
 
+import io
 from pathlib import Path
 from uuid import uuid4
 
@@ -582,3 +583,87 @@ def test_transcript_endpoint_returns_reading_order_blocks():
     assert first_text == "REGIONAL EXAMINATION BOARD"
     assert any("Roll No.   516522   Registration No.   0222420149" == b["text"] for b in transcript["blocks"])
     assert client.get(f"/api/documents/{document_id}/pages/99/transcript").status_code == 404
+
+
+def test_page_without_word_positions_gets_a_text_only_transcript_and_no_invented_geometry():
+    from PIL import Image, ImageDraw, ImageFont
+
+    image = Image.new("RGB", (1400, 700), "white")
+    draw = ImageDraw.Draw(image)
+    try:
+        font = ImageFont.truetype("arial.ttf", 34)
+    except OSError:
+        font = ImageFont.load_default()
+    draw.text((80, 120), "Certificate No.   422005/155187", fill="black", font=font)
+    draw.text((80, 220), f"Roll No.   516522   {uuid4().hex[:6]}", fill="black", font=font)
+    buffer = io.BytesIO()
+    image.save(buffer, format="PNG")
+    upload = client.post("/api/documents/upload", files={"file": (f"no-layout-{uuid4()}.png", buffer.getvalue(), "image/png")})
+    assert upload.status_code == 201, upload.text
+    document_id = upload.json()["document_id"]
+    assert client.post(f"/api/documents/{document_id}/extract-pages", json={"run_ocr": True}).status_code == 200
+
+    # Simulate an OCR route that keeps the text but loses word positions.
+    database = SessionLocal()
+    try:
+        page = database.scalars(select(DocumentPage).where(DocumentPage.document_id == document_id)).first()
+        if not (page.final_text or "").strip():
+            pytest.skip("OCR engine unavailable in this environment")
+        page.ocr_layout_json = None
+        database.commit()
+    finally:
+        database.close()
+
+    transcript = client.get(f"/api/documents/{document_id}/pages/1/transcript").json()
+    assert transcript["positioning"] == "text_only"
+    assert transcript["word_count"] > 0
+    assert transcript["blocks"] and all(b["bbox"] is None for b in transcript["blocks"])
+    assert all(line["bbox"] is None and line["words"] == [] for b in transcript["blocks"] for line in b["lines"])
+    assert any("positioning was not available" in w for w in transcript["warnings"])
+
+    # Geometry-dependent structure is never built from invented positions.
+    structure = client.get(f"/api/documents/{document_id}/source-structure").json()
+    assert structure["field_candidates"] == [] and structure["table_candidates"] == []
+
+
+def test_failed_layout_pass_falls_back_to_mupdf_ocr_word_positions():
+    """Production failure mode: MuPDF OCR produces the text, but the separate
+    pytesseract layout pass times out. The page must still get real word
+    positions (from MuPDF's own OCR pass) — not text-only."""
+
+    from unittest.mock import patch
+
+    from PIL import Image, ImageDraw, ImageFont
+
+    image = Image.new("RGB", (1400, 700), "white")
+    draw = ImageDraw.Draw(image)
+    try:
+        font = ImageFont.truetype("arial.ttf", 34)
+    except OSError:
+        font = ImageFont.load_default()
+    draw.text((80, 120), "Roll No.   516522", fill="black", font=font)
+    draw.text((80, 220), f"Registration No.   0222420149   {uuid4().hex[:6]}", fill="black", font=font)
+    buffer = io.BytesIO()
+    image.save(buffer, format="PNG")
+    upload = client.post("/api/documents/upload", files={"file": (f"slow-cpu-{uuid4()}.png", buffer.getvalue(), "image/png")})
+    assert upload.status_code == 201, upload.text
+    document_id = upload.json()["document_id"]
+    with patch("app.services.ocr_word_layer.extract_ocr_layout", return_value=None):
+        assert client.post(f"/api/documents/{document_id}/extract-pages", json={"run_ocr": True}).status_code == 200
+
+    database = SessionLocal()
+    try:
+        page = database.scalars(select(DocumentPage).where(DocumentPage.document_id == document_id)).first()
+        if not (page.final_text or "").strip():
+            pytest.skip("OCR engine unavailable in this environment")
+        layout = page.ocr_layout_json
+        assert layout and layout["engine"] == "mupdf_textpage" and layout["words"]
+        assert all(word["conf"] is None for word in layout["words"])  # unknown, never invented
+    finally:
+        database.close()
+
+    transcript = client.get(f"/api/documents/{document_id}/pages/1/transcript").json()
+    assert transcript["positioning"] == "spatial"
+    lines = [line for block in transcript["blocks"] for line in block["lines"]]
+    assert any("516522" in line["text"] for line in lines)
+    assert all(line["bbox"] for line in lines)

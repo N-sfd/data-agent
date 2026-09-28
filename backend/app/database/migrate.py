@@ -101,6 +101,7 @@ DOCUMENT_COLUMNS: dict[str, str | dict[str, str]] = {
     "parent_relationship_status": "VARCHAR(20)",
     "processing_duration_seconds": "FLOAT",
     "approved_by": "VARCHAR(120)",
+    "owner_workspace": "VARCHAR(64)",
     "approved_at": {"sqlite": "DATETIME", "postgresql": "TIMESTAMP WITH TIME ZONE"},
     "document_status": "VARCHAR(30)",
     "parent_relationship_reasons": "JSON",

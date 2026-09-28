@@ -1,4 +1,6 @@
 from fastapi import APIRouter, Depends
+
+from app.core.auth import ActorContext, require_permission
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
@@ -17,6 +19,8 @@ settings = get_settings()
 @router.get("/storage-integrity")
 def storage_integrity(
     database: Session = Depends(get_database),
+    # An operator report listing every document's storage state — admin only.
+    actor: ActorContext = Depends(require_permission("admin.integrations")),
 ) -> dict:
     """Report DB document rows vs local/Supabase source availability.
 

@@ -193,33 +193,47 @@ def test_ready_reports_auth_surface() -> None:
     assert body["checks"]["auth"]["status"] in {"ok", "warn"}
 
 
+def _workspace_upload(workspace: dict) -> str:
+    response = client.post(
+        "/api/documents/upload",
+        files={"file": (f"sec-{uuid4()}.pdf", _pdf(), "application/pdf")},
+        headers=workspace,
+    )
+    assert response.status_code == 201, response.text
+    return response.json()["document_id"]
+
+
 def test_public_workspace_serves_core_flow_without_a_credential() -> None:
     """Default release posture: under enforced RBAC a credential-less
     caller is the limited workspace role — the core flow (view results,
-    ordinary export) works with no key, destructive/admin actions don't."""
+    ordinary export) works with no key for the workspace's own documents;
+    destructive/admin actions don't."""
 
-    document_id = _upload()
+    workspace = {"X-Workspace-Token": uuid4().hex + uuid4().hex}
     enforced = get_settings().model_copy(update={"rbac_enforced": True})
 
     with patch("app.core.auth.get_settings", return_value=enforced):
-        me = client.get("/api/actors/me")
+        document_id = _workspace_upload(workspace)
+        me = client.get("/api/actors/me", headers=workspace)
         assert me.status_code == 200, me.text
         assert me.json()["role"] == "workspace"
 
-        workbook = client.get(f"/api/documents/{document_id}/staging-workbook")
+        workbook = client.get(f"/api/documents/{document_id}/staging-workbook", headers=workspace)
         assert workbook.status_code == 200, workbook.text
 
-        assert client.delete(f"/api/documents/{document_id}").status_code == 403
+        # Even the owning workspace cannot delete.
+        assert client.delete(f"/api/documents/{document_id}", headers=workspace).status_code == 403
 
 
 def test_public_workspace_ignores_spoofed_admin_header() -> None:
-    document_id = _upload()
+    workspace = {"X-Workspace-Token": uuid4().hex + uuid4().hex}
     enforced = get_settings().model_copy(update={"rbac_enforced": True})
 
     with patch("app.core.auth.get_settings", return_value=enforced):
+        document_id = _workspace_upload(workspace)
         response = client.delete(
             f"/api/documents/{document_id}",
-            headers={"X-Actor-Id": "actor-admin-default"},
+            headers={**workspace, "X-Actor-Id": "actor-admin-default"},
         )
     assert response.status_code == 403
 

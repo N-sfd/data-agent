@@ -905,5 +905,8 @@ export interface PageTranscript {
   page_width: number | null;
   page_height: number | null;
   blocks: TranscriptBlock[];
+  /** spatial: lines carry page boxes (highlightable) · text_only: engine
+   * text without positions · none: no text on the page. */
+  positioning?: "spatial" | "text_only" | "none";
   warnings: string[];
 }

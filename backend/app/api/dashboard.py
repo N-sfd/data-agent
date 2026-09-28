@@ -1,6 +1,9 @@
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends
+
+from app.core.auth import ActorContext, get_current_actor
+from app.core.document_access import scope_documents
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -50,8 +53,10 @@ def _review_href(document_id: str, *, field_key: str | None = None) -> str:
 @router.get("/stats", response_model=DashboardStatsResponse)
 async def get_dashboard_stats(
     database: Session = Depends(get_database),
+    actor: ActorContext = Depends(get_current_actor),
 ) -> DashboardStatsResponse:
-    documents = list(database.scalars(select(Document)))
+    documents = list(database.scalars(scope_documents(select(Document), actor)))
+    visible = scope_documents(select(Document.id), actor)
 
     total_documents = len(documents)
     completed = 0
@@ -72,7 +77,11 @@ async def get_dashboard_stats(
         if compute_document_needs_manual_review(database, document):
             documents_requiring_manual_review += 1
 
-    fields = list(database.scalars(select(DocumentMetadataField)))
+    fields = list(
+        database.scalars(
+            select(DocumentMetadataField).where(DocumentMetadataField.document_id.in_(visible))
+        )
+    )
     fields_extracted = len(fields)
 
     extraction_accuracy = (
@@ -119,7 +128,8 @@ async def get_dashboard_stats(
     pages = list(
         database.scalars(
             select(DocumentPage).where(
-                DocumentPage.ocr_attempted.is_(True)
+                DocumentPage.ocr_attempted.is_(True),
+                DocumentPage.document_id.in_(visible),
             )
         )
     )
@@ -133,7 +143,9 @@ async def get_dashboard_stats(
     )
 
     clause_confidences = list(
-        database.scalars(select(DocumentClause.confidence))
+        database.scalars(
+            select(DocumentClause.confidence).where(DocumentClause.document_id.in_(visible))
+        )
     )
 
     clause_extraction_accuracy = (
@@ -164,10 +176,11 @@ async def get_dashboard_stats(
 )
 async def get_review_queue(
     database: Session = Depends(get_database),
+    actor: ActorContext = Depends(get_current_actor),
 ) -> list[ReviewQueueEntry]:
     documents = list(
         database.scalars(
-            select(Document).order_by(Document.uploaded_at.desc())
+            scope_documents(select(Document), actor).order_by(Document.uploaded_at.desc())
         )
     )
 
@@ -223,12 +236,13 @@ async def get_review_queue(
 )
 async def get_review_queue_fields(
     database: Session = Depends(get_database),
+    actor: ActorContext = Depends(get_current_actor),
 ) -> list[ReviewQueueFieldItem]:
     """Field-level Review Queue for target + contract pending items."""
 
     documents = {
         document.id: document
-        for document in database.scalars(select(Document)).all()
+        for document in database.scalars(scope_documents(select(Document), actor)).all()
     }
     fields = list(
         database.scalars(

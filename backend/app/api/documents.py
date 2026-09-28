@@ -43,7 +43,13 @@ from app.services.dashboard_stats import (
     compute_document_confidence,
     compute_document_status,
 )
-from app.core.auth import ActorContext, require_permission
+from app.core.document_access import (
+    record_staged_upload,
+    require_document_access,
+    scope_documents,
+    staged_owner,
+)
+from app.core.auth import ActorContext, get_current_actor, require_permission
 from app.core.observability import bind_job_context, log_event
 from app.services.document_storage import (
     DocumentStorageError,
@@ -104,10 +110,12 @@ def _existing_document_summary(
 
 
 def _find_duplicate(
-    database: Session, checksum: str
+    database: Session, checksum: str, actor: ActorContext
 ) -> Document | None:
-    statement = select(Document).where(
-        Document.checksum_sha256 == checksum
+    # Scoped: a workspace caller must never learn that another workspace
+    # holds a file with the same contents.
+    statement = scope_documents(
+        select(Document).where(Document.checksum_sha256 == checksum), actor
     )
 
     return database.scalar(statement)
@@ -236,6 +244,7 @@ def _create_document_record(
     size_bytes: int,
     checksum: str,
     metadata: PDFMetadata,
+    owner_workspace: str | None = None,
 ) -> tuple[Document, datetime]:
     uploaded_at = datetime.now(timezone.utc)
 
@@ -250,6 +259,7 @@ def _create_document_record(
         encrypted=metadata.encrypted,
         status="ready",
         uploaded_at=uploaded_at,
+        owner_workspace=owner_workspace,
     )
 
     database.add(document)
@@ -297,6 +307,7 @@ async def upload_document(
         ),
     ),
     database: Session = Depends(get_database),
+    actor: ActorContext = Depends(get_current_actor),
 ) -> UploadedDocumentResponse:
     document_id = uuid4()
     destination: Path | None = None
@@ -335,6 +346,7 @@ async def upload_document(
 
                 response.status_code = 200
 
+                record_staged_upload(database, str(document_id), actor)
                 return UploadedDocumentResponse(
                     document_id=document_id,
                     original_filename=display_filename,
@@ -376,7 +388,7 @@ async def upload_document(
                 f"{display_filename} → {metadata.embedded_filename}"
             )
 
-        duplicate = None if allow_duplicate else _find_duplicate(database, checksum)
+        duplicate = None if allow_duplicate else _find_duplicate(database, checksum, actor)
 
         if duplicate is not None:
             log.append("Checked for duplicates — possible duplicate found")
@@ -402,6 +414,7 @@ async def upload_document(
             # the existing document. The caller decides whether to reuse
             # it or upload anyway via POST /{document_id}/resolve-duplicate.
             response.status_code = 200
+            record_staged_upload(database, str(document_id), actor)
 
             return UploadedDocumentResponse(
                 document_id=document_id,
@@ -440,6 +453,7 @@ async def upload_document(
             size_bytes=size_bytes,
             checksum=checksum,
             metadata=metadata,
+            owner_workspace=actor.workspace,
         )
         bind_job_context(document_id=str(document_id))
         upload_object(
@@ -658,6 +672,7 @@ async def resolve_duplicate(
     document_id: UUID,
     payload: ResolveDuplicateRequest,
     database: Session = Depends(get_database),
+    actor: ActorContext = Depends(get_current_actor),
 ) -> UploadedDocumentResponse:
     staged = _find_staged_upload(document_id)
 
@@ -676,6 +691,8 @@ async def resolve_duplicate(
                     ),
                 )
             duplicate = database.get(Document, str(existing_id))
+            if duplicate is not None:
+                require_document_access(database, actor, str(existing_id))
             if duplicate is None:
                 raise HTTPException(
                     status_code=404,
@@ -719,10 +736,12 @@ async def resolve_duplicate(
                 break
             hasher.update(chunk)
     checksum = hasher.hexdigest()
-    duplicate = _find_duplicate(database, checksum)
+    duplicate = _find_duplicate(database, checksum, actor)
 
     if duplicate is None and payload.existing_document_id is not None:
         duplicate = database.get(Document, str(payload.existing_document_id))
+        if duplicate is not None:
+            require_document_access(database, actor, str(payload.existing_document_id))
 
     if duplicate is None:
         raise HTTPException(
@@ -781,6 +800,8 @@ async def resolve_duplicate(
             size_bytes=size_bytes,
             checksum=checksum,
             metadata=metadata,
+            # The staged upload's owner (checked on the path already).
+            owner_workspace=staged_owner(database, str(document_id)) or actor.workspace,
         )
         upload_object(
             settings,
@@ -848,6 +869,7 @@ async def select_portfolio_file(
     document_id: UUID,
     payload: SelectPortfolioFileRequest,
     database: Session = Depends(get_database),
+    actor: ActorContext = Depends(get_current_actor),
 ) -> UploadedDocumentResponse:
     staged = _find_staged_upload(document_id)
 
@@ -888,7 +910,7 @@ async def select_portfolio_file(
                 hasher.update(chunk)
         checksum = hasher.hexdigest()
 
-        duplicate = _find_duplicate(database, checksum)
+        duplicate = _find_duplicate(database, checksum, actor)
 
         if duplicate is not None:
             return UploadedDocumentResponse(
@@ -922,6 +944,8 @@ async def select_portfolio_file(
             size_bytes=size_bytes,
             checksum=checksum,
             metadata=metadata,
+            # The staged upload's owner (checked on the path already).
+            owner_workspace=staged_owner(database, str(document_id)) or actor.workspace,
         )
         upload_object(
             settings,
@@ -1068,10 +1092,11 @@ def _build_document_summary(
 async def list_documents(
     limit: int = 10,
     database: Session = Depends(get_database),
+    actor: ActorContext = Depends(get_current_actor),
 ) -> list[DocumentSummaryResponse]:
     documents = list(
         database.scalars(
-            select(Document)
+            scope_documents(select(Document), actor)
             .order_by(Document.uploaded_at.desc())
             .limit(limit)
         )
@@ -1153,6 +1178,7 @@ async def search_documents(
     limit: int = 25,
     offset: int = 0,
     database: Session = Depends(get_database),
+    actor: ActorContext = Depends(get_current_actor),
 ) -> DocumentSearchResponse:
     query = q.strip()
     settings = get_settings()
@@ -1203,7 +1229,7 @@ async def search_documents(
         if not matching_ids:
             return DocumentSearchResponse(documents=[], total=0)
 
-    base_query = select(Document)
+    base_query = scope_documents(select(Document), actor)
 
     if matching_ids is not None:
         base_query = base_query.where(Document.id.in_(matching_ids))
@@ -1291,8 +1317,9 @@ async def search_documents(
 )
 async def get_document_hierarchy(
     database: Session = Depends(get_database),
+    actor: ActorContext = Depends(get_current_actor),
 ) -> DocumentHierarchyResponse:
-    all_documents = list(database.scalars(select(Document)))
+    all_documents = list(database.scalars(scope_documents(select(Document), actor)))
 
     children_by_parent: dict[str, list[Document]] = {}
 
@@ -1344,14 +1371,19 @@ async def get_global_audit_log(
     limit: int = 50,
     offset: int = 0,
     database: Session = Depends(get_database),
+    actor: ActorContext = Depends(get_current_actor),
 ) -> GlobalAuditLogResponse:
+    visible = scope_documents(select(Document.id), actor)
     total = database.scalar(
-        select(func.count(MetadataFieldAuditLog.id))
+        select(func.count(MetadataFieldAuditLog.id)).where(
+            MetadataFieldAuditLog.document_id.in_(visible)
+        )
     ) or 0
 
     rows = list(
         database.scalars(
             select(MetadataFieldAuditLog)
+            .where(MetadataFieldAuditLog.document_id.in_(visible))
             .order_by(MetadataFieldAuditLog.changed_at.desc())
             .offset(offset)
             .limit(limit)

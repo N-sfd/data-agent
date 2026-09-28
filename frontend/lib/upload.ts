@@ -1,4 +1,5 @@
 import { apiUrl, ApiError, COLD_START_RETRY_DELAYS_MS } from "@/lib/api";
+import { getWorkspaceToken, WORKSPACE_HEADER } from "@/lib/workspace";
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -15,6 +16,16 @@ function sendOnce<T>(
     formData.append("file", file);
 
     xhr.open("POST", apiUrl(path));
+    // Same identity headers as apiFetch: the upload's owner workspace, and
+    // an admin key when one is saved in this browser.
+    const workspace = getWorkspaceToken();
+    if (workspace) xhr.setRequestHeader(WORKSPACE_HEADER, workspace);
+    try {
+      const accessToken = window.localStorage.getItem("data-agent-access-token");
+      if (accessToken) xhr.setRequestHeader("Authorization", `Bearer ${accessToken}`);
+    } catch {
+      // storage unavailable — upload as an anonymous workspace
+    }
 
     xhr.upload.onprogress = (event) => {
       if (event.lengthComputable && onProgress) {

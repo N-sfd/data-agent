@@ -9,7 +9,7 @@ import uuid
 import fitz
 import httpx
 
-BASE = "https://data-agent-7jxa.onrender.com"
+BASE = "https://data-agent-backend-qbmc.onrender.com"
 
 
 def main() -> None:

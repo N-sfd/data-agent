@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import hashlib
-from dataclasses import dataclass
+import re
+from dataclasses import dataclass, replace
 from typing import Annotated
 
 from fastapi import Depends, Header, HTTPException, status
@@ -29,6 +30,10 @@ class ActorContext:
     actor_type: str
     role: str
     display_name: str
+    # Hash of the caller's browser-workspace token (X-Workspace-Token), when
+    # sent. Scopes an anonymous workspace caller to its own documents
+    # (core/document_access.py); ignored for real credentials.
+    workspace: str | None = None
 
     def has(self, permission: Permission) -> bool:
         return role_has_permission(self.role, permission)
@@ -40,6 +45,20 @@ PUBLIC_WORKSPACE_ACTOR = ActorContext(
     role="workspace",
     display_name="Workspace User",
 )
+
+
+WORKSPACE_HEADER = "X-Workspace-Token"
+_WORKSPACE_TOKEN = re.compile(r"^[A-Za-z0-9_-]{32,128}$")
+
+
+def workspace_key(token: str | None) -> str | None:
+    """The stored identity of a workspace: a hash of its secret token (the
+    token itself is never persisted). None for a missing or malformed one."""
+
+    token = (token or "").strip()
+    if not _WORKSPACE_TOKEN.match(token):
+        return None
+    return hashlib.sha256(f"workspace:{token}".encode("utf-8")).hexdigest()
 
 
 def hash_api_key(raw_key: str) -> str:
@@ -86,6 +105,7 @@ def resolve_actor(
     *,
     actor_id_header: str | None,
     authorization: str | None,
+    workspace_token: str | None = None,
 ) -> ActorContext:
     settings = get_settings()
     enforced = settings.effective_rbac_enforced
@@ -139,7 +159,7 @@ def resolve_actor(
         # workspace role rather than walling it behind a key; X-Actor-Id is
         # ignored, so a spoofed header can never gain more than this.
         if settings.public_workspace_access:
-            return PUBLIC_WORKSPACE_ACTOR
+            return replace(PUBLIC_WORKSPACE_ACTOR, workspace=workspace_key(workspace_token))
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail=(
@@ -165,11 +185,13 @@ async def get_current_actor(
     database: Session = Depends(get_database),
     x_actor_id: Annotated[str | None, Header()] = None,
     authorization: Annotated[str | None, Header()] = None,
+    x_workspace_token: Annotated[str | None, Header()] = None,
 ) -> ActorContext:
     return resolve_actor(
         database,
         actor_id_header=x_actor_id,
         authorization=authorization,
+        workspace_token=x_workspace_token,
     )
 
 

@@ -18,6 +18,9 @@ from app.api import (
     staging_workbook,
     v3_export,
 )
+from fastapi import Depends
+
+from app.core.document_access import enforce_document_access
 from app.core.config import get_settings
 from app.core.observability import RequestIdMiddleware
 from app.core.security_headers import SecurityHeadersMiddleware
@@ -56,6 +59,7 @@ from app.models import (  # noqa: F401
 from app.models import document_qa_review as document_qa_review_model  # noqa: F401
 from app.models import document_staging_workbook as document_staging_workbook_model  # noqa: F401
 from app.models import document_source_structure as document_source_structure_model  # noqa: F401
+from app.models import staged_upload as staged_upload_model  # noqa: F401
 from app.models import far_master_clause as far_master_clause_model  # noqa: F401
 from app.models import (  # noqa: F401
     document_delivery_schedule as document_delivery_schedule_model,
@@ -146,30 +150,40 @@ app.add_middleware(
 app.include_router(
     documents.router,
     prefix="/api/documents",
+    # Document isolation for every /{document_id} route (core/document_access.py).
+    dependencies=[Depends(enforce_document_access)],
     tags=["Documents"],
 )
 
 app.include_router(
     page_extraction.router,
     prefix="/api/documents",
+    # Document isolation for every /{document_id} route (core/document_access.py).
+    dependencies=[Depends(enforce_document_access)],
     tags=["Page Extraction"],
 )
 
 app.include_router(
     financial_analysis.router,
     prefix="/api/documents",
+    # Document isolation for every /{document_id} route (core/document_access.py).
+    dependencies=[Depends(enforce_document_access)],
     tags=["Financial Analysis"],
 )
 
 app.include_router(
     universal_extraction.router,
     prefix="/api/documents",
+    # Document isolation for every /{document_id} route (core/document_access.py).
+    dependencies=[Depends(enforce_document_access)],
     tags=["Universal Extraction"],
 )
 
 app.include_router(
     contract_analysis.router,
     prefix="/api/documents",
+    # Document isolation for every /{document_id} route (core/document_access.py).
+    dependencies=[Depends(enforce_document_access)],
     tags=["Contract Analysis"],
 )
 
@@ -194,6 +208,8 @@ app.include_router(
 app.include_router(
     jobs.router,
     prefix="/api/documents",
+    # Document isolation for every /{document_id} route (core/document_access.py).
+    dependencies=[Depends(enforce_document_access)],
     tags=["Jobs"],
 )
 
@@ -206,24 +222,32 @@ app.include_router(
 app.include_router(
     target_corrections.router,
     prefix="/api/documents",
+    # Document isolation for every /{document_id} route (core/document_access.py).
+    dependencies=[Depends(enforce_document_access)],
     tags=["Target Corrections"],
 )
 
 app.include_router(
     reviewed_export.router,
     prefix="/api/documents",
+    # Document isolation for every /{document_id} route (core/document_access.py).
+    dependencies=[Depends(enforce_document_access)],
     tags=["Export"],
 )
 
 app.include_router(
     v3_export.router,
     prefix="/api/documents",
+    # Document isolation for every /{document_id} route (core/document_access.py).
+    dependencies=[Depends(enforce_document_access)],
     tags=["V3 Export"],
 )
 
 app.include_router(
     staging_workbook.router,
     prefix="/api/documents",
+    # Document isolation for every /{document_id} route (core/document_access.py).
+    dependencies=[Depends(enforce_document_access)],
     tags=["Staging Workbook"],
 )
 

@@ -99,6 +99,7 @@ export default function SourceTranscription({ documentId, documentName }: Source
   }
 
   const isHtml = transcript?.source_type === "html";
+  const textOnly = transcript?.positioning === "text_only";
 
   function selectLine(key: string, line: TranscriptLine) {
     if (pageNumber == null) return;
@@ -200,9 +201,13 @@ export default function SourceTranscription({ documentId, documentName }: Source
       className="flex min-h-[420px] flex-col overflow-hidden rounded-xl border border-border bg-surface"
     >
       <div className="border-b border-border px-4 py-3">
-        <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-text-teal">Transcript</p>
+        <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-text-teal">
+          {textOnly ? "Text-only transcription" : "Transcript"}
+        </p>
         <p className="text-xs text-text-secondary">
-          Reading order reconstructed from the page. Click a line to highlight it in the source.
+          {textOnly
+            ? "Source positioning was not available for this page. Transcript text is shown below; source highlighting is unavailable."
+            : "Reading order reconstructed from the page. Click a line to highlight it in the source."}
         </p>
       </div>
       <div className="max-h-[65vh] flex-1 space-y-3 overflow-auto p-4">

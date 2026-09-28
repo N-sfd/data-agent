@@ -154,12 +154,22 @@ def detect_relationship(
     if not candidate_ids:
         return None
 
+    # Only documents of the same owner (workspace isolation): a document is
+    # never linked to — and so never reveals — another workspace's file.
+    same_owner = (
+        Document.owner_workspace == document.owner_workspace
+        if document.owner_workspace is not None
+        else Document.owner_workspace.is_(None)
+    )
     candidates = {
         c.id: c
         for c in database.scalars(
-            select(Document).where(Document.id.in_(candidate_ids))
+            select(Document).where(Document.id.in_(candidate_ids), same_owner)
         )
     }
+    candidate_ids = set(candidates)
+    if not candidate_ids:
+        return None
 
     # Batch-fetch bonus-signal fields for the child document plus every
     # remaining candidate in one query instead of per-candidate calls.

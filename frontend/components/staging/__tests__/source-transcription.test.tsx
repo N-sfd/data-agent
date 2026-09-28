@@ -80,3 +80,29 @@ describe("SourceTranscription (Source & Transcript)", () => {
     expect(last.request.region).toEqual([58, 110, 200, 122]);
   });
 });
+
+describe("SourceTranscription text-only pages", () => {
+  beforeEach(() => {
+    pagesMock.mockResolvedValue([PAGE]);
+    panelProps.length = 0;
+  });
+
+  it("labels a page without source positions as text-only and never offers highlighting", async () => {
+    transcriptMock.mockResolvedValue({
+      ...TRANSCRIPT,
+      positioning: "text_only",
+      blocks: [
+        { kind: "paragraph", text: "Certificate No.   422005/155187", bbox: null, table: null,
+          lines: [{ text: "Certificate No.   422005/155187", bbox: null, words: [] }] },
+      ],
+    });
+    render(<SourceTranscription documentId="doc-1" documentName="FA.jpg" />);
+    expect(await screen.findByText("Text-only transcription")).toBeInTheDocument();
+    expect(screen.getByText(/Source positioning was not available for this page/)).toBeInTheDocument();
+    const line = screen.getByText("422005/155187").closest("button")!;
+    expect(line).toBeDisabled();
+    fireEvent.click(line);
+    const last = panelProps.at(-1) as { request: { region?: unknown } };
+    expect(last.request.region ?? null).toBeNull();
+  });
+});

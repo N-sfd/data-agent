@@ -1,8 +1,11 @@
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
+
+from app.core.auth import ActorContext, get_current_actor
+from app.core.document_access import can_access_document
+from app.models.document import Document
 from sqlalchemy.orm import Session
 
 from app.database.dependencies import get_database
-from app.models.document import Document
 from app.models.extraction_job import ExtractionJob
 from app.schemas.extraction_job import (
     ExtractionJobResponse,
@@ -103,10 +106,17 @@ async def start_extraction_job(
 async def get_job(
     job_id: int,
     database: Session = Depends(get_database),
+    actor: ActorContext = Depends(get_current_actor),
 ) -> ExtractionJobResponse:
     job = database.get(ExtractionJob, job_id)
 
     if job is None:
+        raise HTTPException(status_code=404, detail="Job not found.")
+
+    # Job ids are sequential: the job is only visible to whoever may see
+    # its document (core/document_access.py).
+    document = database.get(Document, job.document_id)
+    if document is None or not can_access_document(actor, document):
         raise HTTPException(status_code=404, detail="Job not found.")
 
     return _to_response(job)

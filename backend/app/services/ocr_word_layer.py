@@ -72,10 +72,13 @@ def extract_ocr_layout(
 ) -> OcrLayout | None:
     """Run pytesseract image_to_data and rebuild words/lines with geometry."""
 
+    from app.core.observability import log_event
+
     try:
         from PIL import Image
         import pytesseract
-    except ImportError:
+    except ImportError as exc:
+        log_event("ocr_word_layout", stage="rendering_ocr", status="unavailable", error_category="ImportError", error=str(exc)[:300])
         return None
 
     from app.services.embedded_image_ocr import _configure_pytesseract
@@ -91,7 +94,15 @@ def extract_ocr_layout(
                 timeout=timeout_seconds,
                 output_type=pytesseract.Output.DICT,
             )
-    except Exception:
+    except Exception as exc:
+        # The page keeps its OCR text but loses positions — never silently.
+        log_event(
+            "ocr_word_layout",
+            stage="rendering_ocr",
+            status="error",
+            error_category=type(exc).__name__,
+            error=str(exc)[:500],
+        )
         return None
 
     words: list[OcrWord] = []
@@ -150,3 +161,58 @@ def extract_ocr_layout(
         sum(word.conf for word in words) / len(words) if words else None
     )
     return OcrLayout(words=words, lines=lines, mean_word_confidence=mean)
+
+
+def layout_from_textpage_words(
+    words: list[tuple],
+    *,
+    scale: float,
+) -> OcrLayout | None:
+    """Word layer from the words MuPDF's own OCR pass already produced
+    (``page.get_text("words", textpage=ocr_textpage)``, PDF points), scaled
+    into the same pixel space as the pytesseract layer. Used when the
+    separate pytesseract pass fails — e.g. times out on a slow CPU — so the
+    page keeps real word positions without a second OCR run.
+
+    MuPDF reports no per-word confidence; it stays unknown (None) rather
+    than invented.
+    """
+
+    ocr_words: list[OcrWord] = []
+    for item in words:
+        x0, y0, x1, y1, text, block_num, line_num, word_num = item[:8]
+        text = str(text or "").strip()
+        if not text:
+            continue
+        ocr_words.append(
+            OcrWord(
+                text=text,
+                conf=None,  # type: ignore[arg-type] — unknown, not invented
+                x0=float(x0) * scale,
+                y0=float(y0) * scale,
+                x1=float(x1) * scale,
+                y1=float(y1) * scale,
+                block_num=int(block_num),
+                line_num=int(line_num),
+                word_num=int(word_num),
+            )
+        )
+    if not ocr_words:
+        return None
+    lines_map: dict[tuple[int, int], list[OcrWord]] = {}
+    for word in ocr_words:
+        lines_map.setdefault((word.block_num, word.line_num), []).append(word)
+    lines = [
+        OcrLine(
+            text=" ".join(w.text for w in line_words),
+            conf=None,  # type: ignore[arg-type]
+            x0=min(w.x0 for w in line_words),
+            y0=min(w.y0 for w in line_words),
+            x1=max(w.x1 for w in line_words),
+            y1=max(w.y1 for w in line_words),
+            words=line_words,
+        )
+        for key in sorted(lines_map)
+        for line_words in [sorted(lines_map[key], key=lambda w: w.x0)]
+    ]
+    return OcrLayout(words=ocr_words, lines=lines, mean_word_confidence=None, engine="mupdf_textpage")

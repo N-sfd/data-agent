@@ -6,6 +6,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
+from app.core.document_access import can_access_document
 from app.core.auth import ActorContext, get_current_actor
 from app.core.observability import get_request_id
 from app.database.dependencies import get_database
@@ -506,7 +507,11 @@ async def get_child_relationships(
     child_documents = list(
         database.scalars(
             select(Document).where(
-                Document.parent_document_id == document_id
+                Document.parent_document_id == document_id,
+                # Same owner only (workspace isolation).
+                Document.owner_workspace == parent.owner_workspace
+                if parent.owner_workspace is not None
+                else Document.owner_workspace.is_(None),
             )
         )
     )
@@ -560,6 +565,7 @@ async def assign_relationship(
     document_id: str,
     payload: ManualRelationshipRequest,
     database: Session = Depends(get_database),
+    actor: ActorContext = Depends(get_current_actor),
 ) -> DetectedRelationship:
     document = database.get(Document, document_id)
 
@@ -577,7 +583,11 @@ async def assign_relationship(
 
     parent = database.get(Document, payload.parent_document_id)
 
-    if parent is None:
+    # The body names a second document: it must be reachable too, or a
+    # caller could link to — and then read — another workspace's file.
+    if parent is None or not can_access_document(actor, parent) or (
+        parent.owner_workspace != document.owner_workspace
+    ):
         raise HTTPException(
             status_code=404,
             detail="The selected parent document does not exist.",
