@@ -29,6 +29,12 @@ def latest(profile_id: str) -> StagingProfile | None:
     return max(versions, key=lambda p: p.profile_version) if versions else None
 
 
+def latest_profiles() -> list[StagingProfile]:
+    """The newest version of every registered profile."""
+
+    return [latest(pid) for pid in sorted({pid for pid, _ in _PROFILES})]
+
+
 def all_profiles() -> list[StagingProfile]:
     return sorted(_PROFILES.values(), key=lambda p: (p.profile_id, p.profile_version))
 
@@ -59,10 +65,12 @@ def _register_builtin_profiles() -> None:
     from app.staging.profiles.contract_v3 import CONTRACT_V3_PROFILE
     from app.staging.profiles.generic_business_document import GENERIC_PROFILE
     from app.staging.profiles.generic_business_document_v1 import GENERIC_PROFILE_V1
+    from app.staging.profiles.invoice_v1 import INVOICE_V1_PROFILE
 
     register(CONTRACT_V3_PROFILE)
     register(GENERIC_PROFILE_V1)
     register(GENERIC_PROFILE)
+    register(INVOICE_V1_PROFILE)
 
 
 _register_builtin_profiles()

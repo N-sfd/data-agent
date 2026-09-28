@@ -49,10 +49,22 @@ class Word:
     y1: float
     size: float
     bold: bool = False
+    # Vertical offset of this word's row caused by page skew (a scanned
+    # page tilted and not deskewed). Lines are grouped on y - row_offset;
+    # the reported geometry stays in page space.
+    row_offset: float = 0.0
 
     @property
     def cy(self) -> float:
         return (self.y0 + self.y1) / 2
+
+    @property
+    def row_y0(self) -> float:
+        return self.y0 - self.row_offset
+
+    @property
+    def row_y1(self) -> float:
+        return self.y1 - self.row_offset
 
 
 @dataclass
@@ -111,6 +123,18 @@ class Line:
         return max(1.0, self.y1 - self.y0)
 
     @property
+    def row_y0(self) -> float:
+        return min(w.row_y0 for w in self.words)
+
+    @property
+    def row_y1(self) -> float:
+        return max(w.row_y1 for w in self.words)
+
+    @property
+    def row_height(self) -> float:
+        return max(1.0, self.row_y1 - self.row_y0)
+
+    @property
     def free_segments(self) -> list[Segment]:
         return [s for s in self.segments if not s.used]
 
@@ -142,7 +166,9 @@ def native_words(page) -> list[Word]:
             if sx0 - 0.5 <= cx <= sx1 + 0.5 and sy0 - 0.5 <= cy <= sy1 + 0.5:
                 size, bold = span_size, span_bold
                 break
-        words.append(Word(text, x0, y0, x1, y1, size, bold))
+        # Fonts that encode the printed hyphen as U+00AD (soft hyphen) would
+        # otherwise yield values browsers render without the hyphen.
+        words.append(Word(text.replace("\u00ad", "-"), x0, y0, x1, y1, size, bold))
     return words
 
 
@@ -157,7 +183,39 @@ def ocr_words(ocr_layout_json: dict, space: OcrCoordinateSpace) -> list[Word]:
             (float(item["x0"]), float(item["y0"]), float(item["x1"]), float(item["y1"]))
         )
         words.append(Word(text, x0, y0, x1, y1, size=max(1.0, (y1 - y0) * 0.85)))
+    slope = ocr_skew_slope(ocr_layout_json)
+    if slope and words:
+        centre = (min(w.x0 for w in words) + max(w.x1 for w in words)) / 2
+        for word in words:
+            word.row_offset = slope * ((word.x0 + word.x1) / 2 - centre)
     return words
+
+
+def ocr_skew_slope(ocr_layout_json: dict) -> float:
+    """dy/dx of text rows on a page that was OCR'd still tilted (deskew
+    skipped or not recorded): the median slope of word centres along the
+    engine's own wide text lines. 0.0 when level or not measurable."""
+
+    slopes: list[float] = []
+    for line in ocr_layout_json.get("lines") or []:
+        words = [w for w in line.get("words") or [] if str(w.get("text") or "").strip()]
+        if len(words) < 3:
+            continue
+        xs = [(float(w["x0"]) + float(w["x1"])) / 2 for w in words]
+        ys = [(float(w["y0"]) + float(w["y1"])) / 2 for w in words]
+        span = max(xs) - min(xs)
+        heights = [float(w["y1"]) - float(w["y0"]) for w in words]
+        if span < 10 * statistics.median(heights):
+            continue
+        mx, my = sum(xs) / len(xs), sum(ys) / len(ys)
+        denominator = sum((x - mx) ** 2 for x in xs)
+        if denominator:
+            slopes.append(sum((x - mx) * (y - my) for x, y in zip(xs, ys)) / denominator)
+    if len(slopes) < 3:
+        return 0.0
+    slope = statistics.median(slopes)
+    # Ignore sub-0.1° noise and anything too steep to be a mild scan tilt.
+    return slope if 0.0017 <= abs(slope) <= 0.09 else 0.0
 
 
 # --- lines and segments ----------------------------------------------------
@@ -165,12 +223,12 @@ def ocr_words(ocr_layout_json: dict, space: OcrCoordinateSpace) -> list[Word]:
 
 def build_lines(words: list[Word]) -> list[Line]:
     lines: list[Line] = []
-    for word in sorted(words, key=lambda w: (w.cy, w.x0)):
+    for word in sorted(words, key=lambda w: ((w.row_y0 + w.row_y1) / 2, w.x0)):
         height = max(1.0, word.y1 - word.y0)
         target = None
         for line in reversed(lines[-6:]):
-            overlap = min(line.y1, word.y1) - max(line.y0, word.y0)
-            if overlap >= 0.5 * min(line.height, height):
+            overlap = min(line.row_y1, word.row_y1) - max(line.row_y0, word.row_y0)
+            if overlap >= 0.5 * min(line.row_height, height):
                 target = line
                 break
         if target is None:
@@ -178,7 +236,7 @@ def build_lines(words: list[Word]) -> list[Line]:
             lines.append(target)
         target.words.append(word)
 
-    lines.sort(key=lambda l: (l.y0, min(w.x0 for w in l.words)))
+    lines.sort(key=lambda l: (l.row_y0, min(w.x0 for w in l.words)))
     for index, line in enumerate(lines):
         line.index = index
         ordered = sorted(line.words, key=lambda w: w.x0)
@@ -268,11 +326,90 @@ def _alignment_tables(lines: list[Line]) -> list[tuple[list[_Band], list[list[li
         full_rows = [r for r in rows if len(r) >= max(2, len(bands) // 2)]
         if len(bands) >= 3 and len(full_rows) >= 3:
             grid = [[row.get(b, []) for b in range(len(bands))] for row in rows]
+            header = _header_above(lines, i, bands, line_height)
+            if header is not None:
+                grid.insert(0, header[1])
+                members.insert(0, header[0])
+            bands, grid = _split_fused_bands(bands, grid)
             tables.append((bands, grid, members))
             i = j
         else:
             i += 1
     return tables
+
+
+def _header_above(
+    lines: list[Line], start: int, bands: list[_Band], line_height: float
+) -> tuple[Line, list[list[Segment]]] | None:
+    """The line directly above a column-aligned table whose labels didn't
+    band-align with the data (left-aligned headers over right-aligned
+    numbers): same column count, label-shaped, and each label sits in its
+    own column's slot — between the neighbouring columns — in order."""
+
+    if start == 0:
+        return None
+    line = lines[start - 1]
+    segs = sorted(line.free_segments, key=lambda s: s.x0)
+    if len(segs) != len(bands) or lines[start].y0 - line.y1 > 1.5 * line_height:
+        return None
+    if any(is_numeric_value(s.text) or len(s.words) > 4 for s in segs):
+        return None
+    for k, seg in enumerate(segs):
+        low = bands[k - 1].x1 if k else float("-inf")
+        high = bands[k + 1].x0 if k + 1 < len(bands) else float("inf")
+        if not (seg.x0 >= low - 2 and seg.x1 <= high + 2):
+            return None
+    return line, [[seg] for seg in segs]
+
+
+def _split_fused_bands(
+    bands: list[_Band], grid: list[list[list[Segment]]]
+) -> tuple[list[_Band], list[list[list[Segment]]]]:
+    """Two columns whose HEADERS nearly touch ("UOM" + right-aligned "Unit
+    Price") fuse into one band, yet every data row shows two runs with a
+    clear vertical gutter between them. Split such a band at that gutter;
+    a header run that straddles it is divided word by word."""
+
+    b = 0
+    while b < len(bands):
+        cells = [row[b] for row in grid]
+        filled = [c for c in cells if c]
+        pairs = [sorted(c, key=lambda s: s.x0) for c in filled if len(c) == 2]
+        if len(pairs) < 3 or len(pairs) < 0.6 * len(filled) or any(len(c) > 2 for c in filled):
+            b += 1
+            continue
+        g0 = max(p[0].x1 for p in pairs)
+        g1 = min(p[1].x0 for p in pairs)
+        singles = [c[0] for c in filled if len(c) == 1]
+        straddling = [s for s in singles if s.x0 < g0 - 1 and s.x1 > g1 + 1]
+        if g1 - g0 < 4 or len(straddling) > 1:
+            b += 1
+            continue
+        middle = (g0 + g1) / 2
+        new_grid = []
+        for row in grid:
+            left: list[Segment] = []
+            right: list[Segment] = []
+            for seg in row[b]:
+                if seg.x1 <= middle:
+                    left.append(seg)
+                elif seg.x0 >= middle:
+                    right.append(seg)
+                else:
+                    # A header run spanning the gutter: assign each word to
+                    # the side whose data it sits nearer to.
+                    lw = [w for w in seg.words if (w.x0 + w.x1) / 2 < middle]
+                    rw = [w for w in seg.words if (w.x0 + w.x1) / 2 >= middle]
+                    if lw:
+                        left.append(Segment(lw, seg.line_index, seg.index, seg.used))
+                    if rw:
+                        right.append(Segment(rw, seg.line_index, seg.index, seg.used))
+            new_grid.append(row[:b] + [left, right] + row[b + 1:])
+        grid = new_grid
+        band = bands[b]
+        bands = bands[:b] + [_Band(band.x0, g0), _Band(g1, band.x1)] + bands[b + 1:]
+        b += 2
+    return bands, grid
 
 
 def _is_header_row(cells: list[list[Segment]], data_rows: list[list[list[Segment]]]) -> bool:
@@ -481,6 +618,39 @@ _LIST_ITEM = re.compile(r"^(\(?[a-z0-9]{1,3}[.)]|[•·▪●\-*])\s+\S", re.I)
 _INLINE_SEP = re.compile(r"^(?P<label>[^:]{1,60}?[A-Za-z)#.])\s*:\s+(?P<value>\S.*)$")
 
 
+def _inline_pairs(words: list[Word], label_words: int) -> list[tuple[list[Word], list[Word]]]:
+    """Split one text run holding several "Label: value" pairs
+    ("Invoice Number: INV-1001   Invoice Date: 03/14/2025"). A later word
+    ending in ':' starts a new pair when the words before it form a
+    label-shaped phrase; the phrase starts after the widest gap (pairs are
+    usually spaced apart), else at the first capitalized word without digits."""
+
+    pairs: list[tuple[list[Word], list[Word]]] = []
+    label_start, value_start = 0, label_words
+    k = value_start + 1
+    while k < len(words):
+        if not words[k].text.endswith(":") or k + 1 >= len(words):
+            k += 1
+            continue
+        starts = [
+            j for j in range(max(value_start + 1, k - 4), k + 1)
+            if label_rejection(" ".join(w.text for w in words[j:k + 1])) is None
+            and words[j].text[:1].isupper()
+        ]
+        if not starts:
+            k += 1
+            continue
+        widest = max(starts, key=lambda j: words[j].x0 - words[j - 1].x1)
+        gap = words[widest].x0 - words[widest - 1].x1
+        if all(abs((words[j].x0 - words[j - 1].x1) - gap) < 0.5 for j in starts):
+            widest = next((j for j in starts if not any(ch.isdigit() for ch in words[j].text)), widest)
+        pairs.append((words[label_start:value_start], words[value_start:widest]))
+        label_start, value_start = widest, k + 1
+        k = value_start + 1
+    pairs.append((words[label_start:value_start], words[value_start:]))
+    return pairs
+
+
 def _is_label_segment(seg: Segment) -> bool:
     return seg.text.rstrip().endswith(":") and label_rejection(seg.text) is None
 
@@ -501,14 +671,19 @@ def _label_value_candidates(
             if inline and not text.endswith(":") and "://" not in text:
                 label, value = inline.group("label"), inline.group("value")
                 label_words = min(len(label.split()), len(seg.words))
-                fields.append(
-                    _field(
-                        ids, page_number, label + ":", value, "same_line_separator",
-                        _union([(w.x0, w.y0, w.x1, w.y1) for w in seg.words[:label_words]]) or seg.bbox,
-                        _union([(w.x0, w.y0, w.x1, w.y1) for w in seg.words[label_words:]]) or seg.bbox,
-                        text, extraction_method,
+                for label_part, value_part in _inline_pairs(seg.words, label_words):
+                    pair_text = " ".join(w.text for w in label_part + value_part)
+                    fields.append(
+                        _field(
+                            ids, page_number,
+                            " ".join(w.text for w in label_part).rstrip(":") + ":",
+                            " ".join(w.text for w in value_part),
+                            "same_line_separator",
+                            _union([(w.x0, w.y0, w.x1, w.y1) for w in label_part]) or seg.bbox,
+                            _union([(w.x0, w.y0, w.x1, w.y1) for w in value_part]) or seg.bbox,
+                            pair_text, extraction_method,
+                        )
                     )
-                )
                 seg.used = True
                 continue
 
@@ -565,31 +740,48 @@ def _values_below(label: Segment, line: Line, lines: list[Line]) -> list[Segment
     """Consecutive left-aligned runs directly under a "Label:" run — e.g. a
     multi-line address under "Bill To:"."""
 
-    collected: list[Segment] = []
-    previous_bottom = line.y1
-    for below_line in lines[line.index + 1 : line.index + 8]:
-        if below_line.y0 - previous_bottom > 1.6 * line.height:
-            break
-        match = next(
+    def aligned(candidate_line: Line) -> Segment | None:
+        return next(
             (
                 s
-                for s in below_line.free_segments
+                for s in candidate_line.free_segments
                 if abs(s.x0 - label.x0) <= 12.0 or (s.x0 >= label.x0 - 2 and s.x0 <= label.x1)
             ),
             None,
         )
+
+    window = lines[line.index + 1 : line.index + 9]
+    collected: list[Segment] = []
+    previous_bottom = line.y1
+    for position, below_line in enumerate(window):
+        if below_line.y0 - previous_bottom > 1.6 * line.height:
+            break
+        match = aligned(below_line)
         if match is None:
             # A line belonging only to another column (e.g. a right-hand
             # key/value block interleaved with this one) is skipped, not
             # treated as the end of the value.
             continue
-        if (
-            _is_label_segment(match)
-            or _INLINE_SEP.match(match.text.strip())
-            or _LIST_ITEM.match(match.text.strip())
-        ):
+        text = match.text.strip()
+        if _is_label_segment(match) or _LIST_ITEM.match(text):
             # A list under a heading-like "Label:" is a list, not a value.
             break
+        if _INLINE_SEP.match(text):
+            # "Attn: Accounts Payable" INSIDE an address block (a plain
+            # aligned line follows it) belongs to the block; a "Label:
+            # value" line that starts a stack of fields ends it.
+            following = next(
+                (
+                    s
+                    for later in window[position + 1 : position + 3]
+                    if later.y0 - below_line.y1 <= 1.6 * line.height
+                    for s in [aligned(later)]
+                    if s is not None
+                ),
+                None,
+            )
+            if not collected or following is None or _INLINE_SEP.match(following.text.strip()) or _is_label_segment(following):
+                break
         collected.append(match)
         previous_bottom = below_line.y1
     return collected
@@ -657,6 +849,25 @@ def _group_key_values(ids: _Ids, page_number: int, fields: list[FieldCandidate])
 _CONTACT_SIGNAL = re.compile(r"[\w.+-]+@[\w-]+\.[\w.-]+|\(?\d{3}\)?[\s.-]\d{3}[\s.-]\d{4}|\b[A-Z]{2}\s+\d{5}\b")
 
 
+_ABBREVIATION_END = re.compile(r"(?:^|\s)(?:[A-Za-z]{1,4}\.|(?:[A-Za-z]\.){2,})$")
+
+
+def _ends_like_sentence_or_label(text: str) -> bool:
+    """A trailing colon/comma, or a sentence-final period — but not the
+    period of an abbreviation ("Supply Co.", "Events B.V.")."""
+
+    stripped = text.rstrip()
+    if stripped.endswith((":", ",")):
+        return True
+    return stripped.endswith(".") and not _ABBREVIATION_END.search(stripped)
+
+
+def _typography_break(upper: Segment, lower: Segment) -> bool:
+    larger = upper.size >= 1.2 * lower.size
+    weight = upper.bold and not lower.bold and len(upper.text.split()) <= 10
+    return larger or weight
+
+
 def _text_regions(ids: _Ids, page_number: int, lines: list[Line], extraction_method: str) -> list[StructuredRegion]:
     """Headings, paragraphs/narrative and contact blocks from the runs no
     table or label/value claimed. Runs join a block only when they are on
@@ -680,6 +891,9 @@ def _text_regions(ids: _Ids, page_number: int, lines: list[Line], extraction_met
                 last_line.index < line.index
                 and line.y0 - last_line.y1 <= 1.2 * last_line.height
                 and abs(seg.x0 - block[0].x0) <= 12.0
+                # A typography change (a larger or bold name line above
+                # regular address lines) starts a new block.
+                and not (len(block) == 1 and _typography_break(last, seg))
             ):
                 target = block
                 break
@@ -697,9 +911,12 @@ def _text_regions(ids: _Ids, page_number: int, lines: list[Line], extraction_met
         if (
             len(block) == 1
             and words <= 10
-            and not text.rstrip().endswith((":", ".", ","))
+            and not _ends_like_sentence_or_label(text)
             and (block[0].bold or size >= 1.2 * body_size)
             and re.search(r"[A-Za-z]", text)
+            # An email/URL run can look "large" to OCR ('@', descenders)
+            # but is contact data, never a heading.
+            and not re.search(r"@|www\.|https?://", text)
         ):
             kind = "HEADING"
         elif _CONTACT_SIGNAL.search(text) and len(block) <= 8 and words <= 60:

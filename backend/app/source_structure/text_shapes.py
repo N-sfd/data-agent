@@ -41,6 +41,8 @@ MAX_VALUE_CHARS = 240
 MAX_VALUE_WORDS = 30
 
 
+_ABBREVIATION = re.compile(r"\b([A-Z][A-Za-z]{0,3})\.(?=\s|$)")
+
 _LEADING_BULLET = re.compile(r"^[•·▪◦‣⁃●*\-–]+\s*")
 
 
@@ -77,7 +79,12 @@ def label_rejection(label: str, value: str | None = None) -> str | None:
         return "label_is_lowercase_fragment"
     if any(w in _NON_LABEL_ANYWHERE for w in lowered):
         return "label_contains_verb_or_pronoun"
-    if re.search(r"[.!?;]\s+\S", text) or text.endswith((".", "!", "?", ";", ",")):
+    # A short capitalized token's period is an abbreviation ("Invoice No.",
+    # "Ref. No.", "Acct."), not the end of a sentence.
+    unabbreviated = _ABBREVIATION.sub(r"\1", text)
+    if re.search(r"[.!?;]\s+\S", unabbreviated) or unabbreviated.endswith(
+        (".", "!", "?", ";", ",")
+    ):
         return "label_has_sentence_punctuation"
     digits = sum(ch.isdigit() for ch in text)
     if digits > len(text) * 0.4:

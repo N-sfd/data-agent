@@ -41,6 +41,11 @@ from app.staging.profile import (
     StagingProfile,
 )
 from app.staging.provenance import make_provenance, source_type_of, system_provenance
+from app.staging.structure_provenance import (
+    field_provenance,
+    source_column,
+    table_cell_provenance,
+)
 
 F = FieldDefinition
 
@@ -167,52 +172,10 @@ QA_REVIEW = DatasetDefinition(
 )
 
 
-def _field_provenance(document: Document, candidate: FieldCandidate) -> CellProvenance:
-    single_line = "\n" not in candidate.raw_value.strip()
-    provenance = make_provenance(
-        document,
-        page=candidate.page,
-        evidence=candidate.evidence_text,
-        bbox=candidate.value_bbox,
-        extraction_method=f"{candidate.extraction_method}:{candidate.structural_relation}",
-        region_id=candidate.source_region_ids[0] if candidate.source_region_ids else candidate.candidate_id,
-        anchor=candidate.raw_label.strip(),
-        locator=candidate.source_locator,
-        source_type="html" if candidate.extraction_method == "dom" else None,
-    )
-    # A multi-line value (an address block) is highlighted as its region.
-    provenance.highlight_text = candidate.raw_value.strip() if single_line else None
-    return provenance
 
 
-def _cell_provenance(
-    document: Document, table: TableCandidate, row: list[TableCell], cell: TableCell, anchor: str | None
-) -> CellProvenance:
-    row_text = " | ".join(c.text for c in row if c.text)
-    provenance = make_provenance(
-        document,
-        page=table.page,
-        evidence=row_text,
-        bbox=cell.bbox,
-        extraction_method=f"{table.extraction_method}:{table.detection_method}",
-        region_id=cell.region_id,
-        anchor=anchor,
-        locator=cell.source_locator,
-        source_type="html" if table.extraction_method == "dom" else None,
-    )
-    provenance.highlight_text = cell.text or None
-    return provenance
 
 
-def _source_column(table: TableCandidate, column_index: int) -> SourceColumn:
-    roles = list(table.column_hints.get(column_index, []))
-    has_header = bool(table.header_cells)
-    return SourceColumn(
-        raw_header=table.headers[column_index] if has_header and column_index < len(table.headers) else None,
-        column_index=column_index,
-        structural_role=roles[0] if roles else None,
-        structural_roles=roles,
-    )
 
 
 def _is_line_item_table(table: TableCandidate) -> bool:
@@ -256,7 +219,7 @@ def _line_item_records(
             filled = [c for c in row if c.text]
             if len(filled) >= 2:
                 label_cell, value_cell = filled[0], filled[-1]
-                provenance = _cell_provenance(document, table, row, value_cell, label_cell.text)
+                provenance = table_cell_provenance(document, table, row, value_cell, label_cell.text)
                 totals.append(
                     RawRecord(
                         record_id=f"{table.candidate_id}:total:{r}",
@@ -287,8 +250,8 @@ def _line_item_records(
             if cell is None or not cell.text:
                 continue
             values[key] = cell.text
-            cell_provenance[key] = _cell_provenance(document, table, row, cell, anchor)
-            cell_columns[key] = _source_column(table, cell.column_index)
+            cell_provenance[key] = table_cell_provenance(document, table, row, cell, anchor)
+            cell_columns[key] = source_column(table, cell.column_index)
         other = [
             f"{table.headers[c] if c < len(table.headers) else f'Column {c + 1}'}: {cell.text}"
             for c, cell in sorted(by_column.items())
@@ -302,14 +265,14 @@ def _line_item_records(
             RawRecord(
                 record_id=f"{table.candidate_id}:row:{r}",
                 values=values,
-                provenance=_cell_provenance(document, table, row, row[0], anchor),
+                provenance=table_cell_provenance(document, table, row, row[0], anchor),
                 cell_provenance=cell_provenance,
                 cell_source_columns=cell_columns,
                 source_columns=[
                     SourceColumnValue(
-                        **_source_column(table, cell.column_index).model_dump(),
+                        **source_column(table, cell.column_index).model_dump(),
                         raw_value=cell.text,
-                        provenance=_cell_provenance(document, table, row, cell, anchor),
+                        provenance=table_cell_provenance(document, table, row, cell, anchor),
                     )
                     for cell in row
                     if cell.text
@@ -357,7 +320,7 @@ def adapt_generic(database: Session, document: Document) -> AdapterResult:
                 "extraction_method": candidate.structural_relation.replace("_", " "),
                 "category": "Contact" if is_contact else "Key Field",
             },
-            provenance=_field_provenance(document, candidate),
+            provenance=field_provenance(document, candidate),
         )
         (contacts if is_contact else key_fields).append(record)
 

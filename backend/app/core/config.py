@@ -84,6 +84,14 @@ class Settings(BaseSettings):
     # Production (app_env=production) always enforces RBAC regardless.
     rbac_enforced: bool = False
 
+    # When true (default), a request that presents no credential at all is
+    # served as the built-in "workspace" role even under enforced RBAC, so
+    # the core flow (upload → process → staging workbook → review → export)
+    # needs no key. Delete, authoritative export, Oracle and admin
+    # permissions still require a real credential; an invalid credential is
+    # still rejected. Set false to require a credential for every request.
+    public_workspace_access: bool = True
+
     # SQLAlchemy pool for Postgres (ignored for SQLite).
     db_pool_size: int = 5
     db_max_overflow: int = 5

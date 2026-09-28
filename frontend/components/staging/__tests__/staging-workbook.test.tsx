@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { cellSourceRequest } from "@/components/staging/review-status";
@@ -174,19 +174,28 @@ describe("StagingWorkbook load failures", () => {
   });
   afterEach(() => vi.useRealTimers());
 
-  it("shows a sign-in prompt with an API keys link on 401, without retrying", async () => {
-    getWorkbook.mockRejectedValue(new ApiError("Authentication required.", 401));
+  it("offers to drop a rejected saved key on 401, then loads without it", async () => {
+    window.localStorage.setItem("data-agent-access-token", "stale-key");
+    getWorkbook
+      .mockRejectedValueOnce(new ApiError("Invalid bearer credential.", 401))
+      .mockRejectedValueOnce(new ApiError("Not found", 404));
     render(<StagingWorkbook documentId="doc-1" />);
-    expect(await screen.findByText("Sign-in required to view the staging workbook.")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "API keys" })).toHaveAttribute("href", "/api-keys");
+    expect(
+      await screen.findByText("The access key saved in this browser is no longer valid."),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: /api keys/i })).toBeNull();
     expect(getWorkbook).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(screen.getByRole("button", { name: "Remove saved key and retry" }));
+    await waitFor(() => expect(getWorkbook).toHaveBeenCalledTimes(2));
+    expect(window.localStorage.getItem("data-agent-access-token")).toBeNull();
   });
 
-  it("explains insufficient permission on 403", async () => {
+  it("explains a too-narrow saved key on 403", async () => {
     getWorkbook.mockRejectedValue(new ApiError("Forbidden", 403));
     render(<StagingWorkbook documentId="doc-1" />);
     expect(
-      await screen.findByText("Your access key doesn't have permission to view the staging workbook."),
+      await screen.findByText("The access key saved in this browser can't open this workbook."),
     ).toBeInTheDocument();
     expect(getWorkbook).toHaveBeenCalledTimes(1);
   });

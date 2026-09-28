@@ -32,6 +32,7 @@ from app.services.structure_detection import (
     classify_document_family,
     family_for_document_type,
 )
+from app.source_structure.models import StructuredSourceDocument
 from app.staging import registry
 from app.staging.profile import StagingProfile
 
@@ -116,6 +117,46 @@ def resolve_profile(database: Session, document: Document) -> ProfileResolution:
         family_label=label,
         reasons=reasons,
         confident=family not in _INCONCLUSIVE,
+    )
+
+
+RECOGNITION_THRESHOLD = 0.6
+
+
+def refine_with_structure(
+    resolution: ProfileResolution, structure: StructuredSourceDocument
+) -> ProfileResolution:
+    """For a resolution that wasn't confident, let profiles that declare a
+    structural recognizer score the document's schema-neutral structure.
+    The best score at or above the threshold wins; otherwise the original
+    (safe, generic) resolution stands. Confident resolutions are final."""
+
+    if resolution.confident:
+        return resolution
+    best = None
+    for profile in registry.latest_profiles():
+        if profile.recognizer is None:
+            continue
+        recognition = profile.recognizer(structure)
+        if recognition.score >= RECOGNITION_THRESHOLD and (
+            best is None or recognition.score > best[1].score
+        ):
+            best = (profile, recognition)
+    if best is None:
+        return resolution
+    profile, recognition = best
+    family = profile.document_families[0]
+    label = DOCUMENT_FAMILIES.get(family, (profile.display_name, []))[0]
+    return ProfileResolution(
+        profile=profile,
+        family=family,
+        family_label=label,
+        reasons=[
+            *resolution.reasons,
+            f"Structural recognition: {profile.display_name} "
+            f"(score {recognition.score:.2f}; {'; '.join(recognition.reasons)}).",
+        ],
+        confident=True,
     )
 
 

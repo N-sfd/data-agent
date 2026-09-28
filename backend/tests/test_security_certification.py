@@ -65,7 +65,9 @@ def test_entra_role_mapping_picks_highest() -> None:
 
 def test_rbac_enforced_rejects_spoofed_actor_header() -> None:
     document_id = _upload()
-    enforced = get_settings().model_copy(update={"rbac_enforced": True})
+    enforced = get_settings().model_copy(
+        update={"rbac_enforced": True, "public_workspace_access": False}
+    )
 
     with patch("app.core.auth.get_settings", return_value=enforced):
         response = client.get(
@@ -189,3 +191,59 @@ def test_ready_reports_auth_surface() -> None:
     assert "entra_configured" in body
     assert "auth" in body["checks"]
     assert body["checks"]["auth"]["status"] in {"ok", "warn"}
+
+
+def test_public_workspace_serves_core_flow_without_a_credential() -> None:
+    """Default release posture: under enforced RBAC a credential-less
+    caller is the limited workspace role — the core flow (view results,
+    ordinary export) works with no key, destructive/admin actions don't."""
+
+    document_id = _upload()
+    enforced = get_settings().model_copy(update={"rbac_enforced": True})
+
+    with patch("app.core.auth.get_settings", return_value=enforced):
+        me = client.get("/api/actors/me")
+        assert me.status_code == 200, me.text
+        assert me.json()["role"] == "workspace"
+
+        workbook = client.get(f"/api/documents/{document_id}/staging-workbook")
+        assert workbook.status_code == 200, workbook.text
+
+        assert client.delete(f"/api/documents/{document_id}").status_code == 403
+
+
+def test_public_workspace_ignores_spoofed_admin_header() -> None:
+    document_id = _upload()
+    enforced = get_settings().model_copy(update={"rbac_enforced": True})
+
+    with patch("app.core.auth.get_settings", return_value=enforced):
+        response = client.delete(
+            f"/api/documents/{document_id}",
+            headers={"X-Actor-Id": "actor-admin-default"},
+        )
+    assert response.status_code == 403
+
+
+def test_public_workspace_still_rejects_an_invalid_credential() -> None:
+    document_id = _upload()
+    enforced = get_settings().model_copy(update={"rbac_enforced": True})
+
+    with patch("app.core.auth.get_settings", return_value=enforced):
+        response = client.get(
+            f"/api/documents/{document_id}/staging-workbook",
+            headers={"Authorization": "Bearer not-a-real-key"},
+        )
+    assert response.status_code == 401
+
+
+def test_workspace_role_permissions() -> None:
+    for allowed in ("documents.upload", "extraction.run", "review.accept", "export.read"):
+        assert role_has_permission("workspace", allowed)
+    for denied in (
+        "documents.delete",
+        "export.authoritative",
+        "oracle.preview",
+        "oracle.send",
+        "admin.users",
+    ):
+        assert not role_has_permission("workspace", denied)

@@ -16,13 +16,15 @@ from typing import Any, Callable, Literal
 from sqlalchemy.orm import Session
 
 from app.models.document import Document
+from app.source_structure.models import StructuredSourceDocument
 from app.staging.models import (
     Cardinality,
     CellProvenance,
-    SourceColumn,
-    SourceColumnValue,
     DatasetRole,
     ExportCapability,
+    SourceColumn,
+    SourceColumnValue,
+    ValidationCheck,
     ValueType,
 )
 
@@ -106,6 +108,9 @@ class RawRecord:
     # original column value (mapped or not).
     cell_source_columns: dict[str, SourceColumn] = field(default_factory=dict)
     source_columns: list[SourceColumnValue] = field(default_factory=list)
+    # Profile-run checks per value key (semantic mapping, arithmetic…); a
+    # failed check makes that cell Needs Review with its message.
+    cell_checks: dict[str, list[ValidationCheck]] = field(default_factory=dict)
 
 
 @dataclass
@@ -117,6 +122,18 @@ class AdapterResult:
 
 
 AdapterFn = Callable[[Session, Document], AdapterResult]
+
+
+@dataclass(frozen=True)
+class Recognition:
+    score: float  # 0..1
+    reasons: list[str]
+
+
+# Optional: scores how well a document's schema-neutral structure fits the
+# profile. Consulted only when document-family resolution wasn't confident
+# (app/staging/resolver.refine_with_structure).
+RecognizerFn = Callable[[StructuredSourceDocument], Recognition]
 
 
 @dataclass(frozen=True)
@@ -137,6 +154,7 @@ class StagingProfile:
     # adapter supplying QA rows.
     auto_qa_dataset: str | None = None
     source_structure: SourceStructureRequirement = "none"
+    recognizer: RecognizerFn | None = None
 
     @property
     def key(self) -> str:

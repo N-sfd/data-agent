@@ -33,7 +33,7 @@ from app.source_structure.pdf_structure import (
 
 # Bump whenever extraction rules change; stored structures from an older
 # version are rebuilt on next use.
-EXTRACTOR_VERSION = 2  # 2: table continuation metadata, candidate quality flags
+EXTRACTOR_VERSION = 3  # 2: continuation metadata, quality flags; 3: typography block breaks, address blocks with Attn lines
 
 _HTML_SUFFIXES = {".html", ".htm"}
 _RASTER_SUFFIXES = {".png", ".jpg", ".jpeg", ".tif", ".tiff", ".bmp", ".webp"}

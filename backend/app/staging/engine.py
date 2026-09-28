@@ -39,7 +39,7 @@ def evidence_literal(value: object, evidence: str | None, value_type: str) -> st
             return None
         for match in NUMBER_RE.finditer(evidence):
             try:
-                if abs(float(match.group(0).replace(",", "")) - target) < 0.005:
+                if abs(abs(float(match.group(0).replace(",", ""))) - abs(target)) < 0.005:
                     return match.group(0)
             except ValueError:
                 continue
@@ -85,7 +85,11 @@ def _build_dataset(definition: DatasetDefinition, raws: list[RawRecord]) -> Stag
             value = raw.values.get(field_def.key)
             provenance = _cell_provenance(raw, field_def.key, value, field_def.value_type)
             validation, status, reasons = evaluate_cell(
-                field_def, value, provenance, record_flagged=flagged
+                field_def,
+                value,
+                provenance,
+                record_flagged=flagged,
+                profile_checks=raw.cell_checks.get(field_def.key),
             )
             cells[field_def.canonical_field] = StagingCell(
                 canonical_field=field_def.canonical_field,

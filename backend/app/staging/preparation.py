@@ -25,7 +25,7 @@ from app.models.document import Document
 from app.models.document_staging_workbook import DocumentStagingWorkbook
 from app.source_structure.service import build_and_persist_source_structure
 from app.staging.profile import StagingProfile
-from app.staging.resolver import persist_resolution, resolve_profile
+from app.staging.resolver import persist_resolution, refine_with_structure, resolve_profile
 
 
 @dataclass
@@ -55,8 +55,15 @@ def prepare_staging(database: Session, document: Document) -> StagingPreparation
     structure_ms = 0
     if needed:
         structure_started = time.perf_counter()
-        build_and_persist_source_structure(database, document)
+        structure = build_and_persist_source_structure(database, document)
         structure_ms = int((time.perf_counter() - structure_started) * 1000)
+        if not resolution.confident:
+            # The structure can settle what text signals couldn't (e.g. an
+            # invoice titled "Invoice #" with no "invoice number" phrase).
+            refined = refine_with_structure(resolution, structure)
+            if refined.profile is not resolution.profile:
+                record = persist_resolution(database, document, refined)
+                reason += f"; structure recognized {refined.profile.key}"
 
     return StagingPreparation(
         record=record,

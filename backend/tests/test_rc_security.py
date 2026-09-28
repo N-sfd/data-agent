@@ -244,7 +244,9 @@ def test_rbac_enforced_blocks_spoofed_admin_on_export() -> None:
         files={"file": (f"rc-spoof-{uuid4()}.pdf", _pdf(), "application/pdf")},
     )
     document_id = upload.json()["document_id"]
-    enforced = get_settings().model_copy(update={"rbac_enforced": True})
+    enforced = get_settings().model_copy(
+        update={"rbac_enforced": True, "public_workspace_access": False}
+    )
     with patch("app.core.auth.get_settings", return_value=enforced):
         response = client.get(
             f"/api/documents/{document_id}/export",
@@ -318,7 +320,9 @@ def test_rbac_enforced_csv_xlsx_line_items_require_real_auth() -> None:
         f"/api/documents/{document_id}/export/line-items.csv",
     ]
 
-    enforced = get_settings().model_copy(update={"rbac_enforced": True})
+    enforced = get_settings().model_copy(
+        update={"rbac_enforced": True, "public_workspace_access": False}
+    )
     with patch("app.core.auth.get_settings", return_value=enforced):
         for path in endpoints:
             unauthenticated = client.get(path)
@@ -369,7 +373,9 @@ def test_v3_endpoints_reject_unauthenticated_when_rbac_enforced() -> None:
         f"/api/documents/{document_id}",
     ]
 
-    enforced = get_settings().model_copy(update={"rbac_enforced": True})
+    enforced = get_settings().model_copy(
+        update={"rbac_enforced": True, "public_workspace_access": False}
+    )
     with patch("app.core.auth.get_settings", return_value=enforced):
         for path in endpoints:
             unauthenticated = client.get(path)

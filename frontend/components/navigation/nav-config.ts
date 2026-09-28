@@ -10,7 +10,6 @@ import {
   GitBranch,
   GitCompare,
   History,
-  Key,
   Layers,
   Lightbulb,
   ListChecks,
@@ -216,12 +215,6 @@ export const GOVERNANCE_SECTIONS: MegaMenuSection[] = [
         icon: Settings,
       },
       {
-        label: "API Keys",
-        description: "Manage integration credentials",
-        href: "/api-keys",
-        icon: Key,
-      },
-      {
         label: "Risk",
         description: "Contract risk patterns, obligations, and compliance gaps",
         href: "/risk",
@@ -233,5 +226,4 @@ export const GOVERNANCE_SECTIONS: MegaMenuSection[] = [
 
 export const OVERVIEW_LINKS = [
   { label: "Data Agent", href: "/", icon: Sparkles },
-  { label: "API Keys", href: "/api-keys", icon: Key },
 ];

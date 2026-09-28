@@ -7,8 +7,21 @@ from __future__ import annotations
 
 import csv
 import io
+import re
 
 from app.staging.models import StagingDataset, StagingWorkbook
+
+# Excel forbids these in sheet names ("Customer / Bill-To") and caps them at 31.
+_INVALID_SHEET_CHARS = re.compile(r"[\[\]:*?/\\]")
+
+
+def _sheet_title(name: str, taken: list[str]) -> str:
+    base = re.sub(r"\s+", " ", _INVALID_SHEET_CHARS.sub("-", name)).strip(" '")[:31] or "Sheet"
+    title, n = base, 2
+    while title.lower() in (t.lower() for t in taken):
+        suffix = f" ({n})"
+        title, n = base[: 31 - len(suffix)] + suffix, n + 1
+    return title
 
 
 def _headers(dataset: StagingDataset) -> list[str]:
@@ -62,7 +75,7 @@ def build_workbook_xlsx(workbook: StagingWorkbook) -> bytes:
     readme.append(["REVIEW STATUS", "Verified / Needs Review / Missing — never inferred from OCR confidence."])
 
     for dataset in workbook.datasets:
-        sheet = wb.create_sheet(title=dataset.display_name[:31])
+        sheet = wb.create_sheet(title=_sheet_title(dataset.display_name, wb.sheetnames))
         sheet.append(_headers(dataset))
         for cell in sheet[1]:
             cell.font = Font(bold=True)

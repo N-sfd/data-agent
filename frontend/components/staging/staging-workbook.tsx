@@ -1,7 +1,6 @@
 "use client";
 
 import { ChevronDown, Download } from "lucide-react";
-import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import type { SourceViewRequest } from "@/components/source-verification-panel";
@@ -10,6 +9,7 @@ import SourceTranscription from "@/components/staging/source-transcription";
 import StagingDatasetTable from "@/components/staging/staging-dataset-table";
 import StagingFieldList from "@/components/staging/staging-field-list";
 import { ApiError, COLD_START_RETRY_DELAYS_MS } from "@/lib/api";
+import { storeAccessToken } from "@/lib/entra-auth";
 import {
   downloadExport,
   getStagingWorkbook,
@@ -70,7 +70,7 @@ export default function StagingWorkbook({
   const [workbook, setWorkbook] = useState<Workbook | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [authRequired, setAuthRequired] = useState(false);
+  const [savedKeyRejected, setSavedKeyRejected] = useState(false);
   const [retryTick, setRetryTick] = useState(0);
   const [view, setView] = useState<View>("workbook");
   const [activeDataset, setActiveDataset] = useState("");
@@ -91,7 +91,7 @@ export default function StagingWorkbook({
     async function load() {
       setLoading(true);
       setError(null);
-      setAuthRequired(false);
+      setSavedKeyRejected(false);
       let pendingAttempts = 0;
       let failedAttempts = 0;
       while (true) {
@@ -113,12 +113,14 @@ export default function StagingWorkbook({
         } catch (err) {
           if (cancelled) return;
           if (err instanceof ApiError && (err.status === 401 || err.status === 403)) {
+            // No key is needed to view a workbook, so a 401/403 here means
+            // an access key saved in this browser is invalid or too narrow.
             setError(
               err.status === 401
-                ? "Sign-in required to view the staging workbook."
-                : "Your access key doesn't have permission to view the staging workbook.",
+                ? "The access key saved in this browser is no longer valid."
+                : "The access key saved in this browser can't open this workbook.",
             );
-            setAuthRequired(true);
+            setSavedKeyRejected(true);
             setLoading(false);
             return;
           }
@@ -168,21 +170,18 @@ export default function StagingWorkbook({
     return (
       <div className="space-y-3 rounded-xl border border-border bg-surface-soft p-6 text-sm">
         <p className="text-danger">{error ?? "Unable to load the staging workbook."}</p>
-        {authRequired ? (
-          <p className="text-text-secondary">
-            Add a service API key on the{" "}
-            <Link href="/api-keys" className="font-medium underline">
-              API keys
-            </Link>{" "}
-            page, then retry.
-          </p>
-        ) : null}
         <button
           type="button"
-          onClick={() => setRetryTick((tick) => tick + 1)}
+          onClick={() => {
+            if (savedKeyRejected) {
+              storeAccessToken(null);
+              setSavedKeyRejected(false);
+            }
+            setRetryTick((tick) => tick + 1);
+          }}
           className="btn-secondary text-xs"
         >
-          Retry
+          {savedKeyRejected ? "Remove saved key and retry" : "Retry"}
         </button>
       </div>
     );

@@ -34,6 +34,14 @@ class ActorContext:
         return role_has_permission(self.role, permission)
 
 
+PUBLIC_WORKSPACE_ACTOR = ActorContext(
+    id="actor-public-workspace",
+    actor_type="user",
+    role="workspace",
+    display_name="Workspace User",
+)
+
+
 def hash_api_key(raw_key: str) -> str:
     return hashlib.sha256(raw_key.encode("utf-8")).hexdigest()
 
@@ -126,6 +134,12 @@ def resolve_actor(
             return actor_to_context(actor)
 
     if enforced:
+        # No usable credential was presented (an invalid bearer already
+        # failed closed above). Serve the core product flow as the limited
+        # workspace role rather than walling it behind a key; X-Actor-Id is
+        # ignored, so a spoofed header can never gain more than this.
+        if settings.public_workspace_access:
+            return PUBLIC_WORKSPACE_ACTOR
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail=(

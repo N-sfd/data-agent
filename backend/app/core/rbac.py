@@ -7,6 +7,8 @@ reviewer        View, source inspect, accept/edit/reject, export
 analyst         Upload, extract, view; draft edit; no approve/send
 viewer          Read-only repository/results (no review/export/send)
 service_account API-only scoped extraction/export (and send if granted)
+workspace       Built-in role for credential-less requests: upload, extract,
+                review, ordinary export; no delete/authoritative/Oracle/admin
 """
 
 from __future__ import annotations
@@ -19,6 +21,7 @@ Role = Literal[
     "analyst",
     "viewer",
     "service_account",
+    "workspace",
 ]
 
 Permission = Literal[
@@ -101,6 +104,19 @@ ROLE_PERMISSIONS: Final[dict[Role, frozenset[Permission]]] = {
             "export.authoritative",
             "oracle.preview",
             "oracle.send",
+        }
+    ),
+    "workspace": frozenset(
+        {
+            "documents.view",
+            "documents.upload",
+            "extraction.run",
+            "fields.edit_draft",
+            "review.accept",
+            "review.edit",
+            "review.reject",
+            "export.read",
+            # no documents.delete, export.authoritative, oracle.*, admin.*
         }
     ),
 }

@@ -18,7 +18,13 @@ from app.models.document_staging_workbook import DocumentStagingWorkbook
 from app.services.v3_orchestrator import run_and_persist_v3_extraction
 from app.source_structure.html_structure import extract_html_structure, readable_dom_text
 from app.source_structure.ocr_geometry import OcrCoordinateSpace, coordinate_space_for
-from app.source_structure.pdf_structure import extract_page_structure, native_words
+from app.source_structure.pdf_structure import (
+    Word,
+    build_lines,
+    extract_page_structure,
+    native_words,
+    ocr_skew_slope,
+)
 from app.source_structure.text_shapes import infer_value_type, label_rejection
 from app.staging.resolver import resolve_and_persist_profile
 
@@ -196,6 +202,91 @@ def test_sentence_with_colon_is_not_a_field():
 
     result = _structure(_pdf_page(draw))
     assert not [f for f in result.fields if f.acceptance == "accepted"]
+
+
+# --- label/value and table edge cases found by the invoice fixtures -------------
+
+
+@pytest.mark.parametrize("label", ["Invoice No.", "Invoice No.:", "Ref. No.", "Acct. Number"])
+def test_abbreviation_period_is_not_sentence_punctuation(label):
+    assert label_rejection(label) is None
+
+
+@pytest.mark.parametrize("label", ["Thanks.", "Payment due."])
+def test_sentence_periods_still_reject(label):
+    assert label_rejection(label) is not None
+
+
+def test_one_run_with_two_pairs_yields_two_fields():
+    def draw(page):
+        page.insert_text((72, 72), "Invoice Number: INV-1001 Invoice Date: 03/14/2025", fontsize=10)
+        page.insert_text((72, 90), "Note: meeting at 10:30 today", fontsize=10)
+
+    page = _pdf_page(draw)
+    structure = extract_page_structure(page_number=1, words=native_words(page), extraction_method="native", fitz_page=page)
+    assert [(f.label_text, f.raw_value) for f in structure.fields] == [
+        ("Invoice Number", "INV-1001"),
+        ("Invoice Date", "03/14/2025"),
+        ("Note", "meeting at 10:30 today"),
+    ]
+
+
+def test_fused_header_columns_split_at_the_data_gutter():
+    def draw(page):
+        for x, text in ((72, "Item"), (200, "UOM"), (226, "Unit Price"), (320, "Amount")):
+            page.insert_text((x, 100), text, fontsize=9)
+        for i, (item, uom, price, amount) in enumerate(
+            [("Bolt", "EA", "0.42", "84.00"), ("Washer", "BX", "12.09", "18.00"), ("Seal", "PR", "5.40", "43.20")]
+        ):
+            y = 118 + 16 * i
+            page.insert_text((72, y), item, fontsize=9)
+            page.insert_text((200, y), uom, fontsize=9)
+            page.insert_text((250, y), price, fontsize=9)
+            page.insert_text((320, y), amount, fontsize=9)
+
+    page = _pdf_page(draw)
+    structure = extract_page_structure(page_number=1, words=native_words(page), extraction_method="native", fitz_page=page)
+    (table,) = structure.tables
+    assert table.headers == ["Item", "UOM", "Unit Price", "Amount"]
+    assert [c.text for c in table.rows[0]] == ["Bolt", "EA", "0.42", "84.00"]
+
+
+def test_skewed_ocr_rows_group_on_deskewed_lines():
+    # A 0.7° tilt: across ~500pt, the right end sits ~6pt higher.
+    slope = -0.0122
+    layout = {
+        "lines": [
+            {"words": [{"text": t, "x0": x, "x1": x + 40, "y0": y + slope * x, "y1": y + 10 + slope * x} for t, x in
+                       (("a", 40), ("b", 200), ("c", 360), ("d", 520))]}
+            for y in (100, 140, 180)
+        ]
+    }
+    assert abs(ocr_skew_slope(layout) - slope) < 0.001
+    words = [
+        Word("3", 43, 292, 48, 300, 8), Word("Bilge", 83, 291, 120, 300, 8),
+        Word("3.0", 412, 288, 425, 295, 8), Word("285.00", 538, 286, 566, 293, 8),
+    ]
+    assert len(build_lines(words)) == 2  # tilted: the numbers form their own "line"
+    for w in words:
+        w.row_offset = slope * ((w.x0 + w.x1) / 2 - 300)
+    assert len(build_lines(words)) == 1
+
+
+def test_html_letterhead_heading_is_not_a_label():
+    x = extract_html_structure(
+        b"<html><body><header><h1>Northstar Software Ltd</h1>"
+        b"<address>14 Quayside<br>billing@northstar.example</address></header>"
+        b"<main><section><h3>Billed To</h3><address>Tyneside Trust</address></section>"
+        b"<p>Payment is due within 30 days.</p></main></body></html>"
+    )
+    assert not x.fields
+    kinds = {(r.region_type, r.text.split(chr(10))[0]) for r in x.regions}
+    assert ("HEADING", "Northstar Software Ltd") in kinds
+    assert ("CONTACT_BLOCK", "14 Quayside") in kinds
+    note = next(r for r in x.regions if r.text.startswith("Payment"))
+    # A heading governs only its own section; the note after </section>
+    # is not under "Billed To".
+    assert "Billed To" not in note.source_locator.section_path
 
 
 # --- HTML fixtures A–E ----------------------------------------------------------

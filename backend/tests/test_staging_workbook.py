@@ -132,11 +132,16 @@ def test_evidence_literal_returns_source_spelling_for_numbers():
 
 def test_builtin_profiles_are_versioned():
     keys = {p.key for p in registry.all_profiles()}
-    assert {"contract_v3@1", "generic_business_document@1", "generic_business_document@2"} <= keys
+    assert {
+        "contract_v3@1",
+        "generic_business_document@1",
+        "generic_business_document@2",
+        "invoice@1",
+    } <= keys
 
 
-def test_invoice_family_has_no_profile_yet_so_it_is_not_forced_into_contract():
-    assert registry.profile_for_family("invoice") is None
+def test_invoice_family_gets_the_invoice_profile_never_contract():
+    assert registry.profile_for_family("invoice").profile_id == "invoice"
     assert registry.profile_for_family("government_contract").profile_id == "contract_v3"
 
 
@@ -255,7 +260,7 @@ def _run_v3(document_id: str) -> None:
         database.close()
 
 
-def test_invoice_resolves_to_generic_profile_and_is_never_blank():
+def test_invoice_resolves_to_invoice_profile_and_is_never_blank():
     document_id = _upload(
         [
             "INVOICE",
@@ -270,15 +275,15 @@ def test_invoice_resolves_to_generic_profile_and_is_never_blank():
     response = client.get(f"/api/documents/{document_id}/staging-workbook")
     assert response.status_code == 200, response.text
     body = response.json()
-    assert body["profile"]["profile_id"] == "generic_business_document"
-    assert body["profile"]["profile_version"] == 2
+    assert body["profile"]["profile_id"] == "invoice"
+    assert body["profile"]["profile_version"] == 1
     assert body["processing_metadata"]["document_family"] == "invoice"
     assert body["outcome"]["status"] != "pending"
     dataset_ids = [d["dataset_id"] for d in body["datasets"]]
-    assert dataset_ids[0] == "document_summary"
+    assert dataset_ids[0] == "invoice_summary"
     assert "qa_review" in dataset_ids
     summary = body["datasets"][0]["records"][0]["cells"]
-    assert summary["document.document_type"]["value"] == "Invoice"
+    assert summary["invoice.invoice_number"]["value"] == "INV-1001"
 
     # Exports declared by the profile work.
     for capability in body["profile"]["export_capabilities"]:

@@ -12,7 +12,7 @@ from app.staging import registry
 from app.staging.engine import assemble_workbook
 from app.staging.models import ProcessingMetadata, StagingWorkbook
 from app.staging.provenance import source_type_of
-from app.staging.resolver import resolve_and_persist_profile
+from app.staging.preparation import prepare_staging
 
 
 def _pinned_record(database: Session, document: Document) -> DocumentStagingWorkbook:
@@ -22,7 +22,7 @@ def _pinned_record(database: Session, document: Document) -> DocumentStagingWork
     if record is None:
         # Documents extracted before profiles existed: pin on first read so
         # every later read (and later profile versions) stays consistent.
-        record = resolve_and_persist_profile(database, document)
+        record = prepare_staging(database, document).record
     return record
 
 

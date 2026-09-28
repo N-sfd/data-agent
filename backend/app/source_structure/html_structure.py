@@ -39,6 +39,7 @@ _BLOCK = {
     "hr", "li", "main", "nav", "ol", "p", "pre", "section", "table", "tbody", "td", "tfoot",
     "th", "thead", "tr", "ul", "caption", "legend",
 }
+_SECTIONING = {"section", "article", "aside", "nav", "header", "footer"}
 _HEADINGS = {"h1": 1, "h2": 2, "h3": 3, "h4": 4, "h5": 5, "h6": 6}
 _EMPHASIS = {"b", "strong", "em", "label", "span", "dfn", "th"}
 _CONTROLS = {"input", "select", "textarea", "output"}
@@ -127,7 +128,9 @@ class HtmlStructureExtractor:
         self.regions: list[StructuredRegion] = []
         self.fields: list[FieldCandidate] = []
         self.tables: list[TableCandidate] = []
-        self.heading_stack: list[tuple[int, str]] = []
+        # (level, text, scope): a heading governs only the content of its
+        # nearest sectioning ancestor (None = the whole document).
+        self.heading_stack: list[tuple[int, str, object]] = []
         self.table_index = 0
         self.counts: dict[str, int] = {}
 
@@ -141,9 +144,13 @@ class HtmlStructureExtractor:
         return SourceLocator(
             dom_path=self.tree.getpath(el),
             element_id=el.get("id"),
-            section_path=[text for _, text in self.heading_stack],
+            section_path=self._section_path(el),
             **extra,
         )
+
+    def _section_path(self, el) -> list[str]:
+        ancestors = set(el.iterancestors())
+        return [text for _, text, scope in self.heading_stack if scope is None or scope in ancestors]
 
     def _claim(self, el) -> None:
         self.claimed.add(el)
@@ -204,9 +211,12 @@ class HtmlStructureExtractor:
         text = normalize_space(element_text(el))
         if not text:
             return
+        ancestors = set(el.iterancestors())
+        self.heading_stack = [h for h in self.heading_stack if h[2] is None or h[2] in ancestors]
         while self.heading_stack and self.heading_stack[-1][0] >= level:
             self.heading_stack.pop()
-        self.heading_stack.append((level, text))
+        scope = next((a for a in el.iterancestors() if _tag(a) in _SECTIONING), None)
+        self.heading_stack.append((level, text, scope))
         self._region("HEADING", el, text, level=level)
         self._claim(el)
 
@@ -395,6 +405,10 @@ class HtmlStructureExtractor:
             return False
         first, second = children
         if any(_tag(d) in ("table", "ul", "ol", "dl") for c in children for d in c.iter()):
+            return False
+        # <h1>Org</h1><address>…</address> is a titled contact block (a
+        # letterhead), not "Org: address" — keep the heading and the block.
+        if _tag(first) == "h1" or _tag(second) == "address":
             return False
         label_raw = element_text(first)
         value_raw = element_text(second)

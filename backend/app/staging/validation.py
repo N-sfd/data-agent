@@ -27,7 +27,11 @@ from app.staging.models import (
 from app.staging.profile import FieldDefinition
 
 NUMBER_RE = re.compile(r"-?\d[\d,]*(?:\.\d+)?")
-_MONEY_VALUE_RE = re.compile(r"^\(?-?\$?\s*-?[\d,]+(?:\.\d+)?\)?$")
+# Money: optional sign/parentheses, a currency symbol or ISO code on either
+# side, and a plain or thousands-separated amount.
+_MONEY_VALUE_RE = re.compile(
+    r"^\(?-?\s*(?:[$\u20ac\u00a3\u00a5]|[A-Z]{3})?\s*-?[\d,]+(?:\.\d+)?\s*(?:[A-Z]{3})?\)?$"
+)
 _DATE_FORMATS = (
     "%m/%d/%Y",
     "%m/%d/%y",
@@ -53,7 +57,7 @@ def to_number(value: object) -> float | None:
     if not isinstance(value, str):
         return None
     text = value.strip()
-    negative = text.startswith("(") and text.endswith(")")
+    negative = (text.startswith("(") and text.endswith(")")) or text.startswith("-")
     match = NUMBER_RE.search(text)
     if not match:
         return None
@@ -81,7 +85,9 @@ def value_in_evidence(value: object, evidence: str, value_type: str) -> bool:
             return False
         for match in NUMBER_RE.finditer(evidence):
             try:
-                if abs(float(match.group(0).replace(",", "")) - target) < 0.005:
+                # Magnitudes: a stored "-1,335.00" discount is supported by
+                # evidence that shows the sign elsewhere ("Discount: -€1,335.00").
+                if abs(abs(float(match.group(0).replace(",", ""))) - abs(target)) < 0.005:
                     return True
             except ValueError:
                 continue
@@ -179,7 +185,11 @@ def evaluate_cell(
     provenance: CellProvenance | None,
     *,
     record_flagged: bool,
+    profile_checks: list[ValidationCheck] | None = None,
 ) -> tuple[CellValidation, ReviewStatus | None, list[str]]:
+    """`profile_checks` are extra checks a profile ran for this cell (e.g.
+    semantic label mapping, line arithmetic); any failure means Needs
+    Review, exactly like the built-in checks."""
     if definition.grounding == "none":
         return CellValidation(status="not_checked"), None, []
 
@@ -221,6 +231,7 @@ def evaluate_cell(
     if type_check is not None:
         checks.append(type_check)
     checks.extend(_rule_checks(definition, value, evidence))
+    checks.extend(profile_checks or [])
 
     failed = [check for check in checks if not check.passed]
     reasons = [check.message for check in failed if check.message]
