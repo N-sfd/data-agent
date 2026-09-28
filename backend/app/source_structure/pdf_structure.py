@@ -282,6 +282,9 @@ def _map_to_bands(line: Line, bands: list[_Band]) -> dict[int, list[Segment]] | 
     return mapping
 
 
+_ROW_NUMBER = re.compile(r"^\(?\d{1,3}[.)]?$")
+
+
 def _alignment_tables(lines: list[Line]) -> list[tuple[list[_Band], list[list[list[Segment]]], list[Line]]]:
     """Groups of consecutive lines whose segments line up in ≥3 columns.
     Returns (bands, rows[row][col] -> segments, lines) per table."""
@@ -308,7 +311,14 @@ def _alignment_tables(lines: list[Line]) -> list[tuple[list[_Band], list[list[li
             mapping = _map_to_bands(line, bands)
             if mapping is None:
                 break
-            if len(line.free_segments) >= 2:
+            # A lone row number in the first column ("8." whose other cells
+            # OCR lost) starts its own row; it is never wrapped cell text.
+            lone_row_number = (
+                len(line.free_segments) == 1
+                and set(mapping) == {0}
+                and bool(_ROW_NUMBER.match(line.free_segments[0].text.strip()))
+            )
+            if len(line.free_segments) >= 2 or lone_row_number:
                 for band_index, segs in mapping.items():
                     bands[band_index].x0 = min(bands[band_index].x0, *(s.x0 for s in segs))
                     bands[band_index].x1 = max(bands[band_index].x1, *(s.x1 for s in segs))
@@ -594,6 +604,13 @@ def _field(
     if not reasons:
         hints.append("label_noun_phrase_shape")
     quality_score, quality_flags = candidate_quality(label_text, value_raw, relation)
+    value_type = infer_value_type(value_raw)
+    # "Registration No.  0222420149" is an identifier, not a phone number
+    # that happens to have ten digits.
+    if value_type in ("phone", "number") and _ID_TAIL.search(label_text) and not re.search(
+        r"\b(phone|tel|fax|mobile|cell)\b", label_text, re.I
+    ):
+        value_type = "identifier"
     return FieldCandidate(
         quality_score=quality_score,
         quality_flags=quality_flags,
@@ -601,7 +618,7 @@ def _field(
         raw_label=label_raw,
         raw_value=value_raw,
         label_text=label_text,
-        value_type_hint=infer_value_type(value_raw),
+        value_type_hint=value_type,
         structural_relation=relation,  # type: ignore[arg-type]
         page=page_number,
         label_bbox=label_bbox,
@@ -655,6 +672,98 @@ def _is_label_segment(seg: Segment) -> bool:
     return seg.text.rstrip().endswith(":") and label_rejection(seg.text) is None
 
 
+# OCR renders printed underlines / leader dots between a label and its
+# value as runs of '_', dashes or dots: "Group __ HUMANITIES".
+_FILLER_PAIR = re.compile(r"^(?P<label>[^_:]{1,40}?)\s*(?:_{2,}|[—–]+|-{2,}|\.{3,}|…+)\s*(?P<value>[^\s_].*)$")
+# Identifier-style label endings ("Roll No.", "Invoice #", "Customer ID",
+# "Issue Date") — a shape of field captions, not a business vocabulary.
+_ID_TAIL = re.compile(r"(?:\bno\.?|#|\bnumber|\bnum\.?|\bid|\bdate|\bcode|\bref\.?)$", re.I)
+_VALUE_NOISE = "_|~=—–"
+
+
+def _clean_label(text: str) -> str:
+    # OCR punctuation variation: "Certificate No," / "No;" → "No."
+    text = re.sub(r"\b(No|Ref|Acct|Inv)[,;]$", r"\1.", text.strip())
+    return text.rstrip(" _—–")
+
+
+def _clean_value(text: str) -> str:
+    return text.strip().strip(_VALUE_NOISE).strip()
+
+
+def _position_label(text: str) -> bool:
+    """A run that can be a caption WITHOUT a separator: short, capitalized,
+    not numeric — stricter than label_rejection alone."""
+
+    text = _clean_label(text)
+    words = text.split()
+    return (
+        bool(words)
+        and len(words) <= 4
+        and len(text) <= 32
+        and text[:1].isupper()
+        and label_rejection(text) is None
+        and not is_numeric_value(text)
+        and sum(ch.isdigit() for ch in text) <= 0.2 * len(text)
+    )
+
+
+def _position_value(text: str) -> bool:
+    """A run that reads as a VALUE on its own: has digits, or is a short
+    all-caps name/code — never a lowercase phrase or another caption."""
+
+    text = _clean_value(text)
+    words = text.split()
+    letters = [ch for ch in text if ch.isalpha()]
+    return (
+        bool(words)
+        and len(words) <= 8
+        and not text.endswith(":")
+        and value_rejection(text) is None
+        and (any(ch.isdigit() for ch in text) or (letters and all(ch.isupper() for ch in letters) and len(words) <= 6))
+    )
+
+
+def _whitespace_pairs(segments: list[Segment]) -> list[tuple[Segment, Segment]]:
+    """Label/value pairs separated only by whitespace ("Roll No.   516522
+    Registration No.   0222420149"). Accepted when the label has an
+    identifier-style ending, or when the WHOLE line alternates label,
+    value, label, value — so a table row ("Bolt | EA | 0.42 | 84.00")
+    never pairs up."""
+
+    free = [s for s in segments if not s.used]
+    candidates = [
+        (a, b)
+        for a, b in zip(free, free[1:])
+        if _position_label(a.text)
+        and _position_value(b.text)
+        and 0 < b.x0 - a.x1 <= 200
+        # Caption and value share a type size; a letterhead name beside a
+        # large "INVOICE" title does not.
+        and abs(a.size - b.size) <= 0.2 * max(a.size, b.size)
+    ]
+    # Alternation alone is only evidence with at least two pairs; a lone
+    # "Brightline Office Supply Co.   INVOICE" is not a caption and value.
+    alternating = (
+        len(free) >= 4
+        and len(free) % 2 == 0
+        and all((free[i], free[i + 1]) in candidates for i in range(0, len(free), 2))
+    )
+    pairs: list[tuple[Segment, Segment]] = []
+    taken: set[int] = set()
+    for a, b in candidates:
+        if id(a) in taken or id(b) in taken:
+            continue
+        # An identifier caption ("Roll No.", "Issue Date") takes an
+        # identifier/date value — digits — never another caption such as
+        # a column header ("Sr. No   SUBJECTS").
+        id_pair = _ID_TAIL.search(_clean_label(a.text)) and any(ch.isdigit() for ch in b.text)
+        if alternating or id_pair:
+            pairs.append((a, b))
+            taken.update((id(a), id(b)))
+    return pairs
+
+
 def _label_value_candidates(
     ids: _Ids, page_number: int, lines: list[Line], extraction_method: str
 ) -> list[FieldCandidate]:
@@ -666,6 +775,22 @@ def _label_value_candidates(
             if seg.used:
                 continue
             text = seg.text.strip()
+
+            filler = _FILLER_PAIR.match(text)
+            if filler and _position_label(filler.group("label")) and _clean_value(filler.group("value")):
+                label = _clean_label(filler.group("label"))
+                value = _clean_value(filler.group("value"))
+                label_words = len(filler.group("label").split())
+                fields.append(
+                    _field(
+                        ids, page_number, label, value, "same_line_filler",
+                        _union([(w.x0, w.y0, w.x1, w.y1) for w in seg.words[:label_words]]) or seg.bbox,
+                        _union([(w.x0, w.y0, w.x1, w.y1) for w in seg.words[label_words:]]) or seg.bbox,
+                        text, extraction_method,
+                    )
+                )
+                seg.used = True
+                continue
 
             inline = _INLINE_SEP.match(text)
             if inline and not text.endswith(":") and "://" not in text:
@@ -733,6 +858,18 @@ def _label_value_candidates(
                     )
                 )
                 seg.used = right.used = True
+
+        # Separator-less captions, after every explicit form above.
+        for label_seg, value_seg in _whitespace_pairs(line.segments):
+            label = _clean_label(label_seg.text)
+            value = _clean_value(value_seg.text)
+            fields.append(
+                _field(
+                    ids, page_number, label, value, "left_right_whitespace",
+                    label_seg.bbox, value_seg.bbox, f"{label_seg.text} {value_seg.text}", extraction_method,
+                )
+            )
+            label_seg.used = value_seg.used = True
     return fields
 
 
@@ -868,6 +1005,24 @@ def _typography_break(upper: Segment, lower: Segment) -> bool:
     return larger or weight
 
 
+def _caps_title(text: str) -> bool:
+    """OCR carries no bold/weight, so a title line is recognised by shape:
+    several all-capital words, mostly letters ("HIGHER SECONDARY SCHOOL
+    CERTIFICATE EXAMINATION", "ANNUAL 2005")."""
+
+    words = text.split()
+    letters = [ch for ch in text if ch.isalpha()]
+    alnum = [ch for ch in text if ch.isalnum()]
+    return (
+        # Text on an underline ("_NOSHEEN TARIQ") fills in a form blank.
+        not text.lstrip().startswith("_")
+        and len(words) >= 2
+        and len(letters) >= 6
+        and all(ch.isupper() for ch in letters)
+        and len(letters) >= 0.6 * len(alnum)
+    )
+
+
 def _text_regions(ids: _Ids, page_number: int, lines: list[Line], extraction_method: str) -> list[StructuredRegion]:
     """Headings, paragraphs/narrative and contact blocks from the runs no
     table or label/value claimed. Runs join a block only when they are on
@@ -912,8 +1067,10 @@ def _text_regions(ids: _Ids, page_number: int, lines: list[Line], extraction_met
             len(block) == 1
             and words <= 10
             and not _ends_like_sentence_or_label(text)
-            and (block[0].bold or size >= 1.2 * body_size)
+            and (block[0].bold or size >= 1.2 * body_size or (extraction_method == "ocr" and _caps_title(text)))
             and re.search(r"[A-Za-z]", text)
+            # "grade" set in a larger OCR box is still a lowercase word, not a title.
+            and not text[:1].islower()
             # An email/URL run can look "large" to OCR ('@', descenders)
             # but is contact data, never a heading.
             and not re.search(r"@|www\.|https?://", text)

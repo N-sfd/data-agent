@@ -366,3 +366,48 @@ describe("cellSourceRequest", () => {
     ).toBeNull();
   });
 });
+
+describe("StagingWorkbook presentation", () => {
+  beforeEach(() => getWorkbook.mockReset());
+
+  function genericWorkbook(): Workbook {
+    const base = contractWorkbook();
+    const keyCell = cell("document.field.value", "Value", "516522", "Verified");
+    return {
+      ...base,
+      profile: { ...base.profile, profile_id: "generic_business_document", profile_version: 2, display_name: "Generic" },
+      datasets: [
+        dataset({
+          dataset_id: "document_summary",
+          display_name: "Document Summary",
+          cardinality: "single",
+          records: [{ record_id: "s", cells: { "document.document_type": cell("document.document_type", "Document Type", "Certificate", "Verified") }, record_status: "Verified", links_to_dataset: null }],
+        }),
+        dataset({
+          dataset_id: "key_fields",
+          display_name: "Key Fields",
+          records: [{ record_id: "k", cells: { "document.field.value": keyCell }, record_status: "Verified", links_to_dataset: null }],
+        }),
+        dataset({ dataset_id: "contacts", display_name: "Contacts" }),
+        dataset({ dataset_id: "line_items", display_name: "Line Items" }),
+        dataset({ dataset_id: "other_tables", display_name: "Other Tables" }),
+        dataset({ dataset_id: "all_fields", display_name: "All Fields" }),
+      ],
+    };
+  }
+
+  it("shows Overview / Tables labels and hides empty Contacts and Line Items for the generic profile", async () => {
+    getWorkbook.mockResolvedValue(genericWorkbook());
+    render(<StagingWorkbook documentId="doc-1" />);
+    const tabs = await screen.findByRole("tablist", { name: "Datasets" });
+    const labels = Array.from(tabs.querySelectorAll("button")).map((b) => b.textContent?.replace(/\(.*\)/, "").trim());
+    expect(labels).toEqual(["Overview", "Key Fields", "Tables", "All Fields"]);
+  });
+
+  it("names the source view Source & Transcript", async () => {
+    getWorkbook.mockResolvedValue(genericWorkbook());
+    render(<StagingWorkbook documentId="doc-1" />);
+    expect(await screen.findByRole("tab", { name: "Source & Transcript" })).toBeInTheDocument();
+    expect(screen.queryByRole("tab", { name: "Source / Transcription" })).toBeNull();
+  });
+});

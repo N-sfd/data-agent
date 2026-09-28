@@ -245,7 +245,9 @@ DOCUMENT CONTENT (evidence sample):
 
         try:
 
-            response = self.client.models.generate_content(
+            # The async client: a blocking call here would hold the event
+            # loop and make per-call timeouts impossible to enforce.
+            response = await self.client.aio.models.generate_content(
                 model=self.model,
 
                 contents=user_prompt,

@@ -16,6 +16,8 @@ class ExistingDocumentSummary(BaseModel):
 class EmbeddedFileSummary(BaseModel):
     filename: str
     size_bytes: int
+    # None when the embedded file can't be opened as a PDF.
+    page_count: int | None = None
 
 
 class UploadedDocumentResponse(BaseModel):

@@ -12,6 +12,7 @@ from app.services.ai_context import (
 )
 from app.services.ai_provider import (
     AIProvider,
+    AIProviderError,
 )
 from app.services.deterministic_extractor import (
     extract_from_page,
@@ -152,12 +153,18 @@ async def universal_extract(
             ),
         )
 
-        ai_result = (
-            await ai_provider.extract(
+        try:
+            ai_result = await ai_provider.extract(
                 instruction=instruction,
                 page_context=context,
             )
-        )
+        except AIProviderError:
+            # Optional enrichment: keep the deterministic answer.
+            ai_result = {
+                "answer": None,
+                "values": [],
+                "warnings": ["AI enhancement skipped — deterministic results shown."],
+            }
 
         answer = ai_result.get(
             "answer"

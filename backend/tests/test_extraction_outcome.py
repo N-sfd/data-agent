@@ -147,3 +147,36 @@ def test_inspect_portfolio_requires_collection_entry():
     result = inspect_pdf(_pdf(embedded=True, portfolio=True))
     assert result.kind == SOURCE_KIND_PDF_PORTFOLIO
     assert len(result.embedded_files) == 1
+
+
+def test_portfolio_upload_lists_page_counts_for_the_picker():
+    """The picker orders embedded files by page count so the main document
+    (a 33-page award) isn't buried under a 2-page cover letter."""
+
+    from uuid import uuid4
+
+    import fitz
+    from fastapi.testclient import TestClient
+
+    from app.main import app
+
+    def pdf(pages: int) -> bytes:
+        doc = fitz.open()
+        for i in range(pages):
+            doc.new_page().insert_text((72, 72), f"page {i + 1} {uuid4()}")
+        return doc.tobytes()
+
+    portfolio = fitz.open()
+    portfolio.new_page().insert_text(
+        (72, 72), "For the best experience, open this PDF portfolio in Acrobat X or Adobe Reader X, or later."
+    )
+    portfolio.embfile_add("letter.pdf", pdf(2), filename="letter.pdf")
+    portfolio.embfile_add("award.pdf", pdf(5), filename="award.pdf")
+
+    response = TestClient(app).post(
+        "/api/documents/upload",
+        files={"file": (f"portfolio-{uuid4()}.pdf", portfolio.tobytes(), "application/pdf")},
+    )
+    assert response.status_code in (200, 201), response.text
+    files = {f["filename"]: f["page_count"] for f in response.json()["embedded_files"]}
+    assert files == {"letter.pdf": 2, "award.pdf": 5}

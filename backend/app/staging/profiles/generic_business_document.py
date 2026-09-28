@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import re
 from collections import Counter
+from dataclasses import replace
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -43,6 +44,7 @@ from app.staging.profile import (
 from app.staging.provenance import make_provenance, source_type_of, system_provenance
 from app.staging.structure_provenance import (
     field_provenance,
+    region_provenance,
     source_column,
     table_cell_provenance,
 )
@@ -138,7 +140,11 @@ ALL_FIELDS = DatasetDefinition(
     dataset_id="all_fields",
     display_name="All Fields",
     cardinality="repeating",
-    description="Every accepted scalar candidate (key fields and contacts).",
+    description=(
+        "Everything found in structured form: key fields, contacts, each "
+        "accepted table row, typed values (dates, amounts, emails, URLs) "
+        "from running text, and headings. Never individual OCR words."
+    ),
     identity_fields=("document.field.name", "document.field.value"),
     fields=(F("document.field.category", "category", "Category", grounding="none"), *_FIELD_COLUMNS),
 )
@@ -291,6 +297,116 @@ def _table_label(table: TableCandidate, index: int) -> str:
     return f"Table {index} ({where})"
 
 
+# Typed values worth surfacing from running text (never bare words): dates,
+# currency amounts, emails and URLs.
+_MONTH = r"(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|June?|July?|Aug(?:ust)?|Sep(?:t(?:ember)?)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)"
+_TYPED_VALUES: tuple[tuple[str, str, re.Pattern[str]], ...] = (
+    ("Date", "date", re.compile(rf"\b{_MONTH}\.? \d{{1,2}}, \d{{4}}\b|\b\d{{1,2}} {_MONTH}\.? \d{{4}}\b", re.I)),
+    ("Date", "date", re.compile(r"\b\d{4}-\d{2}-\d{2}\b|\b\d{1,2}[/.-]\d{1,2}[/.-]\d{4}\b")),
+    ("Amount", "currency", re.compile(r"(?<![\w.])-?[$€£¥]\s?\d[\d,]*(?:\.\d{2})?\b")),
+    ("Email", "email", re.compile(r"\b[\w.+-]+@[\w-]+(?:\.[\w-]+)+\b")),
+    ("URL", "url", re.compile(r"\bhttps?://\S+|\bwww\.[\w-]+(?:\.[\w-]+)+\S*", re.I)),
+)
+_MAX_HEADINGS = 20
+
+
+def _all_fields(
+    document: Document,
+    structure,
+    scalar_records: list[RawRecord],
+    accepted_tables: list[TableCandidate],
+) -> list[RawRecord]:
+    """Everything the document says in structured form: label/value fields
+    and contacts, then each accepted table row, then typed values (dates,
+    amounts, emails, URLs) from running text, then headings. Each entry is
+    source-supported and deduplicated by value; bare OCR words never are."""
+
+    records: list[RawRecord] = []
+    seen_values: set[str] = set()
+
+    def key(value: object) -> str:
+        return normalize_space(str(value)).lower()
+
+    for record in scalar_records:
+        category = record.values.get("category") or (
+            "Contact" if record.values.get("name") in (None, "Contact block") else "Key Field"
+        )
+        records.append(replace(record, values={**record.values, "category": category}))
+        seen_values.add(key(record.values.get("value")))
+
+    for index, table in enumerate(accepted_tables, start=1):
+        label = _table_label(table, index)
+        headers = [h for h in table.headers if h]
+        for r, row in enumerate(table.rows):
+            filled = [c for c in row if c.text]
+            if not filled:
+                continue
+            row_text = " | ".join(c.text for c in filled)
+            provenance = table_cell_provenance(document, table, row, filled[0], filled[0].text)
+            boxes = [c.bbox for c in filled if c.bbox]
+            if boxes:
+                provenance.source_bbox = (
+                    min(b[0] for b in boxes), min(b[1] for b in boxes),
+                    max(b[2] for b in boxes), max(b[3] for b in boxes),
+                )
+            provenance.highlight_text = None
+            records.append(
+                RawRecord(
+                    record_id=f"{table.candidate_id}:all:{r}",
+                    values={
+                        "category": "Table Row",
+                        "name": f"{label} · Row {r + 1}" + (f" ({' | '.join(headers)})" if r == 0 and headers else ""),
+                        "value": row_text,
+                        "value_type": "table row",
+                        "extraction_method": table.detection_method.replace("_", " "),
+                    },
+                    provenance=provenance,
+                )
+            )
+            seen_values.update(key(c.text) for c in filled)
+
+    headings: list[RawRecord] = []
+    for region in structure.regions:
+        if region.region_type not in ("HEADING", "PARAGRAPH", "NARRATIVE"):
+            continue
+        for field_name, value_type, pattern in _TYPED_VALUES:
+            for match in pattern.finditer(region.text):
+                value = match.group(0).strip().rstrip(".,;")
+                if key(value) in seen_values:
+                    continue
+                seen_values.add(key(value))
+                records.append(
+                    RawRecord(
+                        record_id=f"{region.region_id}:typed:{match.start()}",
+                        values={
+                            "category": "Detected Value",
+                            "name": field_name,
+                            "value": value,
+                            "value_type": value_type,
+                            "extraction_method": "typed value in text",
+                        },
+                        provenance=region_provenance(document, region, highlight=value, kind="typed_value"),
+                    )
+                )
+        text = normalize_space(region.text)
+        if region.region_type == "HEADING" and len(headings) < _MAX_HEADINGS and key(text) not in seen_values:
+            seen_values.add(key(text))
+            headings.append(
+                RawRecord(
+                    record_id=f"{region.region_id}:heading",
+                    values={
+                        "category": "Heading",
+                        "name": "Heading",
+                        "value": text,
+                        "value_type": "heading",
+                        "extraction_method": "document heading",
+                    },
+                    provenance=region_provenance(document, region, highlight=text, kind="heading"),
+                )
+            )
+    return records + headings
+
+
 def adapt_generic(database: Session, document: Document) -> AdapterResult:
     structure = get_or_build_source_structure(database, document)
     staging_record = database.scalars(
@@ -419,7 +535,7 @@ def adapt_generic(database: Session, document: Document) -> AdapterResult:
             )
         )
 
-    all_fields = key_fields + contacts
+    all_fields = _all_fields(document, structure, key_fields + contacts, accepted_tables)
     stats = structure.stats
     regions = stats.regions_by_type
     summary_parts = [

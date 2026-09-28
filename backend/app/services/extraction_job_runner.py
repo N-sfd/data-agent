@@ -11,7 +11,7 @@ from app.database.session import SessionLocal
 from app.models.document import Document
 from app.models.document_page import DocumentPage
 from app.models.extraction_job import ExtractionJob
-from app.services.ai_provider_factory import create_ai_provider, describe_ai_provider
+from app.services.ai_provider_factory import create_ai_provider
 from app.services.detected_target_store import (
     load_document_targets,
     persist_document_targets,
@@ -33,6 +33,7 @@ from app.services.processing_versions import (
     processing_versions_payload,
 )
 from app.services.schema_discovery import discover_document_schema
+from app.services.ai_enrichment import start_session
 from app.services.target_extraction_service import extract_by_targets
 from app.services.target_result_store import persist_target_extraction_results
 from app.services.v3_orchestrator import run_and_persist_v3_extraction
@@ -287,11 +288,11 @@ async def run_processing_job(job_id: int) -> None:
                 (time.perf_counter() - discovery_started) * 1000
             )
         else:
-            ai_provider = create_ai_provider(settings)
+            ai_provider = start_session(create_ai_provider(settings), settings)
             log_event(
                 "schema_discovery_start",
                 stage="discovering_fields",
-                provider=describe_ai_provider(ai_provider),
+                provider=ai_provider.provider_label,
                 page_count=len(pages),
                 page_text_chars=page_text_chars,
             )
@@ -408,12 +409,17 @@ async def run_extraction_job(
         job.started_at = datetime.now(timezone.utc)
         database.commit()
 
-        ai_provider = create_ai_provider(settings)
+        # One AI enrichment session per run: timeouts, classified failures,
+        # a circuit breaker, and a single ai_enrichment summary (AI never
+        # fails the job — see app/services/ai_enrichment.py).
+        ai_provider = start_session(create_ai_provider(settings), settings)
+        if not use_ai_fallback:
+            ai_provider.mark_not_requested()
         log_event(
             "job_started",
             stage="extracting_data",
             job_type="extraction",
-            provider=describe_ai_provider(ai_provider),
+            provider=ai_provider.provider_label,
             target_count=len(target_ids),
             use_ai_fallback=use_ai_fallback,
         )
@@ -587,6 +593,7 @@ async def run_extraction_job(
             "partial": False,
             "batches_completed": len(batches),
             "batches_total": len(batches),
+            "ai_enrichment": ai_provider.summary(),
         }
 
         from app.services.processing_versions import processing_versions_payload
@@ -600,6 +607,7 @@ async def run_extraction_job(
                 "tables_extracted": len(tables),
                 "stage_timings_ms": stage_timings,
                 "v3_extraction": v3_record,
+                "ai_enrichment": ai_provider.summary(),
             },
         )
 

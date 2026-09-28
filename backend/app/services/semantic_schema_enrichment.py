@@ -13,6 +13,7 @@ from app.models.document_page import DocumentPage
 from app.schemas.document_target import DocumentTarget
 from app.schemas.schema_enrichment import SchemaEnrichmentResult, SchemaTargetEnrichment
 from app.services.ai_context import build_page_context
+from app.services.ai_enrichment import AIEnrichmentSession
 from app.services.ai_provider import AIProvider, AIProviderError, DisabledAIProvider
 from app.services.discovery_enrichment import assign_discovery_group
 from app.services.generic_kv_scanner import is_internal_form_name
@@ -133,7 +134,9 @@ async def enrich_targets_semantically(
     """Return enriched targets + soft warnings (never fails discovery)."""
 
     warnings: list[str] = []
-    if isinstance(ai_provider, DisabledAIProvider):
+    if isinstance(ai_provider, DisabledAIProvider) or (
+        isinstance(ai_provider, AIEnrichmentSession) and not ai_provider.available
+    ):
         return targets, warnings
 
     candidates = [target for target in targets if needs_semantic_enrichment(target)]

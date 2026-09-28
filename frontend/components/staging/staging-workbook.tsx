@@ -40,6 +40,28 @@ function hasValues(dataset: StagingDataset): boolean {
   );
 }
 
+/** Presentation only — the profile's datasets and exports are unchanged.
+ * The generic profile reads as Overview | Key Fields | Tables | All Fields,
+ * showing Contacts / Line Items only when they hold something. */
+const PRESENTATION: Record<string, { labels: Record<string, string>; hideWhenEmpty: string[] }> = {
+  generic_business_document: {
+    labels: { document_summary: "Overview", other_tables: "Tables" },
+    hideWhenEmpty: ["contacts", "line_items"],
+  },
+};
+
+function presentationFor(workbook: Workbook) {
+  return PRESENTATION[workbook.profile.profile_id] ?? { labels: {}, hideWhenEmpty: [] };
+}
+
+function isShown(workbook: Workbook, dataset: StagingDataset): boolean {
+  return !(presentationFor(workbook).hideWhenEmpty.includes(dataset.dataset_id) && !hasValues(dataset));
+}
+
+function tabLabel(workbook: Workbook, dataset: StagingDataset): string {
+  return presentationFor(workbook).labels[dataset.dataset_id] ?? dataset.display_name;
+}
+
 function initialDataset(workbook: Workbook): string {
   const business = workbook.datasets.find((d) => d.role === "business" && hasValues(d));
   const fallback =
@@ -154,7 +176,7 @@ export default function StagingWorkbook({
   }, []);
 
   const businessDatasets = useMemo(
-    () => workbook?.datasets.filter((d) => d.role === "business") ?? [],
+    () => workbook?.datasets.filter((d) => d.role === "business" && isShown(workbook, d)) ?? [],
     [workbook],
   );
 
@@ -267,8 +289,12 @@ export default function StagingWorkbook({
             }}
             className="text-left"
           >
-            <p className="text-lg font-medium tabular-nums text-foreground">{datasetCount(d)}</p>
-            <p className="mt-0.5 text-xs text-text-secondary">{d.display_name}</p>
+            <p
+              className={`text-lg font-medium tabular-nums ${hasValues(d) ? "text-foreground" : "text-text-muted"}`}
+            >
+              {datasetCount(d)}
+            </p>
+            <p className="mt-0.5 text-xs text-text-secondary">{tabLabel(workbook, d)}</p>
           </button>
         ))}
         </div>
@@ -293,7 +319,7 @@ export default function StagingWorkbook({
         {(
           [
             ["workbook", "Staging Workbook"],
-            ["source", "Source / Transcription"],
+            ["source", "Source & Transcript"],
           ] as [View, string][]
         ).map(([id, label]) => (
           <button
@@ -315,7 +341,7 @@ export default function StagingWorkbook({
       </div>
 
       {view === "source" ? (
-        <SourceTranscription documentId={documentId} />
+        <SourceTranscription documentId={documentId} documentName={documentName ?? workbook.document_filename} />
       ) : (
         <>
           <div
@@ -323,24 +349,28 @@ export default function StagingWorkbook({
             aria-label="Datasets"
             className="flex gap-1 overflow-x-auto border-b border-border pb-px"
           >
-            {workbook.datasets.map((d) => (
-              <button
-                key={d.dataset_id}
-                type="button"
-                role="tab"
-                aria-selected={activeDataset === d.dataset_id}
-                onClick={() => setActiveDataset(d.dataset_id)}
-                className={[
-                  "whitespace-nowrap border-b-2 px-3 py-2 text-sm font-medium transition",
-                  activeDataset === d.dataset_id
-                    ? "border-success text-foreground"
-                    : "border-transparent text-text-secondary hover:text-foreground",
-                ].join(" ")}
-              >
-                {d.display_name}
-                <span className="ml-1.5 text-xs text-text-muted">({datasetCount(d)})</span>
-              </button>
-            ))}
+            {workbook.datasets
+              .filter((d) => isShown(workbook, d) || activeDataset === d.dataset_id)
+              .map((d) => (
+                <button
+                  key={d.dataset_id}
+                  type="button"
+                  role="tab"
+                  aria-selected={activeDataset === d.dataset_id}
+                  onClick={() => setActiveDataset(d.dataset_id)}
+                  className={[
+                    "whitespace-nowrap border-b-2 px-3 py-2 text-sm font-medium transition",
+                    activeDataset === d.dataset_id
+                      ? "border-success text-foreground"
+                      : hasValues(d)
+                        ? "border-transparent text-text-secondary hover:text-foreground"
+                        : "border-transparent font-normal text-text-muted hover:text-text-secondary",
+                  ].join(" ")}
+                >
+                  {tabLabel(workbook, d)}
+                  <span className="ml-1.5 text-xs text-text-muted">({datasetCount(d)})</span>
+                </button>
+              ))}
           </div>
 
           {dataset?.description && (

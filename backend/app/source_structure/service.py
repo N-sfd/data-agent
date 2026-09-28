@@ -9,6 +9,7 @@ Per page, the best available geometry is used:
 
 from __future__ import annotations
 
+import re
 import time
 from collections import Counter
 from pathlib import Path
@@ -26,14 +27,16 @@ from app.source_structure.models import StructuredSourceDocument
 from app.source_structure.ocr_geometry import coordinate_space_for
 from app.source_structure.table_continuity import annotate_geometry, link_continuations
 from app.source_structure.pdf_structure import (
+    Word,
     extract_page_structure,
     native_words,
     ocr_words,
 )
+from app.source_structure.reading_order import reconstruct_page
 
 # Bump whenever extraction rules change; stored structures from an older
 # version are rebuilt on next use.
-EXTRACTOR_VERSION = 3  # 2: continuation metadata, quality flags; 3: typography block breaks, address blocks with Attn lines
+EXTRACTOR_VERSION = 4  # 2: continuation metadata, quality flags; 3: typography block breaks, address blocks with Attn lines; 4: invoice-fixture fixes (abbreviation labels, skew-aware OCR rows, fused/above headers, multi-pair runs), whitespace/filler label pairing, identifier typing, OCR caps headings
 
 _HTML_SUFFIXES = {".html", ".htm"}
 _RASTER_SUFFIXES = {".png", ".jpg", ".jpeg", ".tif", ".tiff", ".bmp", ".webp"}
@@ -72,18 +75,7 @@ def _build_pdf(document: Document, pages: list[DocumentPage], file_path: Path | 
             fitz_page = None
             if fitz_doc is not None and 0 <= page.page_number - 1 < fitz_doc.page_count:
                 fitz_page = fitz_doc[page.page_number - 1]
-            words, method = [], "native"
-            if fitz_page is not None:
-                words = native_words(fitz_page)
-            if len(words) < 3 and page.ocr_layout_json:
-                space = coordinate_space_for(
-                    page.ocr_layout_json,
-                    page_width_pt=page.page_width or (fitz_page.rect.width if fitz_page else 612.0),
-                    page_height_pt=page.page_height or (fitz_page.rect.height if fitz_page else 792.0),
-                    ocr_dpi=settings.ocr_dpi,
-                )
-                if space is not None:
-                    words, method = ocr_words(page.ocr_layout_json, space), "ocr"
+            words, method = page_words(page, fitz_page, settings.ocr_dpi)
             if not words:
                 continue
             structure = extract_page_structure(
@@ -102,6 +94,103 @@ def _build_pdf(document: Document, pages: list[DocumentPage], file_path: Path | 
     finally:
         if fitz_doc is not None:
             fitz_doc.close()
+
+
+def page_words(page: DocumentPage, fitz_page, ocr_dpi: float) -> tuple[list[Word], str]:
+    """A page's positioned words in PDF points: native text when present,
+    else the persisted OCR word layer (no new OCR pass)."""
+
+    words: list[Word] = native_words(fitz_page) if fitz_page is not None else []
+    if len(words) < 3 and page.ocr_layout_json:
+        space = coordinate_space_for(
+            page.ocr_layout_json,
+            page_width_pt=page.page_width or (fitz_page.rect.width if fitz_page else 612.0),
+            page_height_pt=page.page_height or (fitz_page.rect.height if fitz_page else 792.0),
+            ocr_dpi=ocr_dpi,
+        )
+        if space is not None:
+            return ocr_words(page.ocr_layout_json, space), "ocr"
+    return words, "native"
+
+
+def _open_source_pdf(document: Document, source_type: str, warnings: list[str]):
+    import fitz
+
+    try:
+        file_path = ensure_local_copy(get_settings(), stored_filename=document.stored_filename)
+    except DocumentStorageError as exc:
+        warnings.append(f"Source file unavailable ({exc}).")
+        return None
+    try:
+        if source_type == "image":
+            from app.services.file_processors.image_processor import _ensure_fitz_readable
+
+            file_path = _ensure_fitz_readable(file_path)
+        return fitz.open(str(file_path))
+    except Exception as exc:  # noqa: BLE001
+        warnings.append(f"Could not open source file for geometry ({exc}).")
+        return None
+
+
+def page_transcript(database: Session, document: Document, page_number: int) -> dict:
+    """Reading-order transcript of one page (reading_order.py): headings,
+    paragraphs and tables, each line carrying its words' page-space boxes.
+    HTML has no geometry: its readable DOM text is split into paragraphs."""
+
+    page = database.scalars(
+        select(DocumentPage).where(
+            DocumentPage.document_id == document.id, DocumentPage.page_number == page_number
+        )
+    ).first()
+    if page is None:
+        raise LookupError(f"Page {page_number} not found.")
+    source_type = _source_type(document)
+    warnings: list[str] = []
+    result = {
+        "document_id": document.id,
+        "page_number": page_number,
+        "source_type": source_type,
+        "extraction_method": "dom" if source_type == "html" else None,
+        "word_count": 0,
+        "page_width": page.page_width,
+        "page_height": page.page_height,
+        "blocks": [],
+        "warnings": warnings,
+    }
+    if source_type == "html":
+        text = page.final_text or ""
+        paragraphs = [p.strip() for p in re.split(r"\n\s*\n", text) if p.strip()]
+        result["blocks"] = [
+            {
+                "kind": "paragraph",
+                "text": p,
+                "bbox": None,
+                "lines": [{"text": line, "bbox": None, "words": []} for line in p.splitlines()],
+                "table": None,
+            }
+            for p in paragraphs
+        ]
+        result["word_count"] = len(text.split())
+        return result
+
+    fitz_doc = _open_source_pdf(document, source_type, warnings)
+    try:
+        fitz_page = (
+            fitz_doc[page_number - 1] if fitz_doc is not None and 0 <= page_number - 1 < fitz_doc.page_count else None
+        )
+        words, method = page_words(page, fitz_page, get_settings().ocr_dpi)
+        if fitz_page is not None:
+            result["page_width"] = result["page_width"] or fitz_page.rect.width
+            result["page_height"] = result["page_height"] or fitz_page.rect.height
+    finally:
+        if fitz_doc is not None:
+            fitz_doc.close()
+    structure = get_or_build_source_structure(database, document)
+    tables = [t for t in structure.table_candidates if t.page == page_number]
+    result["extraction_method"] = method
+    result["word_count"] = len(words)
+    result["blocks"] = [block.as_dict() for block in reconstruct_page(words, tables)]
+    return result
 
 
 def _build_html(file_path: Path | None, result: StructuredSourceDocument) -> None:

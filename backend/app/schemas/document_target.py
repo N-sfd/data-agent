@@ -113,3 +113,7 @@ class ExtractTargetsResponse(BaseModel):
     tables: list[TableTargetResult] = Field(default_factory=list)
     unresolved_targets: list[str] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
+    # This run's optional AI enrichment outcome (app/services/ai_enrichment.py):
+    # deterministic_status, ai_enrichment_status, a short notice, and the
+    # technical detail shown only under Processing Details.
+    ai_enrichment: dict | None = None

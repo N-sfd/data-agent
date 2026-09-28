@@ -104,7 +104,8 @@ def _assert_every_value_has_provenance(workbook: dict) -> None:
             continue
         for record in dataset["records"]:
             for key, cell in record["cells"].items():
-                if cell["value"] in (None, "") or key.endswith(("source_table", "other_values")):
+                # grounding="none" columns (Table, Category, Type, Found By) carry no provenance by design.
+                if cell["value"] in (None, "") or key.endswith(("source_table", "other_values", ".category", ".value_type", ".found_by")):
                     continue
                 provenance = cell["provenance"]
                 assert provenance, (dataset["dataset_id"], key)
@@ -217,3 +218,22 @@ def test_f6_html_letterhead_supplier_and_dom_provenance():
     assert wb["qa_summary"]["needs_review"] == 0
     _assert_arithmetic_passes(wb)
     _assert_every_value_has_provenance(wb)
+
+
+def test_invoice_all_fields_is_the_union_with_matching_states():
+    wb = _workbook("f1_digital_simple.pdf")
+    records = _records(wb, "all_fields")
+    by_name = {r["cells"]["invoice.field.name"]["value"]: r["cells"] for r in records}
+    number = by_name["Invoice Number"]
+    assert number["invoice.field.value"]["value"] == "BOS-24-1187"
+    assert number["invoice.field.category"]["value"] == "Invoice Summary"
+    # A value flagged in its own tab is flagged in All Fields too.
+    (summary,) = _records(wb, "invoice_summary")
+    assert by_name["Invoice Date"]["invoice.field.value"]["review_status"] == summary["cells"]["invoice.invoice_date"]["review_status"] == "Needs Review"
+    assert any(c["invoice.field.category"]["value"] == "Taxes / Charges" for c in by_name.values())
+    import csv
+    import io
+
+    csv_rows = list(csv.reader(io.StringIO(client.get(f"/api/documents/{wb['document_id']}/staging-workbook/datasets/all_fields.csv").text)))
+    assert csv_rows[0][:3] == ["Category", "Field", "Value"]
+    assert len(csv_rows) - 1 == len(records) > 0

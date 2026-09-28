@@ -201,9 +201,14 @@ ALL_FIELDS = DatasetDefinition(
     dataset_id="all_fields",
     display_name="All Fields",
     cardinality="repeating",
-    description="Accepted label/value pairs that don't belong to a stronger invoice dataset.",
-    identity_fields=("invoice.field.name", "invoice.field.value"),
+    description=(
+        "Every field found: the invoice fields above (summary, supplier, customer, "
+        "references, totals), each tax/charge, and accepted label/value pairs that "
+        "don't belong to a stronger dataset. Line items stay in Invoice Lines."
+    ),
+    identity_fields=("invoice.field.category", "invoice.field.name", "invoice.field.value"),
     fields=(
+        F("invoice.field.category", "category", "Category", grounding="none"),
         F("invoice.field.name", "name", "Field", grounding="derived"),
         F("invoice.field.value", "value", "Value", expected=True),
         F("invoice.field.value_type", "value_type", "Type", grounding="none"),
@@ -443,6 +448,72 @@ class Scalars:
                 + ".",
             )
         )
+
+
+# --- All Fields -----------------------------------------------------------------------------
+
+
+def _all_fields_union(
+    scalars: "Scalars",
+    supplier_values: dict,
+    supplier_prov: dict,
+    supplier_checks: dict,
+    totals_values: dict,
+    totals_prov: dict,
+    charges: list,
+    unmapped: list,
+) -> list[RawRecord]:
+    """All Fields = every field this invoice produced (with its own
+    provenance and checks, so a flagged value stays flagged here), each
+    tax/charge, then the unmapped label/value pairs."""
+
+    labels = {
+        f.canonical_field: (dataset.display_name, f.display_label, f.value_type)
+        for dataset in (INVOICE_SUMMARY, SUPPLIER, CUSTOMER, REFERENCE, TOTALS)
+        for f in dataset.fields
+    }
+    records: list[RawRecord] = []
+
+    def add(record_id: str, canonical: str, value, provenance, checks, found_by: str) -> None:
+        if value in (None, ""):
+            return
+        category, name, value_type = labels.get(canonical, ("Invoice", canonical, "text"))
+        records.append(
+            RawRecord(
+                record_id=record_id,
+                values={"category": category, "name": name, "value": value, "value_type": value_type, "found_by": found_by},
+                provenance=provenance,
+                cell_checks={"value": checks} if checks else {},
+            )
+        )
+
+    for canonical, assigned in scalars.assigned.items():
+        add(f"field:{canonical}", canonical, assigned.value, assigned.provenance, assigned.checks, "invoice field")
+    for key, value in supplier_values.items():
+        canonical = f"invoice.supplier.{key}"
+        if canonical not in scalars.assigned:
+            add(f"field:{canonical}", canonical, value, supplier_prov.get(key), supplier_checks.get(key), "invoice field")
+    for key, value in totals_values.items():
+        canonical = f"invoice.total.{key}"
+        if canonical not in scalars.assigned:
+            add(f"field:{canonical}", canonical, value, totals_prov.get(key), None, "invoice field")
+    for i, (kind, item) in enumerate(charges):
+        records.append(
+            RawRecord(
+                record_id=f"field:charge:{i}",
+                values={"category": "Taxes / Charges", "name": item.label, "value": item.value, "value_type": "money", "found_by": kind},
+                provenance=item.provenance,
+            )
+        )
+    for i, item in enumerate(unmapped):
+        records.append(
+            RawRecord(
+                record_id=f"field:{i}",
+                values={"category": "Other Field", "name": item.label, "value": item.value, "value_type": item.value_type, "found_by": item.found_by},
+                provenance=item.provenance,
+            )
+        )
+    return records
 
 
 # --- supplier (letterhead) --------------------------------------------------------------
@@ -1136,13 +1207,9 @@ def adapt_invoice(database: Session, document: Document) -> AdapterResult:
             for i, item in enumerate(distributions)
         ],
         "totals": [single("totals", totals_values, totals_prov)],
-        "all_fields": [
-            labeled_record(
-                "field", i, item,
-                {"name": item.label, "value": item.value, "value_type": item.value_type, "found_by": item.found_by},
-            )
-            for i, item in enumerate(unmapped)
-        ],
+        "all_fields": _all_fields_union(
+            scalars, supplier_values, supplier_prov, supplier_checks, totals_values, totals_prov, charges, unmapped
+        ),
         "source_documents": [
             RawRecord(record_id=f"source:{i}", values=row.model_dump())
             for i, row in enumerate(v3.source_documents if v3 else [])

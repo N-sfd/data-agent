@@ -207,6 +207,11 @@ class ProcessingMetadata(BaseModel):
     page_count: int | None = None
     source_type: SourceType | None = None
     transcription_available: bool = False
+    # The last processing run's optional AI enrichment outcome
+    # (app/services/ai_enrichment.py). Informational only: it never changes
+    # a cell's review state.
+    ai_enrichment_status: str | None = None
+    ai_enrichment_notice: dict | None = None
 
 
 class StagingWorkbook(BaseModel):

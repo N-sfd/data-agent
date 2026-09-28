@@ -356,12 +356,28 @@ export interface TableTargetResult {
   pages: number[];
 }
 
+/** Optional AI enrichment outcome of a processing run. AI never decides
+ * whether a document processed: deterministic_status does. */
+export interface AIEnrichmentSummary {
+  deterministic_status: "completed";
+  ai_enrichment_status: "completed" | "not_needed" | "skipped" | "unavailable" | "failed";
+  reason: string | null;
+  notice: { title: string; detail: string | null } | null;
+  provider: string | null;
+  model: string | null;
+  error_kind: string | null;
+  error_detail: string | null;
+  calls_attempted: number;
+  calls_succeeded: number;
+}
+
 export interface ExtractTargetsResult {
   document_id: string;
   scalars: ScalarTargetResult[];
   tables: TableTargetResult[];
   unresolved_targets: string[];
   warnings: string[];
+  ai_enrichment?: AIEnrichmentSummary | null;
 }
 
 export type CorrectionAction = "edit" | "verify" | "reject";
@@ -410,6 +426,7 @@ export interface ExtractionJob {
 export interface EmbeddedFileSummary {
   filename: string;
   size_bytes: number;
+  page_count?: number | null;
 }
 
 export interface StructureDetectionResult {
@@ -859,4 +876,34 @@ export interface ActorInfo {
   role: string;
   active: boolean;
   permissions: string[];
+}
+
+/** One page's reading-order transcript (GET /pages/{n}/transcript). Boxes
+ * are PDF points in page space — the same space evidence highlights use. */
+export type TranscriptBox = [number, number, number, number];
+
+export interface TranscriptLine {
+  text: string;
+  bbox: TranscriptBox | null;
+  words: { text: string; bbox: TranscriptBox }[];
+}
+
+export interface TranscriptBlock {
+  kind: "heading" | "paragraph" | "table";
+  text: string;
+  bbox: TranscriptBox | null;
+  lines: TranscriptLine[];
+  table: { headers: string[]; rows: string[][] } | null;
+}
+
+export interface PageTranscript {
+  document_id: string;
+  page_number: number;
+  source_type: string;
+  extraction_method: string | null;
+  word_count: number;
+  page_width: number | null;
+  page_height: number | null;
+  blocks: TranscriptBlock[];
+  warnings: string[];
 }

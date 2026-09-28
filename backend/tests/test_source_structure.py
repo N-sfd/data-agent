@@ -482,3 +482,103 @@ def _one_line_pdf() -> bytes:
     doc = fitz.open()
     doc.new_page().insert_text((72, 72), "Internal memo", fontsize=10)
     return doc.tobytes()
+
+
+# --- All Fields, CSV and reading-order transcript ---------------------------------
+
+
+def _record_form(page: fitz.Page) -> None:
+    """A certificate-like form: separator-less captions in two columns, an
+    underline-filled pair, a dated line and a marks table."""
+
+    t = lambda x, y, s, size=10: page.insert_text((x, y), s, fontsize=size)  # noqa: E731
+    t(150, 60, "REGIONAL EXAMINATION BOARD", 14)
+    t(60, 100, "Roll No."); t(120, 100, "516522"); t(330, 100, "Registration No."); t(430, 100, "0222420149")
+    t(60, 125, "Group __ HUMANITIES")
+    for i, (subject, maximum, obtained) in enumerate([("ENGLISH", "200", "069"), ("URDU", "200", "129"), ("ECONOMICS", "200", "126")]):
+        y = 180 + 18 * i
+        t(60, y, f"{i + 1}."); t(100, y, subject); t(330, y, maximum); t(430, y, obtained)
+    t(60, 300, "Issued at Islamabad on December 10, 2005 by the board secretary.")
+
+
+def test_all_fields_is_the_union_and_its_csv_is_never_header_only():
+    doc = fitz.open()
+    _record_form(doc.new_page(width=612, height=792))
+    document_id = _upload(f"record-form-{uuid4()}.pdf", doc.tobytes(), "application/pdf")
+    _process(document_id)
+
+    workbook = client.get(f"/api/documents/{document_id}/staging-workbook").json()
+    assert workbook["profile"]["profile_id"] == "generic_business_document"
+    records = _dataset(workbook, "all_fields")["records"]
+    by_category: dict[str, list[dict]] = {}
+    for record in records:
+        by_category.setdefault(record["cells"]["document.field.category"]["value"], []).append(record)
+
+    fields = {r["cells"]["document.field.name"]["value"]: r["cells"]["document.field.value"] for r in by_category["Key Field"]}
+    assert fields["Roll No."]["value"] == "516522"
+    assert fields["Registration No."]["value"] == "0222420149"
+    # An identifier caption types its value as an identifier, not a phone.
+    assert _dataset(workbook, "contacts")["records"] == []
+    assert fields["Group"]["value"] == "HUMANITIES"
+    assert len(by_category["Table Row"]) == 3
+    assert any(r["cells"]["document.field.value"]["value"] == "December 10, 2005" for r in by_category["Detected Value"])
+    # Every All Fields value is source-supported.
+    for record in records:
+        value = record["cells"]["document.field.value"]
+        assert value["provenance"] and value["provenance"]["source_page"] == 1
+
+    csv_text = client.get(
+        f"/api/documents/{document_id}/staging-workbook/datasets/all_fields.csv"
+    ).text
+    import csv
+    import io
+
+    rows = list(csv.reader(io.StringIO(csv_text)))
+    assert rows[0] == ["Category", "Field", "Value", "Type", "Found By", "Source Page", "Evidence", "Review Status"]
+    assert len(rows) - 1 == len(records) > 0
+
+
+def test_transcript_reads_columns_in_order_and_grids_by_row():
+    from app.source_structure.reading_order import reconstruct_page
+
+    def words_of(page: fitz.Page):
+        return native_words(fitz.open("pdf", page.parent.tobytes())[page.number])
+
+    doc = fitz.open()
+    page = doc.new_page(width=612, height=792)
+    left = ["Alpha column begins here and", "continues on its second line", "and ends on the third one."]
+    right = ["Beta column is independent,", "its lines sit at other heights", "and it is read after Alpha."]
+    for i, text in enumerate(left):
+        page.insert_text((60, 100 + 14 * i), text, fontsize=10)
+    for i, text in enumerate(right):
+        page.insert_text((330, 107 + 14 * i), text, fontsize=10)
+    for i, (label, value) in enumerate([("Subtotal", "$605.20"), ("Tax", "$36.25"), ("Invoice Total", "$659.45")]):
+        page.insert_text((330, 250 + 16 * i), label, fontsize=10)
+        page.insert_text((500, 250 + 16 * i), value, fontsize=10)
+
+    blocks = reconstruct_page(words_of(page))
+    lines = [line["text"] for block in blocks for line in block.as_dict()["lines"]]
+    text = "\n".join(lines)
+    # Columns: all of Alpha before any of Beta — not interleaved by height.
+    assert text.index("third one.") < text.index("Beta column")
+    # Grid: each label stays with its value, row by row.
+    assert "Subtotal   $605.20" in lines and "Invoice Total   $659.45" in lines
+    assert text.index("Subtotal") < text.index("Tax") < text.index("Invoice Total")
+    # Every line keeps its words' page-space boxes for evidence highlighting.
+    for block in blocks:
+        for line in block.as_dict()["lines"]:
+            assert line["bbox"] and line["words"]
+
+
+def test_transcript_endpoint_returns_reading_order_blocks():
+    doc = fitz.open()
+    _record_form(doc.new_page(width=612, height=792))
+    document_id = _upload(f"record-form-{uuid4()}.pdf", doc.tobytes(), "application/pdf")
+    transcript = client.get(f"/api/documents/{document_id}/pages/1/transcript").json()
+    assert transcript["extraction_method"] == "native"
+    kinds = [b["kind"] for b in transcript["blocks"]]
+    assert "table" in kinds
+    first_text = next(b["text"] for b in transcript["blocks"] if b["kind"] != "table")
+    assert first_text == "REGIONAL EXAMINATION BOARD"
+    assert any("Roll No.   516522   Registration No.   0222420149" == b["text"] for b in transcript["blocks"])
+    assert client.get(f"/api/documents/{document_id}/pages/99/transcript").status_code == 404

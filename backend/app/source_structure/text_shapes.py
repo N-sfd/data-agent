@@ -223,5 +223,7 @@ def candidate_quality(label_text: str, value: str, relation: str) -> tuple[float
         flags.append("value_truncated")
     if relation == "left_right_typography":
         flags.append("pairing_by_typography_only")
+    if relation == "left_right_whitespace":
+        flags.append("pairing_by_position_only")
 
     return round(max(0.0, 1.0 - 0.2 * len(flags)), 2), flags

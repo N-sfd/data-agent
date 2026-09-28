@@ -38,12 +38,70 @@ import {
 } from "@/lib/target-corrections";
 import type {
   DocumentTarget,
+  AIEnrichmentSummary,
   ExtractTargetsResult,
   TableTargetResult,
   TargetCorrection,
   TargetType,
   UniversalTable,
 } from "@/types/document";
+
+/** Shown only when optional AI enrichment was unavailable: the document
+ * still processed deterministically, so this is a quiet note, not an error. */
+export function AIEnrichmentNotice({ summary }: { summary: AIEnrichmentSummary | null }) {
+  if (!summary?.notice) return null;
+  return (
+    <div role="status" className="rounded-xl border border-border bg-surface-soft px-4 py-3 text-sm">
+      <p className="font-medium text-foreground">{summary.notice.title}</p>
+      {summary.notice.detail && (
+        <p className="mt-0.5 text-xs text-text-secondary">{summary.notice.detail}</p>
+      )}
+    </div>
+  );
+}
+
+/** Processing Details: the technical record behind the results — AI
+ * provider/model/error detail and the legacy extraction warnings. */
+function ProcessingDiagnostics({
+  summary,
+  warnings,
+}: {
+  summary: AIEnrichmentSummary | null;
+  warnings: string[];
+}) {
+  if (!summary && warnings.length === 0) return null;
+  return (
+    <div className="space-y-2 rounded-xl border border-border bg-surface-soft p-4 text-xs text-text-secondary">
+      {summary && (
+        <div>
+          <p className="font-semibold text-foreground">AI enrichment</p>
+          <p>
+            Deterministic extraction: {summary.deterministic_status} · AI enrichment:{" "}
+            {summary.ai_enrichment_status.replace("_", " ")}
+            {summary.provider ? ` · provider ${summary.provider}` : ""}
+            {summary.model ? ` (${summary.model})` : ""}
+            {` · ${summary.calls_attempted} call(s)`}
+          </p>
+          {summary.reason && <p>{summary.reason}</p>}
+          {summary.error_kind && <p>Error kind: {summary.error_kind}</p>}
+          {summary.error_detail && (
+            <pre className="mt-1 max-h-40 overflow-auto whitespace-pre-wrap font-mono text-[11px]">
+              {summary.error_detail}
+            </pre>
+          )}
+        </div>
+      )}
+      {warnings.length > 0 && (
+        <div>
+          <p className="font-semibold text-foreground">Extraction warnings</p>
+          {warnings.map((warning, index) => (
+            <p key={index}>{warning}</p>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
 
 interface TargetResultsProps {
   result: ExtractTargetsResult;
@@ -566,6 +624,8 @@ export default function TargetResults({
         </div>
       </div>
 
+      <AIEnrichmentNotice summary={result.ai_enrichment ?? null} />
+
       {documentId && (
         <StagingWorkbook
           documentId={documentId}
@@ -589,6 +649,7 @@ export default function TargetResults({
 
       {showLegacyAudit && (
       <>
+      <ProcessingDiagnostics summary={result.ai_enrichment ?? null} warnings={result.warnings} />
       <div>
         <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-text-teal">
           Extraction Results (legacy)
@@ -857,13 +918,6 @@ export default function TargetResults({
       </>
       )}
 
-      {result.warnings.length > 0 && (
-        <div className="rounded-xl border border-border bg-surface-soft p-4 text-xs text-text-secondary">
-          {result.warnings.map((warning, index) => (
-            <p key={index}>{warning}</p>
-          ))}
-        </div>
-      )}
 
       {documentId && (
         <SourceVerificationDrawer

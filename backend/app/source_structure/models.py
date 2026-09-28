@@ -51,6 +51,8 @@ StructuralRelation = Literal[
     "same_line_separator",  # "Label: value" inside one text run
     "left_right_separator",  # "Label:" then the value to its right
     "left_right_typography",  # bold label, regular value, same line
+    "left_right_whitespace",  # "Roll No.   516522" — no separator, shape-gated
+    "same_line_filler",  # "Group ____ HUMANITIES" — underline/leader fill
     "label_above_value",  # "Label:" with the value directly below
     "form_widget",  # PDF AcroForm field
     "html_label_for",  # <label for=…> → control

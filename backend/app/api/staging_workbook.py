@@ -21,7 +21,7 @@ from app.source_structure.models import (
     StructuredSourceDocument,
     TableCandidate,
 )
-from app.source_structure.service import get_or_build_source_structure
+from app.source_structure.service import get_or_build_source_structure, page_transcript
 from app.staging import registry
 from app.staging.engine import profile_descriptor
 from app.staging.export import build_dataset_csv, build_workbook_xlsx, find_dataset
@@ -116,6 +116,26 @@ async def read_source_structure(
     if document is None:
         raise HTTPException(status_code=404, detail="Document not found.")
     return get_or_build_source_structure(database, document)
+
+
+@router.get("/{document_id}/pages/{page_number}/transcript")
+async def read_page_transcript(
+    document_id: str,
+    page_number: int,
+    database: Session = Depends(get_database),
+    actor: ActorContext = Depends(require_permission("documents.view")),
+) -> dict:
+    """The user-facing transcript of one page, in reconstructed reading
+    order (source_structure/reading_order.py). Raw OCR text stays on the
+    pages endpoint for diagnostics."""
+
+    document = database.get(Document, document_id)
+    if document is None:
+        raise HTTPException(status_code=404, detail="Document not found.")
+    try:
+        return page_transcript(database, document, page_number)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
 @router.get(

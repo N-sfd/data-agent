@@ -14,6 +14,7 @@ import type {
   DiscoverSchemaResult,
   DocumentHierarchyResult,
   DocumentPage,
+  PageTranscript,
   DocumentSearchResponse,
   DocumentSummary,
   DocumentTarget,
@@ -165,6 +166,13 @@ export async function getDocumentPages(
   documentId: string,
 ): Promise<DocumentPage[]> {
   return apiFetch(`/api/documents/${documentId}/pages`);
+}
+
+export async function getPageTranscript(
+  documentId: string,
+  pageNumber: number,
+): Promise<PageTranscript> {
+  return apiFetch(`/api/documents/${documentId}/pages/${pageNumber}/transcript`);
 }
 
 export async function detectStructures(
@@ -758,6 +766,8 @@ export async function extractTargetsViaJob(
       ? raw.unresolved_targets
       : [],
     warnings: Array.isArray(raw.warnings) ? raw.warnings : [],
+    ai_enrichment:
+      raw.ai_enrichment && typeof raw.ai_enrichment === "object" ? raw.ai_enrichment : null,
   };
 }
 

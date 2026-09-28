@@ -29,6 +29,7 @@ from app.schemas.universal_extraction import (
     UniversalExtractionRequest,
     UniversalExtractionResponse,
 )
+from app.services.ai_enrichment import start_session
 from app.services.ai_provider_factory import (
     create_ai_provider,
 )
@@ -105,9 +106,7 @@ async def extract_anything(
             ),
         )
 
-    ai_provider = create_ai_provider(
-        settings
-    )
+    ai_provider = start_session(create_ai_provider(settings), settings)
 
     return await universal_extract(
         database=database,
@@ -162,7 +161,7 @@ async def detect_structures(
         )
     )
 
-    ai_provider = create_ai_provider(settings)
+    ai_provider = start_session(create_ai_provider(settings), settings)
 
     return await detect_document_structures(
         document=document,
@@ -222,7 +221,7 @@ async def discover_schema(
         )
     )
 
-    ai_provider = create_ai_provider(settings)
+    ai_provider = start_session(create_ai_provider(settings), settings)
 
     try:
         result = await discover_document_schema(
@@ -388,7 +387,7 @@ async def extract_targets(
 
     document = _load_document_or_404(database, document_id)
 
-    ai_provider = create_ai_provider(settings)
+    ai_provider = start_session(create_ai_provider(settings), settings)
 
     result = await extract_by_targets(
         database=database,
@@ -406,4 +405,5 @@ async def extract_targets(
         tables=result.tables,
         extraction_job_id=None,
     )
+    result.ai_enrichment = ai_provider.summary()
     return result

@@ -45,6 +45,7 @@ from app.schemas.contract_signatures import (
 from app.schemas.contract_tables import TableExtractionResponse
 from app.schemas.structured_tables import StructuredTablesResponse
 from app.services.ai_provider import AIProviderError
+from app.services.ai_enrichment import start_session
 from app.services.ai_provider_factory import create_ai_provider
 from app.services.contract_classifier import classify_contract
 from app.services.contract_field_schema import FieldSpec
@@ -254,7 +255,7 @@ async def analyze_contract(
             for field in custom_fields
         ]
 
-    ai_provider = create_ai_provider(settings)
+    ai_provider = start_session(create_ai_provider(settings), settings)
 
     try:
         classification = await classify_contract(
@@ -1124,7 +1125,7 @@ async def extract_clauses(
     document = _load_ready_document(database, document_id)
     pages = _load_pages(database, document_id)
 
-    ai_provider = create_ai_provider(settings)
+    ai_provider = start_session(create_ai_provider(settings), settings)
 
     clauses, warnings = await extract_contract_clauses(
         database=database,
@@ -1204,7 +1205,7 @@ async def extract_signatures(
     document = _load_ready_document(database, document_id)
     pages = _load_pages(database, document_id)
 
-    ai_provider = create_ai_provider(settings)
+    ai_provider = start_session(create_ai_provider(settings), settings)
 
     signatures, warnings = await extract_contract_signatures(
         database=database,
@@ -1259,7 +1260,7 @@ async def extract_structured_tables(
     document = _load_ready_document(database, document_id)
     pages = _load_pages(database, document_id)
 
-    ai_provider = create_ai_provider(settings)
+    ai_provider = start_session(create_ai_provider(settings), settings)
 
     results, warnings = await extract_document_structured_tables(
         database=database,

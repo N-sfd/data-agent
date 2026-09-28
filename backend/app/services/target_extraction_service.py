@@ -27,6 +27,7 @@ from app.schemas.extraction_intelligence import (
     confidence_detail_to_legacy_signals,
 )
 from app.services.ai_context import build_page_context
+from app.services.ai_enrichment import AIEnrichmentSession, assess_deterministic_sufficiency
 from app.services.ai_provider import AIProvider, AIProviderError
 from app.services.ai_value_mapping import map_ai_value
 from app.services.clause_citation_scanner import scan_pages_for_clause_citations
@@ -825,8 +826,10 @@ async def _run_batched_scalar_ai_fallback(
         ai_result = await ai_provider.extract(
             instruction=instruction, page_context=context
         )
-    except AIProviderError as exc:
-        return [], [f"AI fallback unavailable: {exc}"]
+    except AIProviderError:
+        # Reported once per run by the AI enrichment session (Processing
+        # Details), never as a per-call warning in the results.
+        return [], []
 
     scalars: list[ScalarTargetResult] = []
     warnings: list[str] = []
@@ -907,8 +910,8 @@ async def _run_per_target_ai_fallback(
             ai_result = await ai_provider.extract(
                 instruction=instruction, page_context=context
             )
-        except AIProviderError as exc:
-            return None, [f"AI fallback unavailable for '{target.label}': {exc}"]
+        except AIProviderError:
+            return None, []
 
         warnings = list(ai_result.get("warnings", []))
 
@@ -1071,7 +1074,26 @@ async def extract_by_targets(
         result.target for result in tables
     }
 
-    if needs_ai and use_ai_fallback:
+    run_ai = bool(needs_ai and use_ai_fallback)
+    session = ai_provider if isinstance(ai_provider, AIEnrichmentSession) else None
+    if run_ai and session is not None:
+        if not session.available:
+            run_ai = False
+        else:
+            # Deterministic-first: AI is a rescue, considered only once the
+            # deterministic result has been assessed as insufficient.
+            sufficient, reason = assess_deterministic_sufficiency(
+                database, document, requested=len(requested), resolved=len(resolved_keys)
+            )
+            if sufficient:
+                session.mark_not_needed(reason)
+                run_ai = False
+    elif needs_ai and session is not None:
+        session.mark_not_requested()
+    elif use_ai_fallback and session is not None and requested:
+        session.mark_not_needed("Deterministic extraction resolved every requested field.")
+
+    if run_ai:
         batchable = [
             target
             for target in needs_ai

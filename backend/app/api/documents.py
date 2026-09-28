@@ -146,6 +146,17 @@ def _peek_portfolio_embedded_files(file_path: Path) -> list[EmbeddedPdf]:
         return []
 
 
+def _embedded_page_count(data: bytes) -> int | None:
+    """Page count shown in the portfolio picker, so the main document
+    (e.g. a 33-page award) stands out from 2-page cover letters."""
+
+    try:
+        with fitz.open("pdf", data) as pdf:
+            return pdf.page_count
+    except Exception:
+        return None
+
+
 def _extract_metadata(
     spec: UploadTypeSpec, file_path: Path
 ) -> PDFMetadata:
@@ -342,6 +353,7 @@ async def upload_document(
                         EmbeddedFileSummary(
                             filename=item.filename,
                             size_bytes=len(item.data),
+                            page_count=_embedded_page_count(item.data),
                         )
                         for item in portfolio_files
                     ],
