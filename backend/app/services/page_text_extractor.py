@@ -239,6 +239,10 @@ def extract_page(
         and (force_ocr or detection.requires_ocr)
     )
 
+    # Per-page OCR pass report (timings, whether the enhanced pass ran),
+    # stored with the word layout for QA and performance review.
+    ocr_passes: dict = {}
+
     if should_run_ocr:
         ocr_attempted = True
         mupdf_started = time.perf_counter()
@@ -275,6 +279,7 @@ def extract_page(
                 settings.ocr_page_timeout_seconds,
             )
 
+            ocr_passes["text_ocr_ms"] = int((time.perf_counter() - mupdf_started) * 1000)
             ocr_text = page.get_text(
                 "text",
                 textpage=ocr_text_page,
@@ -414,6 +419,7 @@ def extract_page(
                 preprocess_tags = list(prepared.applied)
                 if prepared.skipped_reason:
                     preprocess_tags.append(f"skip:{prepared.skipped_reason}")
+                pass_started = time.perf_counter()
                 layout = extract_ocr_layout(
                     prepared.image_bytes,
                     language=settings.ocr_language,
@@ -421,9 +427,47 @@ def extract_page(
                         45, int(settings.ocr_page_timeout_seconds or 45)
                     ),
                 )
+                ocr_passes["primary_layout_ms"] = int((time.perf_counter() - pass_started) * 1000)
+                # PASS 1 above is a complete, usable result on its own.
+                # PASS 2 (watermark-suppressed copy) is only an enhancement:
+                # when it fails or times out, pass 1 stands unchanged and the
+                # page is marked so QA can say enhanced OCR was unavailable.
+                if layout is not None:
+                    from app.services.image_preprocess import suppress_light_background
+                    from app.services.ocr_word_layer import layout_score
+
+                    suppressed = suppress_light_background(prepared.image_bytes)
+                    if suppressed is None:
+                        ocr_passes["enhancement"] = "not_needed"
+                    else:
+                        pass_started = time.perf_counter()
+                        alternative = extract_ocr_layout(
+                            suppressed,
+                            language=settings.ocr_language,
+                            timeout_seconds=min(45, int(settings.ocr_page_timeout_seconds or 45)),
+                        )
+                        ocr_passes["enhanced_layout_ms"] = int((time.perf_counter() - pass_started) * 1000)
+                        if alternative is None:
+                            ocr_passes["enhancement"] = "unavailable"
+                            preprocess_tags.append("enhanced_ocr_unavailable")
+                        else:
+                            from app.services.ocr_word_layer import fuse_layouts
+
+                            pass_started = time.perf_counter()
+                            primary, secondary = (
+                                (alternative, layout)
+                                if layout_score(alternative) > layout_score(layout)
+                                else (layout, alternative)
+                            )
+                            layout = fuse_layouts(primary, secondary)
+                            ocr_passes["fusion_ms"] = int((time.perf_counter() - pass_started) * 1000)
+                            ocr_passes["enhancement"] = "applied"
+                            ocr_passes["contested_words"] = sum(1 for w in layout.words if w.contested)
+                            preprocess_tags.append("background_suppressed_fused")
                 if layout is not None and layout.words:
                     ocr_layout_payload = layout.to_json()
                     ocr_layout_payload["preprocess"] = preprocess_tags
+                    ocr_layout_payload["ocr_passes"] = ocr_passes
                     # Lets OCR pixel boxes be mapped back to PDF points
                     # (app/source_structure/ocr_geometry.py).
                     deskew = next(
@@ -479,6 +523,10 @@ def extract_page(
                     if textpage_layout is not None:
                         ocr_layout_payload = textpage_layout.to_json()
                         ocr_layout_payload["preprocess"] = ["source:mupdf_textpage"]
+                        # The word-layer pass failed: positions come from the
+                        # text OCR with no word confidence (values stay Needs
+                        # Review), and no enhancement ran.
+                        ocr_layout_payload["ocr_passes"] = {**ocr_passes, "primary_layout": "unavailable", "enhancement": "unavailable"}
                         ocr_layout_payload["coordinate_space"] = {
                             "unit": "px",
                             "dpi": layout_dpi,

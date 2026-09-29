@@ -22,6 +22,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.models.document import Document
+from app.models.document_page import DocumentPage
 from app.models.document_staging_workbook import DocumentStagingWorkbook
 from app.services.v3_reader import get_normalized_v3_document
 from app.source_structure.models import FieldCandidate, TableCandidate, TableCell
@@ -310,6 +311,33 @@ _TYPED_VALUES: tuple[tuple[str, str, re.Pattern[str]], ...] = (
 _MAX_HEADINGS = 20
 
 
+def _row_label(row: list[TableCell]) -> str | None:
+    """The cell that names a table row: its most wordy non-numeric cell
+    ("ENGLISH (COMPULSORY)", "TOTAL")."""
+
+    textual = [
+        c for c in row
+        if c.text and sum(ch.isalpha() for ch in c.text) >= 2 and sum(ch.isdigit() for ch in c.text) <= 1
+    ]
+    if not textual:
+        return None
+    return max(textual, key=lambda c: sum(ch.isalpha() for ch in c.text)).text
+
+
+def _table_title(structure, table: TableCandidate) -> str | None:
+    """The heading printed just above a table on its page, if any."""
+
+    if not table.bbox or table.page is None:
+        return None
+    x0, top, x1, _ = table.bbox
+    above = [
+        r for r in structure.regions
+        if r.region_type == "HEADING" and r.page == table.page and r.bbox
+        and 0 <= top - r.bbox[3] <= 80 and min(x1, r.bbox[2]) > max(x0, r.bbox[0])
+    ]
+    return normalize_space(max(above, key=lambda r: r.bbox[3]).text) if above else None
+
+
 def _all_fields(
     document: Document,
     structure,
@@ -335,34 +363,34 @@ def _all_fields(
         seen_values.add(key(record.values.get("value")))
 
     for index, table in enumerate(accepted_tables, start=1):
-        label = _table_label(table, index)
-        headers = [h for h in table.headers if h]
+        category = _table_title(structure, table) or _table_label(table, index)
+        has_header = bool(table.header_cells)
         for r, row in enumerate(table.rows):
             filled = [c for c in row if c.text]
             if not filled:
                 continue
-            row_text = " | ".join(c.text for c in filled)
-            provenance = table_cell_provenance(document, table, row, filled[0], filled[0].text)
-            boxes = [c.bbox for c in filled if c.bbox]
-            if boxes:
-                provenance.source_bbox = (
-                    min(b[0] for b in boxes), min(b[1] for b in boxes),
-                    max(b[2] for b in boxes), max(b[3] for b in boxes),
+            row_label = _row_label(row) or f"Row {r + 1}"
+            for cell in filled:
+                if cell.text == row_label:
+                    continue
+                column = (
+                    table.headers[cell.column_index]
+                    if has_header and cell.column_index < len(table.headers) and table.headers[cell.column_index]
+                    else f"Column {cell.column_index + 1}"
                 )
-            provenance.highlight_text = None
-            records.append(
-                RawRecord(
-                    record_id=f"{table.candidate_id}:all:{r}",
-                    values={
-                        "category": "Table Row",
-                        "name": f"{label} · Row {r + 1}" + (f" ({' | '.join(headers)})" if r == 0 and headers else ""),
-                        "value": row_text,
-                        "value_type": "table row",
-                        "extraction_method": table.detection_method.replace("_", " "),
-                    },
-                    provenance=provenance,
+                records.append(
+                    RawRecord(
+                        record_id=f"{table.candidate_id}:all:{r}:{cell.column_index}",
+                        values={
+                            "category": category,
+                            "name": f"{row_label} / {column}",
+                            "value": cell.text,
+                            "value_type": "table cell",
+                            "extraction_method": table.detection_method.replace("_", " "),
+                        },
+                        provenance=table_cell_provenance(document, table, row, cell, row_label),
+                    )
                 )
-            )
             seen_values.update(key(c.text) for c in filled)
 
     headings: list[RawRecord] = []
@@ -447,9 +475,29 @@ def adapt_generic(database: Session, document: Document) -> AdapterResult:
     except ValueError:
         v3 = None
     geometry = PageGeometry(database, document.id)
+    ocr_pages = {
+        page.page_number
+        for page in database.scalars(select(DocumentPage).where(DocumentPage.document_id == document.id))
+        if page.extraction_method == "ocr"
+    }
+    table_row_labels = {
+        normalize_space(cell.text).lower()
+        for table in structure.table_candidates
+        if table.acceptance == "accepted"
+        for row in table.rows
+        for cell in row
+        if cell.text
+    }
     for index, row in enumerate(v3.all_fields if v3 else []):
         signature = (row.normalized_field.lower(), normalize_space(row.value).lower())
         if signature in seen:
+            continue
+        # V3's own layout pass also reads table rows and OCR debris as
+        # "fields" on scanned pages: drop values with no content, captions
+        # carrying rule/underline debris, and rows a table already holds.
+        if not re.search(r"[A-Za-z0-9]", row.value or "") or re.search(r"[|_«»]", row.normalized_field or ""):
+            continue
+        if normalize_space(row.normalized_field).lower() in table_row_labels:
             continue
         seen.add(signature)
         key_fields.append(
@@ -477,6 +525,10 @@ def adapt_generic(database: Session, document: Document) -> AdapterResult:
                 builder_status=row.qa_status,
             )
         )
+        if "ocr" in (row.extraction_method or "").lower() or row.source_page in ocr_pages:
+            # No per-word confidence for these — OCR-read, so never Verified
+            # on the strength of the text alone.
+            key_fields[-1].provenance.ocr_gate = True
 
     for region in structure.regions:
         if region.region_type != "CONTACT_BLOCK":
@@ -485,17 +537,7 @@ def adapt_generic(database: Session, document: Document) -> AdapterResult:
             RawRecord(
                 record_id=region.region_id,
                 values={"name": "Contact block", "value": region.text, "value_type": "address"},
-                provenance=make_provenance(
-                    document,
-                    page=region.page,
-                    evidence=region.text,
-                    bbox=region.bbox,
-                    extraction_method=f"{region.extraction_method}:contact_block",
-                    region_id=region.region_id,
-                    anchor=region.text.splitlines()[0] if region.text else None,
-                    locator=region.source_locator,
-                    source_type="html" if region.extraction_method == "dom" else None,
-                ),
+                provenance=region_provenance(document, region, kind="contact_block"),
             )
         )
 
@@ -534,6 +576,12 @@ def adapt_generic(database: Session, document: Document) -> AdapterResult:
                 ),
             )
         )
+        if table.extraction_method == "ocr":
+            confidences = [c.ocr_confidence for row in table.rows[:1] for c in row if c.text]
+            other_tables[-1].provenance.ocr_gate = True
+            other_tables[-1].provenance.ocr_confidence = (
+                min(confidences) if confidences and None not in confidences else None
+            )
 
     all_fields = _all_fields(document, structure, key_fields + contacts, accepted_tables)
     stats = structure.stats

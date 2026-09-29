@@ -71,6 +71,8 @@ from app.staging.validation import to_number
 
 F = FieldDefinition
 
+_MONEY = re.compile(r"^\s*[-(]?\s*(?:[$€£¥]|USD|EUR|GBP)?\s*-?\d[\d,]*\.\d{2}\)?\s*$")
+
 # --- datasets -------------------------------------------------------------------
 
 INVOICE_SUMMARY = DatasetDefinition(
@@ -197,14 +199,32 @@ TOTALS = DatasetDefinition(
     ),
 )
 
+OTHER_FIELDS = DatasetDefinition(
+    dataset_id="other_fields",
+    display_name="Other Fields",
+    cardinality="repeating",
+    description=(
+        "Meaningful source fields that don't map to a canonical invoice field "
+        "(e.g. shipping or commercial details) — kept as stated, never forced "
+        "into a mapping."
+    ),
+    identity_fields=("invoice.other.name", "invoice.other.value"),
+    fields=(
+        F("invoice.other.name", "name", "Field", grounding="derived"),
+        F("invoice.other.value", "value", "Value", expected=True),
+        F("invoice.other.value_type", "value_type", "Type", grounding="none"),
+        F("invoice.other.found_by", "found_by", "Found By", grounding="none"),
+    ),
+)
+
 ALL_FIELDS = DatasetDefinition(
     dataset_id="all_fields",
     display_name="All Fields",
     cardinality="repeating",
     description=(
-        "Every field found: the invoice fields above (summary, supplier, customer, "
-        "references, totals), each tax/charge, and accepted label/value pairs that "
-        "don't belong to a stronger dataset. Line items stay in Invoice Lines."
+        "Everything found, normalized: the invoice fields (summary, supplier, "
+        "customer, references, totals), each tax/charge, every invoice line cell "
+        "(\"Line 1 / Part Number\"), and Other Fields — each with its own evidence."
     ),
     identity_fields=("invoice.field.category", "invoice.field.name", "invoice.field.value"),
     fields=(
@@ -453,6 +473,37 @@ class Scalars:
 # --- All Fields -----------------------------------------------------------------------------
 
 
+_LINE_LABELS = {f.key: f.display_label for f in INVOICE_LINES.fields}
+
+
+def _line_cell_fields(lines: list[RawRecord]) -> list[RawRecord]:
+    """Every invoice line cell as its own All Fields row, with context —
+    Category "Invoice Lines", Field "Line 3 / Unit Price" — and the cell's
+    own provenance and checks (a flagged amount stays flagged)."""
+
+    records: list[RawRecord] = []
+    for number, line in enumerate(lines, start=1):
+        label = f"Line {line.values.get('line_number') or number}"
+        for key, value in line.values.items():
+            if key in ("source_table",) or value in (None, ""):
+                continue
+            records.append(
+                RawRecord(
+                    record_id=f"{line.record_id}:{key}",
+                    values={
+                        "category": "Invoice Lines",
+                        "name": f"{label} / {_LINE_LABELS.get(key, key)}",
+                        "value": value,
+                        "value_type": "table cell",
+                        "found_by": "invoice line table",
+                    },
+                    provenance=line.cell_provenance.get(key) or line.provenance,
+                    cell_checks={"value": line.cell_checks[key]} if key in line.cell_checks else {},
+                )
+            )
+    return records
+
+
 def _all_fields_union(
     scalars: "Scalars",
     supplier_values: dict,
@@ -611,6 +662,12 @@ def _column_roles(table: TableCandidate) -> dict[str, int]:
         for index, header in enumerate(table.headers):
             role = LINE_HEADER_ALIASES.get(normalize_label(header))
             if role is None:
+                # "Part Number / Description": one column carrying two
+                # fields — each part names a role; the cell is split later.
+                parts = {LINE_HEADER_ALIASES.get(normalize_label(p)) for p in re.split(r"\s*(?:/|&|\+)\s*", header) if p.strip()}
+                if {"item_number", "description"} <= parts and not _numeric_column(table, index):
+                    roles.setdefault("item_number", index)
+                    roles.setdefault("description", index)
                 continue
             numeric = _numeric_column(table, index)
             if role in numeric_fields and not numeric:
@@ -738,6 +795,49 @@ def _union_bbox(a, b):
     return (min(a[0], b[0]), min(a[1], b[1]), max(a[2], b[2]), max(a[3], b[3]))
 
 
+def _code_shaped(token: str) -> bool:
+    """Lexically a code on its own: no lowercase, has a digit or hyphen."""
+
+    return len(token) >= 2 and not any(ch.islower() for ch in token) and (
+        any(ch.isdigit() for ch in token) or "-" in token
+    )
+
+
+def _column_leads_with_codes(table: TableCandidate, column: int) -> bool:
+    """Structural evidence that a combined "Part Number / Description"
+    column really starts each cell with an identifier: most of its cells
+    (at least two) begin with a lexically code-shaped token."""
+
+    leads = [
+        row[column].text.strip().partition(" ")[0]
+        for row in table.rows
+        if column < len(row) and row[column].text.strip()
+    ]
+    coded = sum(1 for token in leads if _code_shaped(token))
+    return coded >= 2 and coded >= 0.5 * len(leads)
+
+
+def _split_code(text: str, column_leads_with_codes: bool = False) -> tuple[str | None, str]:
+    """"P-100 Premium copy paper" → ("P-100", "Premium copy paper"): a
+    leading code-like token (no lowercase, has a digit or hyphen) is the
+    part number; the rest is the description. Otherwise no code.
+
+    Column semantics outrank lexical shape: when the header names the
+    column "Part Number / Description" AND the column's cells demonstrably
+    lead with codes, a purely alphabetic all-caps leading token ("TRV
+    Travel and mileage") is that row's identifier too. Without that
+    column evidence an uppercase first word stays description."""
+
+    first, _, rest = text.strip().partition(" ")
+    code_like = _code_shaped(first) or (
+        column_leads_with_codes
+        and 2 <= len(first) <= 10
+        and first.isalpha()
+        and first.isupper()
+    )
+    return (first, rest.strip()) if code_like and rest.strip() else (None, text.strip())
+
+
 def _line_records(
     document: Document, logical: LogicalTable, label: str, stats: LineStats
 ) -> list[RawRecord]:
@@ -782,12 +882,21 @@ def _line_records(
             values: dict[str, object] = {"source_table": label}
             provenance: dict[str, CellProvenance] = {}
             columns: dict[str, SourceColumn] = {}
+            shared = roles.get("item_number") is not None and roles.get("item_number") == roles.get("description")
+            leads_with_codes = shared and _column_leads_with_codes(table, roles["item_number"])
             for role in ("line_number", "item_number", "description", "quantity", "uom", "unit_price", "amount", "tax", "po_line"):
                 found = cell(role)
                 if found is None:
                     continue
-                values[role] = found.text
+                text = found.text
+                if shared and role in ("item_number", "description"):
+                    code, rest = _split_code(found.text, leads_with_codes)
+                    text = code if role == "item_number" else rest
+                    if not text:
+                        continue
+                values[role] = text
                 provenance[role] = table_cell_provenance(document, table, row, found, anchor)
+                provenance[role].highlight_text = text
                 columns[role] = source_column(table, found.column_index)
             other = [
                 f"{table.headers[c] if table.header_cells and c < len(table.headers) else f'Column {c + 1}'}: {x.text}"
@@ -993,6 +1102,28 @@ def adapt_invoice(database: Session, document: Document) -> AdapterResult:
             distributions.append(item)
         else:
             all_fields.append(item)
+
+    # A money-valued line inside the totals block (between Subtotal and the
+    # invoice total / amount due) is a charge even without a known keyword
+    # ("Insurance", "Environmental Fee"): its label is kept as stated.
+    bounds = [
+        i for i in labelled
+        if (alias := SCALAR_ALIASES.get(normalize_label(i.label)))
+        and alias.canonical in ("invoice.total.subtotal", "invoice.total.invoice_amount", "invoice.total.amount_due")
+    ]
+    subtotals = [i for i in bounds if SCALAR_ALIASES[normalize_label(i.label)].canonical == "invoice.total.subtotal"]
+    finals = [i for i in bounds if i not in subtotals]
+    if subtotals and finals:
+        top, bottom = subtotals[0], max(finals, key=lambda i: i.y)
+        for item in list(all_fields):
+            if (
+                item.page == top.page == bottom.page
+                and top.y < item.y < bottom.y
+                and _MONEY.search(item.value or "")
+                and to_number(item.value) is not None
+            ):
+                all_fields.remove(item)
+                charges.append(("other", item))
 
     # Customer name: the first line of a bill-to / customer block.
     for source in ("invoice.customer.bill_to_address", "invoice.customer.name"):
@@ -1207,9 +1338,16 @@ def adapt_invoice(database: Session, document: Document) -> AdapterResult:
             for i, item in enumerate(distributions)
         ],
         "totals": [single("totals", totals_values, totals_prov)],
+        "other_fields": [
+            labeled_record(
+                "other", i, item,
+                {"name": item.label, "value": item.value, "value_type": item.value_type, "found_by": item.found_by},
+            )
+            for i, item in enumerate(unmapped)
+        ],
         "all_fields": _all_fields_union(
             scalars, supplier_values, supplier_prov, supplier_checks, totals_values, totals_prov, charges, unmapped
-        ),
+        ) + _line_cell_fields(lines),
         "source_documents": [
             RawRecord(record_id=f"source:{i}", values=row.model_dump())
             for i, row in enumerate(v3.source_documents if v3 else [])
@@ -1243,6 +1381,7 @@ INVOICE_V1_PROFILE = StagingProfile(
         TAXES_CHARGES,
         DISTRIBUTIONS,
         TOTALS,
+        OTHER_FIELDS,
         ALL_FIELDS,
         SOURCE_DOCUMENTS,
         QA_REVIEW,
@@ -1265,7 +1404,7 @@ INVOICE_V1_PROFILE = StagingProfile(
             )
             for definition in (
                 INVOICE_SUMMARY, SUPPLIER, CUSTOMER, REFERENCE, INVOICE_LINES,
-                TAXES_CHARGES, DISTRIBUTIONS, TOTALS, ALL_FIELDS,
+                TAXES_CHARGES, DISTRIBUTIONS, TOTALS, OTHER_FIELDS, ALL_FIELDS,
             )
         ),
     ),

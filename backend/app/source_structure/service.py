@@ -36,7 +36,7 @@ from app.source_structure.reading_order import reconstruct_page
 
 # Bump whenever extraction rules change; stored structures from an older
 # version are rebuilt on next use.
-EXTRACTOR_VERSION = 4  # 2: continuation metadata, quality flags; 3: typography block breaks, address blocks with Attn lines; 4: invoice-fixture fixes (abbreviation labels, skew-aware OCR rows, fused/above headers, multi-pair runs), whitespace/filler label pairing, identifier typing, OCR caps headings
+EXTRACTOR_VERSION = 7  # 7: raster tables split rows at printed row rules; 6: OCR-pass disagreement (ocr_contested) on fields/cells/regions; 5: OCR word confidence on fields/cells/regions, background-suppressed OCR fusion; 2: continuation metadata, quality flags; 3: typography block breaks, address blocks with Attn lines; 4: invoice-fixture fixes (abbreviation labels, skew-aware OCR rows, fused/above headers, multi-pair runs), whitespace/filler label pairing, identifier typing, OCR caps headings
 
 _HTML_SUFFIXES = {".html", ".htm"}
 _RASTER_SUFFIXES = {".png", ".jpg", ".jpeg", ".tif", ".tiff", ".bmp", ".webp"}
@@ -78,11 +78,17 @@ def _build_pdf(document: Document, pages: list[DocumentPage], file_path: Path | 
             words, method = page_words(page, fitz_page, settings.ocr_dpi)
             if not words:
                 continue
+            grids = []
+            if method == "ocr" and fitz_page is not None:
+                from app.source_structure.raster_tables import detect_raster_grids
+
+                grids = detect_raster_grids(fitz_page)
             structure = extract_page_structure(
                 page_number=page.page_number,
                 words=words,
                 extraction_method=method,
                 fitz_page=fitz_page,
+                raster_grids=grids,
             )
             page_height = page.page_height or (fitz_page.rect.height if fitz_page else None)
             for table in structure.tables:

@@ -24,6 +24,7 @@ from sqlalchemy.orm import Session
 from app.models.document import Document
 from app.models.document_staging_workbook import DocumentStagingWorkbook
 from app.source_structure.service import build_and_persist_source_structure
+from app.staging import registry
 from app.staging.profile import StagingProfile
 from app.staging.resolver import persist_resolution, refine_with_structure, resolve_profile
 
@@ -65,9 +66,18 @@ def prepare_staging(database: Session, document: Document) -> StagingPreparation
                 record = persist_resolution(database, document, refined)
                 reason += f"; structure recognized {refined.profile.key}"
 
+    timings_ms = {"profile_resolution_ms": resolve_ms, "source_structure_ms": structure_ms}
+    profile = registry.get_profile(record.profile_id, record.profile_version)
+    if profile is not None and profile.materializer is not None:
+        # The profile's own domain records (e.g. the canonical FAR model)
+        # are built here, once, rather than on first read.
+        materialize_started = time.perf_counter()
+        profile.materializer(database, document)
+        timings_ms["profile_materialize_ms"] = int((time.perf_counter() - materialize_started) * 1000)
+
     return StagingPreparation(
         record=record,
         structure_built=needed,
         structure_reason=reason,
-        timings_ms={"profile_resolution_ms": resolve_ms, "source_structure_ms": structure_ms},
+        timings_ms=timings_ms,
     )

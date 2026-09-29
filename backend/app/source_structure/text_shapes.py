@@ -51,7 +51,9 @@ def strip_label_separator(label: str) -> str:
 
 
 def normalize_space(text: str) -> str:
-    return re.sub(r"\s+", " ", text or "").strip()
+    # Fonts that encode the printed hyphen as U+00AD (soft hyphen) would
+    # otherwise yield "P-100" as an invisible-hyphen "P100" lookalike.
+    return re.sub(r"\s+", " ", (text or "").replace("­", "-")).strip()
 
 
 def label_rejection(label: str, value: str | None = None) -> str | None:

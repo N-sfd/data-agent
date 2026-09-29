@@ -388,6 +388,7 @@ export default function StagingWorkbook({
               <StagingDatasetTable
                 key={dataset.dataset_id}
                 dataset={dataset}
+                documentId={documentId}
                 onOpenSource={onOpenSource}
                 onOpenDataset={setActiveDataset}
                 selectedId={selectedSourceId}

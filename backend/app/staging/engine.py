@@ -146,7 +146,11 @@ def _build_dataset(definition: DatasetDefinition, raws: list[RawRecord]) -> Stag
         ],
         records=records,
         identity_fields=list(definition.identity_fields),
+        grid_fields=list(definition.grid_fields),
     )
+
+
+build_dataset = _build_dataset
 
 
 def _has_value(record: StagingRecord) -> bool:

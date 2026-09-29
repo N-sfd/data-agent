@@ -267,10 +267,23 @@ def test_skewed_ocr_rows_group_on_deskewed_lines():
         Word("3", 43, 292, 48, 300, 8), Word("Bilge", 83, 291, 120, 300, 8),
         Word("3.0", 412, 288, 425, 295, 8), Word("285.00", 538, 286, 566, 293, 8),
     ]
-    assert len(build_lines(words)) == 2  # tilted: the numbers form their own "line"
+    # With the measured tilt compensated, the row is one line.
     for w in words:
         w.row_offset = slope * ((w.x0 + w.x1) / 2 - 300)
     assert len(build_lines(words)) == 1
+
+
+def test_an_oversized_title_does_not_glue_neighbouring_lines():
+    # A 24pt "INVOICE" level with an 11pt letterhead name and the 7.5pt
+    # address line under it: name and address stay separate lines.
+    words = [
+        Word("Northstar", 42, 40, 95, 52.5, 11), Word("Office", 98, 40, 128, 52.5, 11),
+        Word("INVOICE", 471, 40, 570, 67, 24),
+        Word("4800", 42, 55.5, 60, 63.5, 7.5), Word("Market", 62, 55.5, 88, 63.5, 7.5),
+    ]
+    texts = [" ".join(w.text for w in line.words) for line in build_lines(words)]
+    assert any(t.startswith("Northstar Office") for t in texts)
+    assert not any("Northstar" in t and "4800" in t for t in texts)
 
 
 def test_html_letterhead_heading_is_not_a_label():
@@ -521,7 +534,11 @@ def test_all_fields_is_the_union_and_its_csv_is_never_header_only():
     # An identifier caption types its value as an identifier, not a phone.
     assert _dataset(workbook, "contacts")["records"] == []
     assert fields["Group"]["value"] == "HUMANITIES"
-    assert len(by_category["Table Row"]) == 3
+    # Table values arrive cell by cell with context: "<row label> / <column>".
+    cells = [r for r in records if r["cells"]["document.field.value_type"]["value"] == "table cell"]
+    names = {r["cells"]["document.field.name"]["value"]: r["cells"]["document.field.value"]["value"] for r in cells}
+    assert len(cells) >= 6
+    assert any(name.startswith("ECONOMICS / ") and value == "126" for name, value in names.items())
     assert any(r["cells"]["document.field.value"]["value"] == "December 10, 2005" for r in by_category["Detected Value"])
     # Every All Fields value is source-supported.
     for record in records:

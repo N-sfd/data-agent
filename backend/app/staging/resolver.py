@@ -1,6 +1,10 @@
 """document → detected family → staging profile, pinned with its version.
 
 Signals, in order:
+  0. A profile's document recognizer finding strong structural evidence
+     in the document itself (e.g. FAR Part 52's Part/Subpart/clause
+     heading structure) — decisive, because such text would otherwise
+     read like a contract to the keyword classifier. Never the filename.
   1. Deterministic keyword family classification of the document's text
      (structure_detection.classify_document_family — no AI).
   2. When that is inconclusive, the document's existing AI classification
@@ -80,7 +84,46 @@ def _has_contract_structure(database: Session, document_id: str) -> bool:
     return (listings or 0) >= _MIN_CLAUSE_LISTINGS and bool(contract_number)
 
 
+# A document recognizer must be this sure (strong structural evidence)
+# before it pre-empts keyword classification.
+DOCUMENT_RECOGNITION_THRESHOLD = 0.8
+
+
+def recognize_document_profile(database: Session, document: Document) -> ProfileResolution | None:
+    """The profile whose document recognizer finds strong structural
+    evidence in the document itself, if any (resolution step 0)."""
+
+    best = None
+    for profile in registry.latest_profiles():
+        if profile.document_recognizer is None:
+            continue
+        recognition = profile.document_recognizer(database, document)
+        if recognition.score >= DOCUMENT_RECOGNITION_THRESHOLD and (
+            best is None or recognition.score > best[1].score
+        ):
+            best = (profile, recognition)
+    if best is None:
+        return None
+    profile, recognition = best
+    family = profile.document_families[0]
+    label = DOCUMENT_FAMILIES.get(family, (profile.display_name, []))[0]
+    return ProfileResolution(
+        profile=profile,
+        family=family,
+        family_label=label,
+        reasons=[
+            f"Structural recognition: {profile.display_name} "
+            f"(score {recognition.score:.2f}; {'; '.join(recognition.reasons)}).",
+            f"{profile.display_name} profile is registered for '{label}'.",
+        ],
+        confident=True,
+    )
+
+
 def resolve_profile(database: Session, document: Document) -> ProfileResolution:
+    recognized = recognize_document_profile(database, document)
+    if recognized is not None:
+        return recognized
     reasons: list[str] = []
     family, label, confidence = classify_document_family(_page_text(database, document.id))
     reasons.append(f"Keyword classification: {label} (confidence {confidence:.2f}).")

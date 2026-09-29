@@ -9,12 +9,15 @@ import {
   formatCellValue,
   locationLabel,
 } from "@/components/staging/review-status";
-import type { StagingDataset, StagingRecord } from "@/lib/staging-workbook";
+import StagingRecordDrawer from "@/components/staging/staging-record-drawer";
+import type { StagingColumn, StagingDataset, StagingRecord } from "@/lib/staging-workbook";
 
 type StatusFilter = "all" | "Verified" | "Needs Review";
 
 interface StagingDatasetTableProps {
   dataset: StagingDataset;
+  /** Needed to load full records of a compact dataset. */
+  documentId?: string;
   onOpenSource?: (request: SourceViewRequest) => void;
   onOpenDataset?: (datasetId: string) => void;
   selectedId?: string | null;
@@ -42,8 +45,17 @@ function resultTone(value: string): string {
 
 /** Any repeating dataset of any profile. Every populated cell opens source
  * verification with that cell's own provenance. */
+function gridColumns(dataset: StagingDataset): StagingColumn[] {
+  const grid = dataset.grid_fields ?? [];
+  if (grid.length === 0) return dataset.columns;
+  return grid
+    .map((field) => dataset.columns.find((column) => column.canonical_field === field))
+    .filter((column): column is StagingColumn => Boolean(column));
+}
+
 export default function StagingDatasetTable({
   dataset,
+  documentId,
   onOpenSource,
   onOpenDataset,
   selectedId,
@@ -52,8 +64,14 @@ export default function StagingDatasetTable({
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [page, setPage] = useState(0);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const [openRecord, setOpenRecord] = useState<StagingRecord | null>(null);
 
+  const columns = gridColumns(dataset);
+  // A compact grid shows only its declared columns; every other field,
+  // with its evidence, is in the record detail drawer.
+  const hasDetails = (dataset.grid_fields?.length ?? 0) > 0 && (!dataset.compact || Boolean(documentId));
   const isBusiness = dataset.role === "business";
+  const showEvidence = isBusiness && !hasDetails;
   const hasStatus = isBusiness && dataset.records.some((r) => r.record_status != null);
   const hasLinks = dataset.records.some((r) => r.links_to_dataset);
 
@@ -134,7 +152,7 @@ export default function StagingDatasetTable({
             <table className="w-full min-w-max divide-y divide-border text-sm">
               <thead className="sticky top-0 z-10 bg-surface-soft">
                 <tr>
-                  {dataset.columns.map((column) => (
+                  {columns.map((column) => (
                     <th
                       key={column.canonical_field}
                       className="min-w-[110px] whitespace-nowrap px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-text-secondary"
@@ -142,7 +160,7 @@ export default function StagingDatasetTable({
                       {column.display_label}
                     </th>
                   ))}
-                  {isBusiness && (
+                  {showEvidence && (
                     <>
                       <th className="whitespace-nowrap px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-text-secondary">
                         Location
@@ -150,11 +168,14 @@ export default function StagingDatasetTable({
                       <th className="min-w-[220px] whitespace-nowrap px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-text-secondary">
                         Evidence
                       </th>
-                      <th className="whitespace-nowrap px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-text-secondary">
-                        Status
-                      </th>
                     </>
                   )}
+                  {isBusiness && (
+                    <th className="whitespace-nowrap px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-text-secondary">
+                      Status
+                    </th>
+                  )}
+                  {hasDetails && <th className="px-3 py-2" />}
                   {hasLinks && <th className="px-3 py-2" />}
                 </tr>
               </thead>
@@ -164,7 +185,7 @@ export default function StagingDatasetTable({
                   const isExpanded = expanded.has(record.record_id);
                   return (
                     <tr key={record.record_id} className="align-top hover:bg-surface-soft/60">
-                      {dataset.columns.map((column) => {
+                      {columns.map((column) => {
                         const cell = record.cells[column.canonical_field];
                         const requestId = `${dataset.dataset_id}:${record.record_id}:${column.canonical_field}`;
                         const request = cell ? cellSourceRequest(cell, requestId) : null;
@@ -198,7 +219,7 @@ export default function StagingDatasetTable({
                           </td>
                         );
                       })}
-                      {isBusiness && (
+                      {showEvidence && (
                         <>
                           <td className="whitespace-nowrap px-3 py-2 tabular-nums text-text-secondary">
                             {location}
@@ -220,10 +241,23 @@ export default function StagingDatasetTable({
                               </button>
                             )}
                           </td>
-                          <td className="whitespace-nowrap px-3 py-2">
-                            <ReviewStatusBadge status={record.record_status} />
-                          </td>
                         </>
+                      )}
+                      {isBusiness && (
+                        <td className="whitespace-nowrap px-3 py-2">
+                          <ReviewStatusBadge status={record.record_status} />
+                        </td>
+                      )}
+                      {hasDetails && (
+                        <td className="whitespace-nowrap px-3 py-2 text-right">
+                          <button
+                            type="button"
+                            onClick={() => setOpenRecord(record)}
+                            className="text-xs font-medium text-primary hover:underline"
+                          >
+                            Details
+                          </button>
+                        </td>
                       )}
                       {hasLinks && (
                         <td className="whitespace-nowrap px-3 py-2 text-right">
@@ -244,6 +278,16 @@ export default function StagingDatasetTable({
               </tbody>
             </table>
           </div>
+
+          {openRecord && hasDetails && (
+            <StagingRecordDrawer
+              documentId={documentId ?? ""}
+              dataset={dataset}
+              record={openRecord}
+              onClose={() => setOpenRecord(null)}
+              onOpenSource={onOpenSource}
+            />
+          )}
 
           {totalPages > 1 && (
             <div className="flex items-center justify-between text-xs text-text-secondary">

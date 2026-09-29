@@ -53,6 +53,8 @@ StructuralRelation = Literal[
     "left_right_typography",  # bold label, regular value, same line
     "left_right_whitespace",  # "Roll No.   516522" — no separator, shape-gated
     "same_line_filler",  # "Group ____ HUMANITIES" — underline/leader fill
+    "form_fill_in",  # printed wording + value written into its blank
+    "table_key_value_grid",  # ruled grid of caption | value cells
     "label_above_value",  # "Label:" with the value directly below
     "form_widget",  # PDF AcroForm field
     "html_label_for",  # <label for=…> → control
@@ -109,6 +111,10 @@ class FieldCandidate(BaseModel):
     # candidate_quality); profiles may require a minimum score.
     quality_score: float = 1.0
     quality_flags: list[str] = Field(default_factory=list)
+    # Lowest OCR word confidence under the VALUE (OCR pages only).
+    ocr_confidence: float | None = None
+    # The OCR passes disagreed on a word of the VALUE.
+    ocr_contested: bool = False
 
 
 class TableCell(BaseModel):
@@ -118,6 +124,10 @@ class TableCell(BaseModel):
     bbox: BBox | None = None
     source_locator: SourceLocator | None = None
     region_id: str | None = None
+    # Lowest OCR word confidence under this cell (OCR pages only; None when
+    # unknown or not OCR).
+    ocr_confidence: float | None = None
+    ocr_contested: bool = False
 
 
 # Neutral structural roles — never "invoice lines" or "CLINs".

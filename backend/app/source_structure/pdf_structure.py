@@ -49,6 +49,11 @@ class Word:
     y1: float
     size: float
     bold: bool = False
+    # OCR confidence (0–1) of this word; None for native text or when the
+    # OCR engine reported none.
+    conf: float | None = None
+    # The OCR passes disagreed on this word (ocr_word_layer.fuse_layouts).
+    contested: bool = False
     # Vertical offset of this word's row caused by page skew (a scanned
     # page tilted and not deskewed). Lines are grouped on y - row_offset;
     # the reported geometry stays in page space.
@@ -172,6 +177,26 @@ def native_words(page) -> list[Word]:
     return words
 
 
+def _is_ocr_noise(text: str, conf) -> bool:
+    """Debris OCR reads from background texture (watermarks, stamps): a
+    short, digit-free token the engine itself is unsure of. Digits are
+    always kept (a misread value is flagged downstream, never dropped),
+    and so are longer words, which low confidence alone doesn't disprove."""
+
+    if conf is None or float(conf) >= 0.5:
+        return False
+    alnum = sum(ch.isalnum() for ch in text)
+    if alnum == 0:
+        return True  # stray rules, underscores, specks
+    if any(ch.isdigit() for ch in text):
+        return False
+    letters = [ch for ch in text if ch.isalpha()]
+    # Form captions and filled-in values are often capitals ("MARKS");
+    # background debris reads as short lowercase fragments ("oan", "acc").
+    all_caps = len(letters) >= 2 and all(ch.isupper() for ch in letters)
+    return alnum <= 5 and not all_caps
+
+
 def ocr_words(ocr_layout_json: dict, space: OcrCoordinateSpace) -> list[Word]:
     words: list[Word] = []
     for item in ocr_layout_json.get("words") or []:
@@ -182,7 +207,17 @@ def ocr_words(ocr_layout_json: dict, space: OcrCoordinateSpace) -> list[Word]:
         x0, y0, x1, y1 = space.to_pdf_points(
             (float(item["x0"]), float(item["y0"]), float(item["x1"]), float(item["y1"]))
         )
-        words.append(Word(text, x0, y0, x1, y1, size=max(1.0, (y1 - y0) * 0.85)))
+        conf = item.get("conf")
+        if _is_ocr_noise(text, conf):
+            continue
+        words.append(
+            Word(
+                text, x0, y0, x1, y1,
+                size=max(1.0, (y1 - y0) * 0.85),
+                conf=float(conf) if conf is not None else None,
+                contested=bool(item.get("contested")),
+            )
+        )
     slope = ocr_skew_slope(ocr_layout_json)
     if slope and words:
         centre = (min(w.x0 for w in words) + max(w.x1 for w in words)) / 2
@@ -227,8 +262,21 @@ def build_lines(words: list[Word]) -> list[Line]:
         height = max(1.0, word.y1 - word.y0)
         target = None
         for line in reversed(lines[-6:]):
-            overlap = min(line.row_y1, word.row_y1) - max(line.row_y0, word.row_y0)
-            if overlap >= 0.5 * min(line.row_height, height):
+            # Compare against the line's typical band (median centre and
+            # height), not its full extent: one oversized word — a large
+            # "INVOICE" title level with a letterhead — must not stretch a
+            # line until it swallows the small print beneath.
+            centres = sorted((w.row_y0 + w.row_y1) / 2 for w in line.words)
+            heights = sorted(max(1.0, w.y1 - w.y0) for w in line.words)
+            band_centre = centres[len(centres) // 2]
+            band_half = heights[len(heights) // 2] / 2
+            overlap = min(band_centre + band_half, word.row_y1) - max(band_centre - band_half, word.row_y0)
+            # A line not stretched by an outlier word (its tallest word is
+            # close to the typical height) may also match on its full
+            # extent — residual scan tilt spreads one row over a few points.
+            unstretched = heights[-1] <= 1.6 * heights[len(heights) // 2] and height <= 1.6 * heights[len(heights) // 2]
+            full = min(line.row_y1, word.row_y1) - max(line.row_y0, word.row_y0)
+            if overlap >= 0.5 * min(2 * band_half, height) or (unstretched and full >= 0.5 * min(line.row_height, height)):
                 target = line
                 break
         if target is None:
@@ -420,6 +468,157 @@ def _split_fused_bands(
         bands = bands[:b] + [_Band(band.x0, g0), _Band(g1, band.x1)] + bands[b + 1:]
         b += 2
     return bands, grid
+
+
+def _raster_grid_table(
+    ids: "_Ids",
+    page_number: int,
+    lines: list[Line],
+    grid,
+    extraction_method: str,
+    page_text: str,
+):
+    """A table from a printed column grid (raster_tables.RasterGrid) and the
+    OCR lines inside it. Rows follow the skew-aware OCR lines: a line with a
+    number, or text in the first column, starts a row; a line without
+    either continues the previous row (wrapped cell text). Leading lines
+    without numbers form the header, joined per column."""
+
+    x_rules = grid.columns
+    x0, top, x1, bottom = grid.bbox
+
+    def column_of(word: Word) -> int | None:
+        centre = (word.x0 + word.x1) / 2
+        for index in range(len(x_rules) - 1):
+            if x_rules[index] - 2 <= centre <= x_rules[index + 1] + 2:
+                return index
+        return None
+
+    table_lines: list[tuple[Line, dict[int, list[Word]]]] = []
+    for line in lines:
+        # Strictly inside the grid: a title printed just above the top rule
+        # is not part of the header.
+        if not (top + 1 <= (line.row_y0 + line.row_y1) / 2 <= bottom + 2):
+            continue
+        cells: dict[int, list[Word]] = {}
+        for seg in line.free_segments:
+            for word in seg.words:
+                column = column_of(word)
+                if column is not None:
+                    cells.setdefault(column, []).append(word)
+        if cells:
+            table_lines.append((line, cells))
+    if not table_lines:
+        return None
+
+    columns = len(x_rules) - 1
+    header: dict[int, list[Word]] = {}
+    rows: list[dict[int, list[Word]]] = []
+    row_bottom = 0.0  # lowest word of the current row
+    rule_ys_at = getattr(grid, "rule_ys_at", None)
+    for _, cells in table_lines:
+        texts = {c: " ".join(w.text for w in ws) for c, ws in cells.items()}
+        numeric = any(any(ch.isdigit() for ch in t) for t in texts.values())
+        line_words = [w for ws in cells.values() for w in ws]
+        line_top = min(w.y0 for w in line_words)
+        line_bottom = max(w.y1 for w in line_words)
+        line_x = sum((w.x0 + w.x1) / 2 for w in line_words) / len(line_words)
+        if not rows and not numeric:
+            for c, ws in cells.items():
+                header.setdefault(c, []).extend(ws)
+            continue
+        # A printed row rule between this line and the current row makes
+        # it a new row, whatever its shape (an empty numbered row "8." is
+        # not part of the TOTAL row under it).
+        ruled = bool(rows) and rule_ys_at is not None and any(
+            row_bottom - 1 <= y <= line_top + 1 for y in rule_ys_at(line_x)
+        )
+        if ruled:
+            rows.append({c: list(ws) for c, ws in cells.items()})
+            row_bottom = line_bottom
+            continue
+        if rows and not numeric and 0 not in cells:
+            for c, ws in cells.items():  # wrapped cell text
+                rows[-1].setdefault(c, []).extend(ws)
+            row_bottom = max(row_bottom, line_bottom)
+            continue
+        numeric_columns = {c for c, t in texts.items() if any(ch.isdigit() for ch in t)}
+        complementary = rows and not (numeric_columns & {c for c in rows[-1] if c != 0})
+        if rows and numeric and 0 not in cells and complementary:
+            # The row's figures sit on the line under its identifier (a
+            # two-line cell, or a tilted scan): they complete that row.
+            for c, ws in cells.items():
+                rows[-1].setdefault(c, []).extend(ws)
+            row_bottom = max(row_bottom, line_bottom)
+            continue
+        rows.append({c: list(ws) for c, ws in cells.items()})
+        row_bottom = line_bottom
+
+    filled_rows = [r for r in rows if len(r) >= 2]
+    if len(filled_rows) < 2:
+        return None
+
+    def text_of(ws: list[Word]) -> str:
+        tokens: list[str] = []
+        for w in sorted(ws, key=lambda w: (round(w.y0 / 4), w.x0)):
+            if not tokens or tokens[-1] != w.text:  # "MARKS MARKS" from two OCR passes
+                tokens.append(w.text)
+        return " ".join(tokens)
+
+    def box_of(ws: list[Word]):
+        return _union([(w.x0, w.y0, w.x1, w.y1) for w in ws]) if ws else None
+
+    header_texts = [text_of(header.get(c, [])) for c in range(columns)] if header else None
+    if header_texts is not None and sum(1 for t in header_texts if t) < max(2, columns // 2):
+        header_texts = None
+    body_texts = [[text_of(r.get(c, [])) for c in range(columns)] for r in rows]
+    body_boxes = [[box_of(r.get(c, [])) for c in range(columns)] for r in rows]
+    table, regions = _table_from_grid(
+        ids, page_number, "raster_ruling_lines", extraction_method,
+        header_texts,
+        [box_of(header.get(c, [])) for c in range(columns)] if header_texts else [],
+        body_texts, body_boxes, page_text, (x0, top, x1, bottom),
+    )
+    for line, _ in table_lines:
+        for seg in line.segments:
+            sx0, sy0, sx1, sy1 = seg.bbox
+            if x0 - 2 <= (sx0 + sx1) / 2 <= x1 + 2:
+                seg.used = True
+    return table, regions
+
+
+def _key_value_grid_fields(ids: "_Ids", page_number: int, table: TableCandidate, extraction_method: str) -> list[FieldCandidate] | None:
+    """A ruled "table" that is really a grid of captions and their values —
+    "Invoice Number | NS-2026-1048 | Invoice Date | 2026-09-12" — becomes
+    label/value fields instead of a table: an even number of columns where,
+    on every row, each even cell is a caption and the next one its value."""
+
+    rows: list[list[TableCell]] = ([table.header_cells] if table.header_cells else []) + table.rows
+    columns = max((len(r) for r in rows), default=0)
+    if columns < 2 or columns % 2 or len(rows) < 1:
+        return None
+    pairs: list[tuple[TableCell, TableCell]] = []
+    for row in rows:
+        by_column = {c.column_index: c for c in row}
+        for c in range(0, columns, 2):
+            label, value = by_column.get(c), by_column.get(c + 1)
+            if label is None or not label.text:
+                return None
+            if label_rejection(label.text) is not None or is_numeric_value(label.text):
+                return None
+            if value is not None and value.text:
+                pairs.append((label, value))
+    if len(pairs) < 2 or len(pairs) < 0.6 * len(rows) * columns / 2:
+        return None
+    fields = []
+    for label, value in pairs:
+        field = _field(
+            ids, page_number, label.text, value.text, "table_key_value_grid",
+            label.bbox, value.bbox, f"{label.text} {value.text}", extraction_method,
+        )
+        field.ocr_confidence = value.ocr_confidence
+        fields.append(field)
+    return fields
 
 
 def _is_header_row(cells: list[list[Segment]], data_rows: list[list[list[Segment]]]) -> bool:
@@ -691,6 +890,18 @@ def _clean_value(text: str) -> str:
     return text.strip().strip(_VALUE_NOISE).strip()
 
 
+def _filled_entry(text: str) -> bool:
+    """A value that reads as written into a form blank, whatever its size:
+    it carries digits, sits on an underline, or is a single character."""
+
+    stripped = text.strip()
+    return (
+        stripped.startswith("_")
+        or any(ch.isdigit() for ch in stripped)
+        or sum(ch.isalnum() for ch in stripped) == 1
+    )
+
+
 def _position_label(text: str) -> bool:
     """A run that can be a caption WITHOUT a separator: short, capitalized,
     not numeric — stricter than label_rejection alone."""
@@ -739,8 +950,9 @@ def _whitespace_pairs(segments: list[Segment]) -> list[tuple[Segment, Segment]]:
         and _position_value(b.text)
         and 0 < b.x0 - a.x1 <= 200
         # Caption and value share a type size; a letterhead name beside a
-        # large "INVOICE" title does not.
-        and abs(a.size - b.size) <= 0.2 * max(a.size, b.size)
+        # large "INVOICE" title does not. Filled-in entries are exempt:
+        # digits (a stamped serial), an underline, a single character.
+        and (_filled_entry(b.text) or abs(a.size - b.size) <= 0.2 * max(a.size, b.size))
     ]
     # Alternation alone is only evidence with at least two pairs; a lone
     # "Brightline Office Supply Co.   INVOICE" is not a caption and value.
@@ -859,7 +1071,109 @@ def _label_value_candidates(
                 )
                 seg.used = right.used = True
 
-        # Separator-less captions, after every explicit form above.
+    return fields
+
+
+# "Roll No, 782710" read as ONE run: a caption ending in an identifier word,
+# then a digit-bearing value of at most three words.
+_FUSED_ID_PAIR = re.compile(
+    r"^(?P<label>[A-Z][A-Za-z .'/()-]{0,30}?\b(?:No|Number|ID|#)[.,:;]?)\s+(?P<value>(?=\S*\d)\S+(?:\s\S+){0,2})$"
+)
+
+
+def _rescue_form_captions(fields: list[FieldCandidate]) -> None:
+    """A "Caption: VALUE" pair rejected ONLY because its caption reads like
+    a sentence ("His / Her mark of identification :") is a form fill-in when
+    the value is a filled entry (capitals, digits, underline). Pairs
+    rejected for their value (prose after "Note:") stay rejected."""
+
+    for field in fields:
+        if field.acceptance != "rejected" or not field.reasons:
+            continue
+        # Only a value written beside its caption: a caption whose own blank
+        # is empty must not borrow the next line (a title, a table header).
+        if field.structural_relation not in ("left_right_separator", "same_line_separator"):
+            continue
+        if not all(reason.startswith("label_") and reason != "empty_label" for reason in field.reasons):
+            continue
+        value = _clean_value(field.raw_value)
+        letters = [ch for ch in value if ch.isalpha()]
+        filled = _filled_entry(field.raw_value) or (len(letters) >= 2 and all(ch.isupper() for ch in letters))
+        if filled and len(field.label_text.split()) <= 8 and value_rejection(value) is None:
+            field.acceptance = "accepted"
+            field.reasons = []
+            field.structural_relation = "form_fill_in"
+            field.raw_value = value
+            field.label_text = normalize_space(field.label_text.rstrip(": "))
+
+
+def _fill_in_pairs(segments: list[Segment]) -> list[tuple[Segment, Segment]]:
+    """Form fill-in relationships on one line: printed wording followed by
+    the value written into its blank — "Certified that  NOSHEEN TARIQ",
+    "whose date of birth is  10-07-1986", "grade  B". Pure geometry and
+    shape, no vocabulary: the caption is lower-/mixed-case printed text,
+    the value is visually separate and reads as a filled entry — it sits on
+    an underline ("_GENERAL"), is in capitals, or carries digits — and both
+    share a type size. Pairs are taken left to right."""
+
+    free = [s for s in segments if not s.used]
+    pairs: list[tuple[Segment, Segment]] = []
+    index = 0
+    while index + 1 < len(free):
+        caption, value = free[index], free[index + 1]
+        caption_text = caption.text.strip().rstrip(":").strip()
+        value_text = _clean_value(value.text)
+        caption_letters = [ch for ch in caption_text if ch.isalpha()]
+        value_letters = [ch for ch in value_text if ch.isalpha()]
+        filled = value.text.lstrip().startswith("_") or (
+            value_letters and all(ch.isupper() for ch in value_letters) and len(value_letters) >= 1
+        ) or any(ch.isdigit() for ch in value_text)
+        caption_ok = (
+            # "Tax  $36.25": a 3-letter caption is enough before a number.
+            len(caption_letters) >= (3 if any(ch.isdigit() for ch in value_text) else 4)
+            and any(ch.islower() for ch in caption_letters)
+            and len(caption_text.split()) <= 8
+            and not caption_text.endswith((".", ";"))
+            and not any(ch.isdigit() for ch in caption_text)
+        )
+        value_ok = (
+            bool(value_text)
+            and len(value_text.split()) <= 8
+            and not value_text.endswith(":")
+            and value_rejection(value_text) is None
+        )
+        same_size = _filled_entry(value.text) or abs(caption.size - value.size) <= 0.2 * max(caption.size, value.size)
+        if caption_ok and value_ok and filled and same_size and value.x0 - caption.x1 > 0:
+            pairs.append((caption, value))
+            index += 2
+        else:
+            index += 1
+    return pairs
+
+
+def _loose_label_value_candidates(
+    ids: _Ids, page_number: int, lines: list[Line], extraction_method: str
+) -> list[FieldCandidate]:
+    """Separator-less pairings — whitespace captions and form fill-ins. Run
+    AFTER every table detector has claimed its cells, so table rows are
+    never read as label/value pairs."""
+
+    fields: list[FieldCandidate] = []
+    for line in lines:
+        for seg in line.free_segments:
+            fused = _FUSED_ID_PAIR.match(seg.text.strip())
+            if fused and _position_label(fused.group("label")):
+                label_words = len(fused.group("label").split())
+                label, value = _clean_label(fused.group("label")), _clean_value(fused.group("value"))
+                fields.append(
+                    _field(
+                        ids, page_number, label, value, "left_right_whitespace",
+                        _union([(w.x0, w.y0, w.x1, w.y1) for w in seg.words[:label_words]]) or seg.bbox,
+                        _union([(w.x0, w.y0, w.x1, w.y1) for w in seg.words[label_words:]]) or seg.bbox,
+                        seg.text, extraction_method,
+                    )
+                )
+                seg.used = True
         for label_seg, value_seg in _whitespace_pairs(line.segments):
             label = _clean_label(label_seg.text)
             value = _clean_value(value_seg.text)
@@ -870,6 +1184,20 @@ def _label_value_candidates(
                 )
             )
             label_seg.used = value_seg.used = True
+        for caption_seg, value_seg in _fill_in_pairs(line.segments):
+            caption = caption_seg.text.strip().rstrip(":").strip()
+            value = _clean_value(value_seg.text)
+            candidate = _field(
+                ids, page_number, caption, value, "form_fill_in",
+                caption_seg.bbox, value_seg.bbox, f"{caption_seg.text} {value_seg.text}", extraction_method,
+            )
+            # The caption is printed wording, not a noun-phrase label — the
+            # geometry makes it a field; label-shape rejection doesn't apply.
+            if candidate.acceptance == "rejected" and all(r.startswith("label_") for r in candidate.reasons):
+                candidate.acceptance = "accepted"
+                candidate.reasons = []
+            fields.append(candidate)
+            caption_seg.used = value_seg.used = True
     return fields
 
 
@@ -1102,12 +1430,61 @@ def _text_regions(ids: _Ids, page_number: int, lines: list[Line], extraction_met
     return regions
 
 
+def _min_ocr_confidence(words: list[Word], bbox) -> float | None:
+    """Lowest confidence of the OCR words inside `bbox`; None when any of
+    them has no confidence (unknown must not look certain)."""
+
+    if not bbox:
+        return None
+    x0, y0, x1, y1 = bbox
+    inside = [
+        w for w in words
+        if x0 - 1 <= (w.x0 + w.x1) / 2 <= x1 + 1 and y0 - 1 <= (w.y0 + w.y1) / 2 <= y1 + 1
+    ]
+    if not inside or any(w.conf is None for w in inside):
+        return None
+    return min(w.conf for w in inside)
+
+
+def _ocr_contested(words: list[Word], bbox) -> bool:
+    """Whether any OCR word inside `bbox` was read differently by the two
+    OCR passes (an unresolved disagreement)."""
+
+    if not bbox:
+        return False
+    x0, y0, x1, y1 = bbox
+    return any(
+        w.contested
+        for w in words
+        if x0 - 1 <= (w.x0 + w.x1) / 2 <= x1 + 1 and y0 - 1 <= (w.y0 + w.y1) / 2 <= y1 + 1
+    )
+
+
+def _assign_ocr_confidence(result: "PageStructure", words: list[Word]) -> None:
+    for field in result.fields:
+        field.ocr_confidence = _min_ocr_confidence(words, field.value_bbox)
+        field.ocr_contested = _ocr_contested(words, field.value_bbox)
+    for table in result.tables:
+        for row in table.rows:
+            for cell in row:
+                cell.ocr_confidence = _min_ocr_confidence(words, cell.bbox)
+                cell.ocr_contested = _ocr_contested(words, cell.bbox)
+        for cell in table.header_cells:
+            cell.ocr_confidence = _min_ocr_confidence(words, cell.bbox)
+            cell.ocr_contested = _ocr_contested(words, cell.bbox)
+    for region in result.regions:
+        region.structural_metadata["ocr_confidence"] = _min_ocr_confidence(words, region.bbox)
+        if _ocr_contested(words, region.bbox):
+            region.structural_metadata["ocr_contested"] = True
+
+
 def extract_page_structure(
     *,
     page_number: int,
     words: list[Word],
     extraction_method: str,
     fitz_page=None,
+    raster_grids: list | None = None,
 ) -> PageStructure:
     ids = _Ids(page_number)
     result = PageStructure()
@@ -1144,6 +1521,28 @@ def extract_page_structure(
                         if sx0 >= x0 - 1 and sx1 <= x1 + 1 and sy0 >= y0 - 1 and sy1 <= y1 + 1:
                             seg.used = True
 
+    # 1b. Ruled tables printed on a raster (OCR) page — from the image's own
+    # column rules. Claimed before any label/value pairing, so table cells
+    # never become scalar fields.
+    for grid in raster_grids or []:
+        built = _raster_grid_table(ids, page_number, lines, grid, extraction_method, page_text)
+        if built is not None:
+            table, regions = built
+            result.tables.append(table)
+            result.regions.extend(regions)
+
+    # 1c. Ruled "tables" that are grids of captions and values are fields.
+    grid_fields: list[FieldCandidate] = []
+    kept_tables = []
+    for table in result.tables:
+        converted = _key_value_grid_fields(ids, page_number, table, extraction_method)
+        if converted:
+            grid_fields.extend(converted)
+            result.regions = [r for r in result.regions if not (r.region_id or "").startswith(table.region_id)]
+        else:
+            kept_tables.append(table)
+    result.tables = kept_tables
+
     # 2. Label/value pairs claim their segments before column alignment,
     # so a stack of "Label: value" lines is never mistaken for a table.
     widget_fields = _form_widget_candidates(ids, fitz_page, page_number) if fitz_page is not None else []
@@ -1171,6 +1570,11 @@ def extract_page_structure(
                 for seg in line.free_segments:
                     seg.used = True
 
+    # 4. Separator-less pairs, only from what no table claimed.
+    fields.extend(_loose_label_value_candidates(ids, page_number, lines, extraction_method))
+    fields[:0] = grid_fields
+    _rescue_form_captions(fields)
+
     for f in fields:
         result.regions.append(
             StructuredRegion(
@@ -1188,4 +1592,6 @@ def extract_page_structure(
     result.fields = fields
     result.regions.extend(_group_key_values(ids, page_number, fields))
     result.regions.extend(_text_regions(ids, page_number, lines, extraction_method))
+    if extraction_method == "ocr":
+        _assign_ocr_confidence(result, words)
     return result

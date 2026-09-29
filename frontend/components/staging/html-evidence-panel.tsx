@@ -76,9 +76,27 @@ export default function HtmlEvidencePanel({
       </div>
 
       {current?.error && <p className="text-danger">{current.error}</p>}
-      {!regionId && (
-        <p className="text-text-muted">No structural region was recorded for this value.</p>
-      )}
+      {!regionId &&
+        (request.evidenceText ? (
+          // Values read straight from a DOM element (no structure region):
+          // the element's own text is the evidence.
+          <div className="rounded-lg border border-primary/30 bg-primary/[0.04] p-3">
+            <p className="text-xs text-text-secondary">{request.label}</p>
+            <p
+              data-evidence-highlight
+              className="mt-0.5 max-h-72 overflow-y-auto whitespace-pre-wrap rounded bg-warning/20 px-1 text-foreground"
+            >
+              {request.evidenceText}
+            </p>
+            {request.extractionMethod && (
+              <p className="mt-2 text-[11px] text-text-muted">
+                Found by: {request.extractionMethod.replace(/_/g, " ")}
+              </p>
+            )}
+          </div>
+        ) : (
+          <p className="text-text-muted">No structural region was recorded for this value.</p>
+        ))}
       {regionId && !current && <p className="text-text-muted">Loading source structure...</p>}
 
       {context?.field && (

@@ -20,6 +20,18 @@ def _source_type(extraction_method: str):
     return "html" if extraction_method == "dom" else None
 
 
+def _ocr_gate(provenance: CellProvenance, extraction_method: str, confidence, contested: bool = False) -> None:
+    """OCR-read structure values carry the lowest confidence of their words
+    and whether the OCR passes disagreed on them; the validator then
+    requires known, high confidence and agreement before Verified. Native
+    PDF text and HTML DOM values are never gated."""
+
+    if extraction_method == "ocr":
+        provenance.ocr_gate = True
+        provenance.ocr_confidence = float(confidence) if confidence is not None else None
+        provenance.ocr_contested = bool(contested)
+
+
 def field_provenance(document: Document, candidate: FieldCandidate) -> CellProvenance:
     """Provenance of a label/value candidate's VALUE. A single-line value is
     highlighted as text inside its box; a multi-line one (an address) as
@@ -38,6 +50,7 @@ def field_provenance(document: Document, candidate: FieldCandidate) -> CellProve
     )
     single_line = "\n" not in candidate.raw_value.strip()
     provenance.highlight_text = candidate.raw_value.strip() if single_line else None
+    _ocr_gate(provenance, candidate.extraction_method, candidate.ocr_confidence, candidate.ocr_contested)
     return provenance
 
 
@@ -61,6 +74,7 @@ def table_cell_provenance(
         source_type=_source_type(table.extraction_method),
     )
     provenance.highlight_text = cell.text or None
+    _ocr_gate(provenance, table.extraction_method, cell.ocr_confidence, cell.ocr_contested)
     return provenance
 
 
@@ -83,6 +97,12 @@ def region_provenance(
         source_type=_source_type(region.extraction_method),
     )
     provenance.highlight_text = highlight
+    _ocr_gate(
+        provenance,
+        region.extraction_method,
+        region.structural_metadata.get("ocr_confidence"),
+        bool(region.structural_metadata.get("ocr_contested")),
+    )
     return provenance
 
 

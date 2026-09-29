@@ -88,6 +88,12 @@ export interface StagingDataset {
   columns: StagingColumn[];
   records: StagingRecord[];
   identity_fields: string[];
+  /** Columns a compact grid shows; the rest are in the record detail view.
+   * Empty = every column. */
+  grid_fields?: string[];
+  /** Records carry only their grid cells (no provenance); the full record
+   * is fetched with getStagingRecord. */
+  compact?: boolean;
 }
 
 export interface ExportCapability {
@@ -156,6 +162,25 @@ export async function getStagingWorkbook(documentId: string): Promise<StagingWor
   return apiFetch<StagingWorkbook>(`/api/documents/${documentId}/staging-workbook`);
 }
 
+/** Every cell (with provenance and checks) of one record — the detail view
+ * of a compact grid row. */
+export async function getStagingRecord(
+  documentId: string,
+  datasetId: string,
+  recordId: string,
+): Promise<StagingRecord> {
+  return apiFetch<StagingRecord>(
+    `/api/documents/${documentId}/staging-workbook/datasets/${encodeURIComponent(datasetId)}/records/${encodeURIComponent(recordId)}`,
+  );
+}
+
+const EXPORT_MIME: Record<ExportCapability["format"], string> = {
+  xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  csv: "text/csv;charset=utf-8;",
+  json: "application/json",
+  xml: "application/xml",
+};
+
 export async function downloadExport(
   capability: ExportCapability,
   fallbackName: string,
@@ -171,11 +196,7 @@ export async function downloadExport(
     downloadBlob(await response.text(), filename, "text/csv;charset=utf-8;");
     return;
   }
-  downloadBlob(
-    await response.blob(),
-    filename,
-    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-  );
+  downloadBlob(await response.blob(), filename, EXPORT_MIME[capability.format]);
 }
 
 /** Mirrors backend app/source_structure/models.py (the subset the HTML

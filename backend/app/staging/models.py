@@ -23,7 +23,7 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_serializer
 
 # The only three user-facing cell states. Internal statuses (rejected,
 # noise, superseded) never become staging cells at all.
@@ -81,6 +81,29 @@ class CellProvenance(BaseModel):
     # it. Used to highlight the cell rather than the whole record.
     anchor_text: str | None = None
     highlight_text: str | None = None
+    # OCR-derived structure values (set by structure_provenance only): the
+    # lowest confidence of the words the value was read from. With the gate
+    # on, a value can be Verified only when this is known and high — OCR
+    # confidence is necessary for Verified, never sufficient.
+    ocr_confidence: float | None = None
+    ocr_gate: bool = False
+    # The two OCR passes read this value differently (unresolved): never
+    # Verified while set.
+    ocr_contested: bool = False
+
+    @model_serializer(mode="wrap")
+    def _omit_unused_ocr_keys(self, handler):
+        # OCR trust keys appear only on OCR-read values, so native/HTML
+        # provenance (e.g. every contract_v3 value) serializes exactly as
+        # before these keys existed.
+        data = handler(self)
+        if isinstance(data, dict):
+            if data.get("ocr_confidence") is None:
+                data.pop("ocr_confidence", None)
+            for key in ("ocr_gate", "ocr_contested"):
+                if data.get(key) is False:
+                    data.pop(key, None)
+        return data
 
 
 class ValidationCheck(BaseModel):
@@ -158,6 +181,24 @@ class StagingDataset(BaseModel):
     records: list[StagingRecord]
     # Canonical fields that best identify a record (used for row labels).
     identity_fields: list[str] = Field(default_factory=list)
+    # Canonical fields a compact grid shows (the rest in the record detail
+    # view). Empty = every column.
+    grid_fields: list[str] = Field(default_factory=list)
+    # True when records carry only their grid (and identity) cells; the
+    # full record is served by the dataset record endpoint.
+    compact: bool = False
+
+    @model_serializer(mode="wrap")
+    def _omit_default_grid_keys(self, handler):
+        # Only datasets that declare a compact grid carry these keys, so
+        # every other profile's datasets serialize exactly as before.
+        data = handler(self)
+        if isinstance(data, dict):
+            if not data.get("grid_fields"):
+                data.pop("grid_fields", None)
+            if data.get("compact") is False:
+                data.pop("compact", None)
+        return data
 
 
 class ExportCapability(BaseModel):

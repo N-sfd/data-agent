@@ -87,6 +87,9 @@ class DatasetDefinition:
     role: DatasetRole = "business"
     description: str | None = None
     identity_fields: tuple[str, ...] = ()
+    # Canonical fields a compact grid shows; the rest open in a record
+    # detail view. Empty = every column in the grid.
+    grid_fields: tuple[str, ...] = ()
 
 
 @dataclass
@@ -135,6 +138,29 @@ class Recognition:
 # (app/staging/resolver.refine_with_structure).
 RecognizerFn = Callable[[StructuredSourceDocument], Recognition]
 
+# Optional: scores the document itself (e.g. its DOM) BEFORE keyword family
+# classification — for sources whose structure is decisive and whose words
+# would mislead the keyword classifier (FAR Part 52 regulation text reads
+# like a contract). Must return 0 cheaply for documents it doesn't handle.
+DocumentRecognizerFn = Callable[[Session, Document], Recognition]
+
+# Optional: builds and persists the profile's own domain records when the
+# extraction job prepares staging (the adapter then only reads them).
+# Returns a JSON-safe run summary.
+MaterializerFn = Callable[[Session, Document], dict]
+
+
+@dataclass(frozen=True)
+class ExportArtifact:
+    content: bytes | str
+    media_type: str
+    filename: str
+
+
+# Optional: profile-specific exports addressed by id
+# (/staging-workbook/exports/{export_id}); None = unknown id.
+ExporterFn = Callable[[Session, Document, str], "ExportArtifact | None"]
+
 
 @dataclass(frozen=True)
 class StagingProfile:
@@ -155,6 +181,13 @@ class StagingProfile:
     auto_qa_dataset: str | None = None
     source_structure: SourceStructureRequirement = "none"
     recognizer: RecognizerFn | None = None
+    document_recognizer: DocumentRecognizerFn | None = None
+    # Whether the V3 contract pipeline (clauses, CLINs, funding…) applies to
+    # this profile's documents. False lets the extraction job skip it when
+    # the document recognizer has already identified the profile.
+    contract_pipeline: bool = True
+    materializer: MaterializerFn | None = None
+    exporter: ExporterFn | None = None
 
     @property
     def key(self) -> str:

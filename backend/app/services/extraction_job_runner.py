@@ -38,6 +38,7 @@ from app.services.target_extraction_service import extract_by_targets
 from app.services.target_result_store import persist_target_extraction_results
 from app.services.v3_orchestrator import run_and_persist_v3_extraction
 from app.staging.preparation import prepare_staging
+from app.staging.resolver import recognize_document_profile
 from app.schemas.document_target import ScalarTargetResult, TableTargetResult
 
 settings = get_settings()
@@ -510,55 +511,79 @@ async def run_extraction_job(
         v3_record: dict = {"status": "failed", "error": None, "source_inspection": None}
         _append_stage(job, "v3_classification")
         database.commit()
+        # A profile recognized from the document's own structure may declare
+        # that the contract pipeline doesn't apply (StagingProfile.
+        # contract_pipeline) — e.g. a regulation source, where V3 would only
+        # spend minutes finding "clauses" that are the regulation itself.
+        recognized = None
         try:
-            v3_pages = list(
-                database.scalars(
-                    select(DocumentPage)
-                    .where(DocumentPage.document_id == document.id)
-                    .order_by(DocumentPage.page_number)
-                )
-            )
-            v3_summary = await run_in_threadpool(
-                run_and_persist_v3_extraction,
-                database=database,
-                document=document,
-                pages=v3_pages,
-            )
-            stage_timings["v3_ms"] = int((time.perf_counter() - v3_started) * 1000)
-            warnings.extend(v3_summary.warnings)
-            v3_record = {
-                "status": "completed",
-                "error": None,
-                "source_inspection": (
-                    v3_summary.source_inspection.to_dict()
-                    if v3_summary.source_inspection is not None
-                    else None
-                ),
-            }
-            log_event(
-                "v3_extraction_complete",
-                stage="v3_classification",
-                candidate_count=v3_summary.candidate_count,
-                all_fields_count=v3_summary.all_fields_count,
-                clin_count=v3_summary.clin_count,
-                funding_count=v3_summary.funding_count,
-                performance_delivery_count=v3_summary.performance_delivery_count,
-                attachment_count=v3_summary.attachment_count,
-                clause_reference_count=v3_summary.clause_reference_count,
-                pages_with_geometry=v3_summary.pages_with_geometry,
-            )
-        except Exception as exc:  # noqa: BLE001 - V3 is additive, never fails the job
+            recognized = await run_in_threadpool(recognize_document_profile, database, document)
+        except Exception:  # noqa: BLE001 - recognition is advisory here
             database.rollback()
-            warning = f"V3 canonical extraction failed: {exc}"
-            warnings.append(warning)
-            v3_record["error"] = type(exc).__name__
+        if recognized is not None and not recognized.profile.contract_pipeline:
+            v3_record = {
+                "status": "skipped",
+                "error": None,
+                "source_inspection": None,
+                "reason": f"{recognized.profile.key} does not use the contract pipeline.",
+            }
+            stage_timings["v3_ms"] = int((time.perf_counter() - v3_started) * 1000)
             log_event(
-                "v3_extraction_failed",
+                "v3_extraction_skipped",
                 stage="v3_classification",
-                status="error",
-                error_category=type(exc).__name__,
-                error=str(exc),
+                profile_id=recognized.profile.profile_id,
+                profile_version=recognized.profile.profile_version,
             )
+        else:
+            try:
+                v3_pages = list(
+                    database.scalars(
+                        select(DocumentPage)
+                        .where(DocumentPage.document_id == document.id)
+                        .order_by(DocumentPage.page_number)
+                    )
+                )
+                v3_summary = await run_in_threadpool(
+                    run_and_persist_v3_extraction,
+                    database=database,
+                    document=document,
+                    pages=v3_pages,
+                )
+                stage_timings["v3_ms"] = int((time.perf_counter() - v3_started) * 1000)
+                warnings.extend(v3_summary.warnings)
+                v3_record = {
+                    "status": "completed",
+                    "error": None,
+                    "source_inspection": (
+                        v3_summary.source_inspection.to_dict()
+                        if v3_summary.source_inspection is not None
+                        else None
+                    ),
+                }
+                log_event(
+                    "v3_extraction_complete",
+                    stage="v3_classification",
+                    candidate_count=v3_summary.candidate_count,
+                    all_fields_count=v3_summary.all_fields_count,
+                    clin_count=v3_summary.clin_count,
+                    funding_count=v3_summary.funding_count,
+                    performance_delivery_count=v3_summary.performance_delivery_count,
+                    attachment_count=v3_summary.attachment_count,
+                    clause_reference_count=v3_summary.clause_reference_count,
+                    pages_with_geometry=v3_summary.pages_with_geometry,
+                )
+            except Exception as exc:  # noqa: BLE001 - V3 is additive, never fails the job
+                database.rollback()
+                warning = f"V3 canonical extraction failed: {exc}"
+                warnings.append(warning)
+                v3_record["error"] = type(exc).__name__
+                log_event(
+                    "v3_extraction_failed",
+                    stage="v3_classification",
+                    status="error",
+                    error_category=type(exc).__name__,
+                    error=str(exc),
+                )
 
         # Pin the staging profile, then build the schema-neutral source
         # structure only if that profile (or an uncertain resolution) needs

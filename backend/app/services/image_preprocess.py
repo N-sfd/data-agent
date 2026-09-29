@@ -125,3 +125,33 @@ def preprocess_scan_image(
     buffer = BytesIO()
     contrasted.save(buffer, format="PNG")
     return PreprocessResult(image_bytes=buffer.getvalue(), applied=applied)
+
+
+# A page whose background is covered in light printed texture (security
+# watermark text, guilloche, tinted forms) — mid-grey pixels well above a
+# clean scan's ~1–2 % — makes Tesseract drop real characters, especially
+# digits in table cells.
+_TEXTURED_MID_GREY = 0.04
+_SUPPRESS_FRACTION_OF_PAPER = 0.68
+
+
+def suppress_light_background(image_bytes: bytes) -> bytes | None:
+    """A binarized copy with light background texture removed, or None when
+    the page has no such texture. The cut-off follows the page's own paper
+    brightness (not a fixed value): ink is far darker than the watermark."""
+
+    try:
+        import numpy as np
+        from PIL import Image
+    except ImportError:
+        return None
+    with Image.open(BytesIO(image_bytes)) as image:
+        gray = np.asarray(image.convert("L"))
+    mid_grey = float(((gray > 120) & (gray < 230)).mean())
+    if mid_grey < _TEXTURED_MID_GREY:
+        return None
+    paper = float(np.median(gray))
+    cleaned = ((gray > paper * _SUPPRESS_FRACTION_OF_PAPER) * 255).astype("uint8")
+    out = BytesIO()
+    Image.fromarray(cleaned).save(out, format="PNG")
+    return out.getvalue()

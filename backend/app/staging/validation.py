@@ -179,6 +179,15 @@ def _rule_checks(
     return checks
 
 
+# An OCR-read value's words must all reach this confidence before it can be
+# Verified (with source evidence and type checks as well).
+OCR_VERIFY_MIN_CONFIDENCE = 0.80
+
+# Glyphs OCR produces from table rules / box edges: any vertical bar, or a
+# token made only of underscores/brackets.
+_RULING_ARTIFACT = re.compile(r"[|¦]|(?:^|\s)[_\[\]]+(?:\s|$)")
+
+
 def evaluate_cell(
     definition: FieldDefinition,
     value: object,
@@ -225,6 +234,64 @@ def evaluate_cell(
                 message=None
                 if grounded
                 else "Value does not appear as-is in its source evidence.",
+            )
+        )
+    if provenance is not None and provenance.ocr_gate:
+        # OCR often drops the space between capitalised words and still
+        # reports high confidence ("TARIQMAHMOOD"): a long all-caps run of
+        # LETTERS with no space is a merge until someone confirms it. Only
+        # free text is checked — identifiers/codes ("NS20261048"), numbers
+        # and dates follow no human word-spacing, and a value with digits is
+        # not a run of words.
+        text = str(value).strip()
+        letters = [ch for ch in text if ch.isalpha()]
+        merged = (
+            definition.value_type == "text"
+            and " " not in text
+            and not any(ch.isdigit() for ch in text)
+            and len(letters) >= 12
+            and all(ch.isupper() for ch in letters)
+        )
+        checks.append(
+            ValidationCheck(
+                check="ocr_word_spacing",
+                passed=not merged,
+                message="OCR may have merged words (no spaces) — confirm against the source image." if merged else None,
+            )
+        )
+        # Table ruling lines and box edges are often read as glyphs ("2. _|")
+        # with high confidence: a value carrying them is not clean text.
+        artifact = bool(_RULING_ARTIFACT.search(text))
+        checks.append(
+            ValidationCheck(
+                check="ocr_ruling_artifacts",
+                passed=not artifact,
+                message="The OCR value contains line/box artifacts (| or _) — confirm against the source image."
+                if artifact
+                else None,
+            )
+        )
+        checks.append(
+            ValidationCheck(
+                check="ocr_pass_agreement",
+                passed=not provenance.ocr_contested,
+                message="The OCR passes read this value differently — confirm against the source image."
+                if provenance.ocr_contested
+                else None,
+            )
+        )
+        confident = provenance.ocr_confidence is not None and provenance.ocr_confidence >= OCR_VERIFY_MIN_CONFIDENCE
+        checks.append(
+            ValidationCheck(
+                check="ocr_confidence",
+                passed=confident,
+                message=None
+                if confident
+                else (
+                    "OCR confidence for this value is unavailable — confirm against the source image."
+                    if provenance.ocr_confidence is None
+                    else f"Low OCR confidence ({provenance.ocr_confidence:.2f}) — confirm against the source image."
+                ),
             )
         )
     type_check = _type_check(value, definition.value_type)

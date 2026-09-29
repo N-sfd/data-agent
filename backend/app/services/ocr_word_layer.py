@@ -23,6 +23,9 @@ class OcrWord:
     block_num: int
     line_num: int
     word_num: int
+    # Two OCR passes read different text at this spot (fuse_layouts); the
+    # reading is unresolved and must not be Verified.
+    contested: bool = False
 
 
 @dataclass(frozen=True)
@@ -216,3 +219,112 @@ def layout_from_textpage_words(
         for line_words in [sorted(lines_map[key], key=lambda w: w.x0)]
     ]
     return OcrLayout(words=ocr_words, lines=lines, mean_word_confidence=None, engine="mupdf_textpage")
+
+
+def layout_score(layout: "OcrLayout | None") -> float:
+    """Total confidence of real words (≥ 2 letters/digits) — how much a
+    layout actually read, used to choose between OCR variants."""
+
+    if layout is None:
+        return 0.0
+    return sum(
+        (word.conf or 0.0)
+        for word in layout.words
+        if sum(ch.isalnum() for ch in word.text) >= 2
+    )
+
+
+def _overlap(a: OcrWord, b: OcrWord) -> float:
+    ix = max(0.0, min(a.x1, b.x1) - max(a.x0, b.x0))
+    iy = max(0.0, min(a.y1, b.y1) - max(a.y0, b.y0))
+    inter = ix * iy
+    smaller = min((a.x1 - a.x0) * (a.y1 - a.y0), (b.x1 - b.x0) * (b.y1 - b.y0)) or 1.0
+    return inter / smaller
+
+
+def _iou(a: OcrWord, b: OcrWord) -> float:
+    ix = max(0.0, min(a.x1, b.x1) - max(a.x0, b.x0))
+    iy = max(0.0, min(a.y1, b.y1) - max(a.y0, b.y0))
+    inter = ix * iy
+    union = (a.x1 - a.x0) * (a.y1 - a.y0) + (b.x1 - b.x0) * (b.y1 - b.y0) - inter
+    return inter / union if union > 0 else 0.0
+
+
+def _norm(text: str) -> str:
+    return "".join(ch for ch in text.lower() if ch.isalnum())
+
+
+def fuse_layouts(primary: OcrLayout, secondary: OcrLayout) -> OcrLayout:
+    """Word-level fusion of two OCR readings of the same page image (same
+    pixel space). Agreeing words keep the better reading; words only one
+    pass found are added; where the passes DISAGREE on the same spot, the
+    higher-confidence text is kept but its confidence drops to the lower
+    of the two — a contested reading must never look certain."""
+
+    fused: list[OcrWord] = []
+    used: set[int] = set()
+    for word in primary.words:
+        # Same word = boxes of similar extent. When the passes split text
+        # differently ("10-07-1986" vs "10 - 07 - 1986") nothing matches and
+        # the primary tokenization is kept as is.
+        match_index = None
+        for index, other in enumerate(secondary.words):
+            if index not in used and _iou(word, other) >= 0.6:
+                match_index = index
+                break
+        if match_index is None:
+            fused.append(word)
+            continue
+        used.add(match_index)
+        other = secondary.words[match_index]
+        best, worst = (word, other) if (word.conf or 0) >= (other.conf or 0) else (other, word)
+        if _norm(word.text) == _norm(other.text):
+            fused.append(best)
+        else:
+            fused.append(
+                OcrWord(
+                    text=best.text,
+                    conf=min(word.conf or 0.0, other.conf or 0.0),
+                    x0=best.x0, y0=best.y0, x1=best.x1, y1=best.y1,
+                    block_num=best.block_num, line_num=best.line_num, word_num=best.word_num,
+                    contested=True,
+                )
+            )
+    # Words only the secondary pass read (e.g. digits hidden by a watermark
+    # in the primary image) fill the gaps.
+    for index, other in enumerate(secondary.words):
+        if index not in used and not any(_overlap(other, word) >= 0.3 for word in fused):
+            fused.append(other)
+
+    lines_map: dict[tuple[int, int], list[OcrWord]] = {}
+    for word in fused:
+        # Line identity is geometric after fusion: words whose vertical
+        # centres agree within half a word height share a line.
+        centre = (word.y0 + word.y1) / 2
+        height = max(1.0, word.y1 - word.y0)
+        key = next(
+            (k for k, ws in lines_map.items() if abs((ws[0].y0 + ws[0].y1) / 2 - centre) <= 0.5 * height),
+            (len(lines_map), 0),
+        )
+        lines_map.setdefault(key, []).append(word)
+    lines: list[OcrLine] = []
+    for line_words in lines_map.values():
+        line_words = sorted(line_words, key=lambda w: w.x0)
+        confs = [w.conf for w in line_words if w.conf is not None]
+        lines.append(
+            OcrLine(
+                text=" ".join(w.text for w in line_words),
+                conf=sum(confs) / len(confs) if confs else 0.0,
+                x0=min(w.x0 for w in line_words), y0=min(w.y0 for w in line_words),
+                x1=max(w.x1 for w in line_words), y1=max(w.y1 for w in line_words),
+                words=line_words,
+            )
+        )
+    lines.sort(key=lambda line: (line.y0, line.x0))
+    confs = [w.conf for w in fused if w.conf is not None]
+    return OcrLayout(
+        words=fused,
+        lines=lines,
+        mean_word_confidence=sum(confs) / len(confs) if confs else None,
+        engine=f"{primary.engine}+fused",
+    )
