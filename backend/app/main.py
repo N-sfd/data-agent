@@ -317,24 +317,30 @@ async def create_database_tables() -> None:
 def _recover_interrupted_jobs() -> None:
     """In-process background tasks don't survive a process restart —
     anything still queued/processing when the process died is stuck
-    forever otherwise. Surface it as a clean failure instead."""
+    forever otherwise. Surface it as a clean failure instead.
 
-    from datetime import datetime, timezone
+    Only stale jobs are failed here: during a rolling deploy the previous
+    instance is still running its jobs while this one boots. Younger
+    orphans are failed lazily by the job status endpoint once stale."""
 
     from app.database.session import SessionLocal
     from app.models.extraction_job import ExtractionJob
+    from app.services.job_recovery import (
+        ACTIVE_STATUSES,
+        is_orphaned,
+        mark_interrupted,
+    )
 
     database = SessionLocal()
 
     try:
-        stuck_jobs = database.query(ExtractionJob).filter(
-            ExtractionJob.status.in_(["queued", "processing"])
+        active_jobs = database.query(ExtractionJob).filter(
+            ExtractionJob.status.in_(ACTIVE_STATUSES)
         )
 
-        for job in stuck_jobs:
-            job.status = "failed"
-            job.error_message = "Interrupted by a server restart."
-            job.completed_at = datetime.now(timezone.utc)
+        for job in active_jobs:
+            if is_orphaned(job):
+                mark_interrupted(job)
 
         database.commit()
     finally:

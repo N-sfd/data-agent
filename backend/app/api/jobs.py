@@ -11,6 +11,7 @@ from app.schemas.extraction_job import (
     ExtractionJobResponse,
     StartExtractionJobRequest,
 )
+from app.services.job_recovery import is_orphaned, mark_interrupted
 from app.services.extraction_job_runner import (
     run_extraction_job,
     run_in_worker_thread,
@@ -118,5 +119,9 @@ async def get_job(
     document = database.get(Document, job.document_id)
     if document is None or not can_access_document(actor, document):
         raise HTTPException(status_code=404, detail="Job not found.")
+
+    if is_orphaned(job):
+        mark_interrupted(job)
+        database.commit()
 
     return _to_response(job)
