@@ -300,6 +300,8 @@ function NewExtractionPageContent() {
     const startedAt = Date.now();
 
     async function poll() {
+      // Best-effort UI detail: skip while the tab is in the background.
+      if (window.document.hidden) return;
       try {
         const result = await getExtractionProgress(documentId);
 
@@ -313,7 +315,7 @@ function NewExtractionPageContent() {
     }
 
     poll();
-    const progressInterval = setInterval(poll, 1500);
+    const progressInterval = setInterval(poll, 4000);
 
     const elapsedInterval = setInterval(() => {
       setElapsedSeconds(Math.floor((Date.now() - startedAt) / 1000));

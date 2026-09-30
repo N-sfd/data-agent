@@ -623,7 +623,16 @@ export async function getExtractionJob(
   return apiFetch(`/v1/jobs/${jobId}`, undefined, onRetry);
 }
 
-const JOB_POLL_INTERVAL_MS = 1200;
+// Jobs run for minutes on large documents. Polling starts quick for short
+// jobs, then backs off: Render's edge (Cloudflare) rate-limits bursty
+// clients with a 429 challenge the browser reports as unreachable.
+const JOB_POLL_INITIAL_MS = 1500;
+const JOB_POLL_MAX_MS = 5000;
+const JOB_POLL_BACKOFF = 1.3;
+
+function nextJobPollDelay(current: number): number {
+  return Math.min(Math.round(current * JOB_POLL_BACKOFF), JOB_POLL_MAX_MS);
+}
 const MIN_STAGE_DWELL_MS = 450;
 
 export async function startProcessingJob(
@@ -652,8 +661,10 @@ export async function processDocumentViaJob(
   let lastStageAt = Date.now();
   onStageChange?.(job);
 
+  let pollDelay = JOB_POLL_INITIAL_MS;
   while (job.status === "queued" || job.status === "processing") {
-    await new Promise((resolve) => setTimeout(resolve, JOB_POLL_INTERVAL_MS));
+    await new Promise((resolve) => setTimeout(resolve, pollDelay));
+    pollDelay = nextJobPollDelay(pollDelay);
     job = await getExtractionJob(job.id, onRetry);
     const nextStage = job.stage || job.status;
     if (nextStage !== lastStage) {
@@ -736,8 +747,10 @@ export async function extractTargetsViaJob(
   }
   onStageChange?.(job);
 
+  let pollDelay = JOB_POLL_INITIAL_MS;
   while (job.status === "queued" || job.status === "processing") {
-    await new Promise((resolve) => setTimeout(resolve, JOB_POLL_INTERVAL_MS));
+    await new Promise((resolve) => setTimeout(resolve, pollDelay));
+    pollDelay = nextJobPollDelay(pollDelay);
     const next = await getExtractionJob(job.id, onRetry);
     if (!next) {
       throw new Error("Lost contact with the extraction job.");
