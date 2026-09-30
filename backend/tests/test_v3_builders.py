@@ -77,6 +77,29 @@ def test_build_all_fields_drops_candidates_with_no_value():
     assert rows == []
 
 
+def test_weak_form_associations_are_not_verified():
+    candidates = [
+        _candidate(label="UNITED STATES OF AMERICA", value="SIGN", confidence=0.9),
+        _candidate(
+            label="NAME OF CONTRACTING OFFICER (Type or print)",
+            value="UNITED STATES",
+            confidence=0.9,
+        ),
+        _candidate(
+            label="CHECK IF REMITTANCE ADDRESS IS",
+            value="SUCH ADDRESS IN SCHEDULE.",
+            confidence=0.9,
+        ),
+        _candidate(label="Email", value="paul.lewis.16@us.af.mil", confidence=0.9),
+    ]
+    rows = build_all_fields(document=_document(), candidates=candidates)
+    by_label = {row.label: (row.evidence_json or {})["qa_status"] for row in rows}
+    assert by_label["UNITED STATES OF AMERICA"] == "Needs Review"
+    assert by_label["NAME OF CONTRACTING OFFICER (Type or print)"] == "Needs Review"
+    assert by_label["CHECK IF REMITTANCE ADDRESS IS"] == "Needs Review"
+    assert by_label["Email"] == "Verified"
+
+
 # --- clin_builder ---
 
 

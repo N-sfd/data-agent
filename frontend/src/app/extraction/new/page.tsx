@@ -909,15 +909,14 @@ function NewExtractionPageContent() {
   return (
     <>
       <PageHero
+        compact
         eyebrow="Store / Extraction"
         title={
           <>
-            Source evidence first
-            <br />
-            across every document
+            Turn documents into verified structured data
           </>
         }
-        description="Extract fields, tables, and clauses from contracts, financial reports, lab records, and more — then verify every value against the source PDF."
+        description="Contracts, invoices, regulatory documents, spreadsheets, scans, images, and business records. Data Agent detects the type and staging profile."
       />
 
       <ContentSection>
@@ -944,31 +943,32 @@ function NewExtractionPageContent() {
                   <DocumentUploader onUploadComplete={handleUploadComplete} />
                   <ImportSourceTabs />
                 </section>
-                <section className="editorial-card flex flex-col justify-center p-6 sm:p-8">
+                <section className="editorial-card flex flex-col p-6 sm:p-8">
                   <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-text-teal">
                     Workflow
                   </p>
                   <h2 className="mt-2 text-lg font-medium text-foreground">
                     Upload → Understand → Extract → Verify
                   </h2>
-                  <ol className="mt-4 space-y-3 text-sm leading-6 text-text-secondary">
-                    <li>
-                      <span className="font-medium text-foreground">1.</span>{" "}
-                      Upload a document to extract pages and detect structure.
-                    </li>
-                    <li>
-                      <span className="font-medium text-foreground">2.</span>{" "}
-                      Discover the document&apos;s actual schema — not static
-                      presets.
-                    </li>
-                    <li>
-                      <span className="font-medium text-foreground">3.</span>{" "}
-                      Choose detected fields, tables, clauses, or contacts.
-                    </li>
-                    <li>
-                      <span className="font-medium text-foreground">4.</span>{" "}
-                      Verify results against source evidence, then review.
-                    </li>
+                  <ol className="mt-6 space-y-5">
+                    {[
+                      ["Upload", "Extract pages and detect the document's structure."],
+                      ["Understand", "Discover the document's actual schema — not static presets."],
+                      ["Extract", "Choose detected fields, tables, clauses, or contacts."],
+                      ["Verify", "Check results against source evidence, then review."],
+                    ].map(([title, body], i) => (
+                      <li key={title} className="flex gap-4">
+                        <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary-soft text-sm font-semibold text-primary tabular-nums">
+                          {i + 1}
+                        </span>
+                        <div className="pt-1">
+                          <p className="text-sm font-medium text-foreground">{title}</p>
+                          <p className="mt-0.5 text-sm leading-6 text-text-secondary">
+                            {body}
+                          </p>
+                        </div>
+                      </li>
+                    ))}
                   </ol>
                 </section>
               </div>

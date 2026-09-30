@@ -28,6 +28,61 @@ from app.schemas.candidate_classification import ClassifiedCandidate
 from app.services.evidence_geometry import evidence_bbox
 
 _SLUG_RE = re.compile(r"[^a-z0-9]+")
+# Form chrome and leftover instructions are not business values. Kept
+# generic — no contract-specific strings.
+_CHROME_VALUES = frozenset(
+    {
+        "sign",
+        "signature",
+        "date",
+        "name",
+        "code",
+        "item",
+        "page",
+        "pages",
+        "check",
+        "initial",
+        "initials",
+        "title",
+        "number",
+        "n/a",
+        "na",
+        "see",
+        "united states",
+        "united states of america",
+    }
+)
+_INSTRUCTIONAL_LABEL = re.compile(
+    r"^(check if\b)|\(type or print\)|\(if other than",
+    re.IGNORECASE,
+)
+_INSTRUCTION_FRAGMENT = re.compile(r"\b(such|thereof|herein|aforementioned)\b", re.IGNORECASE)
+
+
+def association_is_defensible(label: str, value: str) -> bool:
+    """A label/value pair is not Verified just because both strings exist.
+
+    Recognized fields must pass their semantic validator. Unrecognized
+    pairs must not be form chrome, checkbox instructions, or placeholders.
+    """
+
+    from app.services.contract_summary_fields import match_label, validate_value
+
+    normalized_value = " ".join(value.lower().split()).strip(" .:")
+    if normalized_value in _CHROME_VALUES:
+        return False
+    if _INSTRUCTIONAL_LABEL.search(label) and match_label(label) is None:
+        return False
+    if _INSTRUCTION_FRAGMENT.search(value) and not re.search(r"\d", value):
+        return False
+    field_key = match_label(label)
+    if field_key is not None:
+        return validate_value(field_key, value).is_valid
+    words = re.findall(r"[A-Za-z]{4,}", value)
+    digits = re.findall(r"\d{3,}", value)
+    if not words and not digits and len(value.strip()) < 40:
+        return False
+    return True
 
 
 def _slug(text: str) -> str:
@@ -66,7 +121,13 @@ def build_all_fields(
             continue
         seen.add(dedupe_key)
 
-        qa_status = "Verified" if candidate.confidence >= 0.7 else "Needs Review"
+        defensible = association_is_defensible(label, value)
+        unrecognized = "unrecognized_field_vocabulary" in candidate.reason_codes
+        qa_status = (
+            "Verified"
+            if candidate.confidence >= 0.7 and defensible and not unrecognized
+            else "Needs Review"
+        )
 
         rows.append(
             DocumentMetadataField(

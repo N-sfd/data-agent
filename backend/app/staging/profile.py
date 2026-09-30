@@ -122,6 +122,10 @@ class AdapterResult:
     # Extraction outcome inputs the adapter knows about (e.g. contract_v3's
     # v3_extraction provenance record).
     outcome_provenance: dict | None = None
+    # Per-document column captions: dataset id → canonical field → label.
+    # For tables whose columns a document names itself ("Unit Code" where
+    # the field is course.code). Canonical ids never change.
+    column_labels: dict[str, dict[str, str]] = field(default_factory=dict)
 
 
 AdapterFn = Callable[[Session, Document], AdapterResult]

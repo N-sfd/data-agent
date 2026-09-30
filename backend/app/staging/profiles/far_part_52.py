@@ -227,6 +227,47 @@ CANONICAL = DatasetDefinition(
     ),
 )
 
+BUSINESS = DatasetDefinition(
+    dataset_id="far_business",
+    display_name="Business Export",
+    cardinality="repeating",
+    description=(
+        "Final business columns for downstream use. Intent, Start Date, Attribute Category "
+        "and Attribute 1 stay blank until an approved rule or Oracle template supports them."
+    ),
+    identity_fields=("far.business.number", "far.business.display_name"),
+    grid_fields=(
+        "far.business.date_published",
+        "far.business.number",
+        "far.business.title",
+        "far.business.display_name",
+        "far.business.provision",
+        "far.business.clause",
+        "far.business.clause_type",
+        "far.business.reserved",
+    ),
+    fields=tuple(
+        F(f"far.business.{key}", key, label, grounding="derived")
+        for key, label in (
+            ("date_published", "Date Published"),
+            ("number", "Number"),
+            ("title", "Title"),
+            ("display_name", "Display Name"),
+            ("provision", "Provision"),
+            ("clause", "Clause"),
+            ("clause_type", "Clause Type"),
+            ("reserved", "Reserved"),
+            ("description", "Description"),
+            ("text", "Text"),
+            ("intent", "Intent"),
+            ("start_date", "Start Date"),
+            ("attribute_category", "Attribute Category"),
+            ("attribute_1", "Attribute 1"),
+            ("source_reference", "Source Reference"),
+        )
+    ),
+)
+
 OUTPUT_MAP = DatasetDefinition(
     dataset_id="far_oracle_output_map",
     display_name="Oracle Output Map",
@@ -594,6 +635,33 @@ def _alternate_record(document: Document, row: DocumentFarRecord) -> RawRecord:
     )
 
 
+def _business_record(document: Document, row: DocumentFarRecord) -> RawRecord:
+    exported = views.business_row(row)
+    keys = [field.key for field in BUSINESS.fields]
+    prov = row.provenance_json or {}
+    locator = SourceLocator(
+        dom_path=prov.get("dom_path"),
+        element_id=prov.get("element_id"),
+        section_path=list(prov.get("section_path") or []),
+    )
+    default = make_provenance(
+        document,
+        page=None,
+        evidence=row.source_text or row.official_heading or row.far_number,
+        extraction_method="dom",
+        region_id=row.clause_key,
+        anchor=row.official_heading or row.far_number,
+        locator=locator,
+        source_type="html",
+    )
+    return _raw(
+        f"far_business:{row.clause_key}",
+        dict(zip(keys, (exported[name] for name in views.BUSINESS_COLUMNS))),
+        {"_default": default},
+        row,
+    )
+
+
 def _canonical_record(document: Document, row: DocumentFarRecord) -> RawRecord:
     canonical = views.canonical_row(row)
     alternate = row.alternate_code is not None
@@ -805,6 +873,7 @@ def adapt_far(database: Session, document: Document) -> AdapterResult:
         "far_alternates": [_alternate_record(document, row) for row in rows if row.alternate_code is not None],
         "far_references": _reference_records(document, rows),
         "far_canonical": [_canonical_record(document, row) for row in rows],
+        "far_business": [_business_record(document, row) for row in rows],
         "far_oracle_output_map": [
             RawRecord(
                 record_id=f"far_map:{index}",
@@ -887,6 +956,7 @@ FAR_PART_52_PROFILE = StagingProfile(
         ALTERNATES,
         REFERENCES,
         CANONICAL,
+        BUSINESS,
         OUTPUT_MAP,
         ALL_FIELDS,
         SOURCE_DOCUMENTS,

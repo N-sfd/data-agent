@@ -123,6 +123,15 @@ CLINS = DatasetDefinition(
     cardinality="repeating",
     description="One row per CLIN / SLIN / sub-CLIN.",
     identity_fields=("contract.clin.clin", "contract.clin.description"),
+    grid_fields=(
+        "contract.clin.clin",
+        "contract.clin.description",
+        "contract.clin.option_base",
+        "contract.clin.pricing_type",
+        "contract.clin.max_quantity",
+        "contract.clin.unit",
+        "contract.clin.max_amount",
+    ),
     fields=(
         F("contract.clin.clin", "clin", "CLIN", "code", expected=True),
         F("contract.clin.option_base", "option_base", "Option/Base", grounding="derived"),
@@ -252,6 +261,11 @@ ALL_FIELDS = DatasetDefinition(
     cardinality="repeating",
     description="Other accepted, source-supported label/value fields.",
     identity_fields=("contract.field.name", "contract.field.value"),
+    grid_fields=(
+        "contract.field.category",
+        "contract.field.name",
+        "contract.field.value",
+    ),
     fields=(
         F("contract.field.category", "category", "Category", grounding="none"),
         F("contract.field.name", "normalized_field", "Field", grounding="derived"),
@@ -456,7 +470,8 @@ CONTRACT_V3_PROFILE = StagingProfile(
                 dataset_id=dataset_id,
             )
             for dataset_id, csv_name, name in (
-                ("all_fields", "all-fields", "All Fields"),
+                ("all_fields", "all-fields-business", "All Fields"),
+                ("all_fields", "all-fields", "All Fields + Evidence"),
                 ("clins", "clins", "CLINs"),
                 ("funding", "funding", "Funding"),
                 ("performance_delivery", "performance-delivery", "Performance & Delivery"),

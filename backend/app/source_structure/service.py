@@ -23,7 +23,7 @@ from app.models.document_page import DocumentPage
 from app.models.document_source_structure import DocumentSourceStructure
 from app.services.document_storage import DocumentStorageError, ensure_local_copy
 from app.source_structure.html_structure import extract_html_structure
-from app.source_structure.models import StructuredSourceDocument
+from app.source_structure.models import StructuredSourceDocument, TableCandidate
 from app.source_structure.ocr_geometry import coordinate_space_for
 from app.source_structure.table_continuity import annotate_geometry, link_continuations
 from app.source_structure.pdf_structure import (
@@ -212,12 +212,76 @@ def page_transcript(database: Session, document: Document, page_number: int) -> 
         return result
 
     structure = get_or_build_source_structure(database, document)
-    tables = [t for t in structure.table_candidates if t.page == page_number]
+    tables = [
+        t for t in structure.table_candidates
+        if t.page == page_number and table_accounts_for_its_words(t, words)
+    ]
     result["positioning"] = "spatial"
     result["extraction_method"] = method
     result["word_count"] = len(words)
     result["blocks"] = [block.as_dict() for block in reconstruct_page(words, tables)]
     return result
+
+
+def table_accounts_for_its_words(table: TableCandidate, words: list[Word], minimum: float = 0.85) -> bool:
+    """Whether a detected table's cells hold the words printed inside it.
+
+    Reading-order text renders an accepted table in place of the words it
+    covers. A ruled grid that lost or merged words (a page border read as
+    one giant table, boxes that split sentences) must not replace them —
+    the words are then read as ordinary lines instead."""
+
+    if not table.bbox or table.extraction_method == "dom":
+        return True
+    x0, y0, x1, y1 = table.bbox
+    inside = [
+        w for w in words
+        if x0 - 2 <= (w.x0 + w.x1) / 2 <= x1 + 2 and y0 - 2 <= (w.y0 + w.y1) / 2 <= y1 + 2
+    ]
+    if len(inside) < 4:
+        return True
+    tokens = Counter(
+        token.lower()
+        for row in [table.header_cells, *table.rows]
+        for cell in row
+        for token in cell.text.split()
+    )
+    matched = 0
+    for word in inside:
+        key = word.text.lower()
+        if tokens[key] > 0:
+            tokens[key] -= 1
+            matched += 1
+    return matched >= minimum * len(inside)
+
+
+def document_page_words(database: Session, document: Document) -> list[tuple[int, list[Word], str]]:
+    """Every page's positioned words in PDF points — (page number, words,
+    "native" | "ocr") — from the same sources the structure uses. HTML
+    documents have none."""
+
+    if _source_type(document) == "html":
+        return []
+    pages = list(
+        database.scalars(
+            select(DocumentPage).where(DocumentPage.document_id == document.id).order_by(DocumentPage.page_number)
+        )
+    )
+    fitz_doc = _open_source_pdf(document, _source_type(document), [])
+    try:
+        result = []
+        for page in pages:
+            fitz_page = (
+                fitz_doc[page.page_number - 1]
+                if fitz_doc is not None and 0 <= page.page_number - 1 < fitz_doc.page_count
+                else None
+            )
+            words, method = page_words(page, fitz_page, get_settings().ocr_dpi)
+            result.append((page.page_number, words, method))
+        return result
+    finally:
+        if fitz_doc is not None:
+            fitz_doc.close()
 
 
 def _text_only_blocks(text: str) -> list[dict]:

@@ -68,6 +68,7 @@ export default function ClausesPage() {
   return (
     <>
       <PageHero
+        compact
         eyebrow="Intelligence / Clause Agent"
         title={
           <>

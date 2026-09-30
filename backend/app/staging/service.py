@@ -193,14 +193,11 @@ def get_staging_record(
         definition = profile.dataset(dataset_id)
     except KeyError:
         return None
-    raws = [
-        raw
-        for raw in profile.adapter(database, document).records.get(dataset_id, [])
-        if raw.record_id == record_id
-    ]
+    result = profile.adapter(database, document)
+    raws = [raw for raw in result.records.get(dataset_id, []) if raw.record_id == record_id]
     if not raws:
         return None
-    return build_dataset(definition, raws).records[0]
+    return build_dataset(definition, raws, result.column_labels.get(dataset_id)).records[0]
 
 
 def _with_ai_notice(workbook: StagingWorkbook, ai: dict) -> StagingWorkbook:

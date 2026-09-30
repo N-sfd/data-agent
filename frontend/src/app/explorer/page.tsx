@@ -96,6 +96,7 @@ function ExplorerContent() {
   return (
     <>
       <PageHero
+        compact
         eyebrow="Intelligence / Field Explorer"
         title={
           <>

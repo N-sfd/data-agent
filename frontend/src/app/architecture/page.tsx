@@ -81,6 +81,7 @@ export default function ArchitecturePage() {
   return (
     <div className="space-y-10 pb-16">
       <PageHero
+        compact
         eyebrow="Platform"
         title="Architecture"
         description="Data Agent is an enterprise contract intelligence spine: retrieve evidence, extract with explainable confidence, govern at field level, and only then export or send downstream."

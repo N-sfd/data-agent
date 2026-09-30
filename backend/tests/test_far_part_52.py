@@ -250,6 +250,29 @@ def test_embedded_references_are_an_index_not_records():
     assert "52.219-9" not in records and "52.101" not in records
 
 
+def test_business_export_columns_do_not_invent_dates_or_attributes():
+    rows = build_canonical(extract_far(far_html()), "doc")
+    by_key = {r.clause_key: views.business_row(r) for r in rows}
+    assert list(views.BUSINESS_COLUMNS) == [
+        "Date Published", "Number", "Title", "Display Name", "Provision", "Clause",
+        "Clause Type", "Reserved", "Description", "Text", "Intent", "Start Date",
+        "Attribute Category", "Attribute 1", "Source Reference",
+    ]
+    basic = by_key["FAR-52.204-3"]
+    assert basic["Number"] == "52.204-3"
+    assert basic["Title"]
+    assert basic["Text"] and "Taxpayer" in basic["Text"]
+    assert basic["Intent"] is None and basic["Start Date"] is None
+    assert basic["Attribute Category"] is None and basic["Attribute 1"] is None
+    assert basic["Source Reference"] and "page" not in basic["Source Reference"].lower()
+    assert by_key["FAR-52.203-1"]["Reserved"] == "Yes"
+    assert by_key["FAR-52.203-1"]["Clause Type"] == "Reserved"
+    assert by_key["FAR-52.203-1"]["Clause"] is None
+    alternate = by_key["FAR-52.215-1-ALT-I"]
+    assert alternate["Clause Type"] == "Alternate" and alternate["Clause"] is None
+    assert all(views.business_row(r)["Source Reference"] for r in rows)
+
+
 def test_canonical_model_keys_types_and_load_eligibility():
     rows = build_canonical(extract_far(far_html()), "doc")
     by_key = {r.clause_key: r for r in rows}
@@ -307,7 +330,8 @@ def test_existing_profiles_keep_their_capabilities():
         profile = registry.latest(key)
         assert profile.document_recognizer is None and profile.materializer is None
         assert profile.contract_pipeline is True
-        assert all(not d.grid_fields for d in profile.datasets)
+        if key != "contract_v3":
+            assert all(not d.grid_fields for d in profile.datasets)
 
 
 # --- staging workbook, record details and exports -----------------------------------------
@@ -334,7 +358,7 @@ def test_workbook_tabs_and_states(far_document):
     assert workbook["profile"]["profile_id"] == "far_part_52"
     assert [d["display_name"] for d in workbook["datasets"]] == [
         "Overview", "FAR Sections", "Clauses & Provisions", "Alternates", "FAR References",
-        "Canonical Model", "Oracle Output Map", "All Fields", "Source Documents", "QA Review",
+        "Canonical Model", "Business Export", "Oracle Output Map", "All Fields", "Source Documents", "QA Review",
     ]
     assert workbook["qa_summary"]["needs_review"] == 0 and workbook["qa_summary"]["verified"] > 0
     clauses = next(d for d in workbook["datasets"] if d["dataset_id"] == "far_clauses")
@@ -381,12 +405,15 @@ def test_exports_workbook_csv_and_json(far_document):
     assert wb.sheetnames == [
         "01_FAR_STAGING", "02_ORACLE_MAPPING", "03_VALIDATION", "99_LONG_TEXT",
         "04_STRUCTURED_FAR", "05_EXTRACTION_GUIDE", "06_CANONICAL_MODEL", "07_ORACLE_OUTPUT_MAP",
+        "08_BUSINESS_EXPORT",
     ]
     staging = list(wb["01_FAR_STAGING"].iter_rows(values_only=True))
     assert list(staging[3]) == list(views.STAGING_COLUMNS)
     assert list(staging[3])[-2:] == ["Paragraph", "Subparagraph"]
     canonical = list(wb["06_CANONICAL_MODEL"].iter_rows(values_only=True))
     assert list(canonical[3]) == list(views.CANONICAL_COLUMNS)
+    business = list(wb["08_BUSINESS_EXPORT"].iter_rows(values_only=True))
+    assert list(business[3]) == list(views.BUSINESS_COLUMNS)
     keys = [r[1] for r in canonical[4:]]
     assert "FAR-52.215-1-ALT-II" in keys and "FAR-Subpart_52.2" in keys
     output_map = list(wb["07_ORACLE_OUTPUT_MAP"].iter_rows(values_only=True))

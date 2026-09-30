@@ -37,16 +37,16 @@ export const PLATFORM_SECTIONS: MegaMenuSection[] = [
     title: "Document Intelligence",
     tiles: [
       {
-        label: "Extraction",
-        description: "Upload and extract with source verification",
-        href: "/extraction/new",
-        icon: FileSearch,
+        label: "Documents",
+        description: "Open any document workspace",
+        href: "/documents",
+        icon: Archive,
       },
       {
-        label: "Repository",
-        description: "Browse all documents and metadata",
-        href: "/repository",
-        icon: Archive,
+        label: "New Document",
+        description: "Upload and let Data Agent detect the profile",
+        href: "/extraction/new",
+        icon: FileSearch,
       },
       {
         label: "Field Explorer",
@@ -61,8 +61,8 @@ export const PLATFORM_SECTIONS: MegaMenuSection[] = [
         icon: Sparkles,
       },
       {
-        label: "Review Queue",
-        description: "Items that need human verification",
+        label: "Review",
+        description: "Fields that need a human decision",
         href: "/review-queue",
         icon: ListChecks,
       },
@@ -159,8 +159,8 @@ export const REVIEW_SECTIONS: MegaMenuSection[] = [
     title: "Review",
     tiles: [
       {
-        label: "Review Queue",
-        description: "Low confidence, conflicts, and corrections",
+        label: "Review",
+        description: "Extraction, validation, missing values, and conflicts",
         href: "/review-queue",
         icon: ListChecks,
       },

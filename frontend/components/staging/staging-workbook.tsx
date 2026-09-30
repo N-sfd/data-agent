@@ -5,9 +5,14 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 import type { SourceViewRequest } from "@/components/source-verification-panel";
 import OutcomeBanner from "@/components/staging/outcome-banner";
+import ContractSummaryPanel from "@/components/staging/contract-summary-panel";
+import type { EvidenceTarget } from "@/components/staging/evidence-drawer";
+import { cellSourceRequest } from "@/components/staging/review-status";
 import SourceTranscription from "@/components/staging/source-transcription";
 import StagingDatasetTable from "@/components/staging/staging-dataset-table";
 import StagingFieldList from "@/components/staging/staging-field-list";
+import TranscriptPanes from "@/components/staging/transcript-workbook";
+import PresentationWorkspace from "@/components/staging/presentation-workspace";
 import { ApiError, COLD_START_RETRY_DELAYS_MS } from "@/lib/api";
 import { storeAccessToken } from "@/lib/entra-auth";
 import {
@@ -16,6 +21,11 @@ import {
   type StagingDataset,
   type StagingWorkbook as Workbook,
 } from "@/lib/staging-workbook";
+import { contractTabs, initialContractTab, isContractProfile } from "@/lib/contract-workbook-nav";
+import { isTranscriptProfile } from "@/lib/transcript-workbook";
+
+// The document itself, as opposed to the data staged from it.
+const DOCUMENT_MODES = { original: "Original", text: "Extracted Text" };
 
 interface StagingWorkbookProps {
   documentId: string;
@@ -27,7 +37,7 @@ interface StagingWorkbookProps {
   refreshKey?: string | number;
 }
 
-type View = "workbook" | "source";
+type View = "workbook" | "source" | "qa";
 
 // The staging stage runs last in the extraction job; a fetch landing just
 // before it finishes reports outcome "pending". Retry briefly before
@@ -63,6 +73,7 @@ function tabLabel(workbook: Workbook, dataset: StagingDataset): string {
 }
 
 function initialDataset(workbook: Workbook): string {
+  if (isContractProfile(workbook)) return initialContractTab(workbook);
   const business = workbook.datasets.find((d) => d.role === "business" && hasValues(d));
   const fallback =
     workbook.datasets.find((d) => d.role === "source") ??
@@ -98,6 +109,7 @@ export default function StagingWorkbook({
   const [activeDataset, setActiveDataset] = useState("");
   const [exportMenuOpen, setExportMenuOpen] = useState(false);
   const [exportError, setExportError] = useState<string | null>(null);
+  const [documentFocus, setDocumentFocus] = useState<SourceViewRequest | null>(null);
   const exportMenuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -209,8 +221,14 @@ export default function StagingWorkbook({
     );
   }
 
-  const { profile, outcome, qa_summary: qa } = workbook;
-  const dataset = workbook.datasets.find((d) => d.dataset_id === activeDataset);
+  const { profile, outcome } = workbook;
+
+  function viewInDocument(target: EvidenceTarget) {
+    const request = cellSourceRequest(target.cell, `${target.fieldId ?? target.cell.canonical_field}:${Date.now()}`);
+    if (!request) return;
+    setDocumentFocus({ ...request, label: target.field });
+    setView("source");
+  }
   const baseName = (documentName ?? workbook.document_filename).replace(/\.[^.]+$/, "");
   const wholeExports = profile.export_capabilities.filter((c) => !c.dataset_id);
   const datasetExports = profile.export_capabilities.filter((c) => c.dataset_id);
@@ -219,19 +237,9 @@ export default function StagingWorkbook({
     <div className="space-y-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h3 className="text-base font-semibold text-foreground">Professional Staging Workbook</h3>
+          <h3 className="text-base font-semibold text-foreground">{profile.display_name}</h3>
           <p className="text-xs text-text-secondary">
-            Profile:{" "}
-            <span className="font-medium text-foreground">{profile.display_name}</span>{" "}
-            <span className="text-text-muted">
-              ({profile.profile_id}@{profile.profile_version})
-            </span>
-            {workbook.processing_metadata.document_family_label && (
-              <> · Detected: {workbook.processing_metadata.document_family_label}</>
-            )}
-          </p>
-          <p className="mt-0.5 text-xs text-text-secondary">
-            Select any value to see its source evidence.
+            {workbook.processing_metadata.document_family_label ?? "Select any value to see its source evidence."}
           </p>
         </div>
         {profile.export_capabilities.length > 0 && (
@@ -277,49 +285,11 @@ export default function StagingWorkbook({
 
       {outcome.status !== "populated" && <OutcomeBanner outcome={outcome} />}
 
-      <div className="flex flex-col gap-4 rounded-xl border border-border bg-surface p-4 xl:flex-row xl:items-start">
-        <div className="flex flex-1 flex-wrap gap-x-6 gap-y-3">
-        {businessDatasets.map((d) => (
-          <button
-            key={d.dataset_id}
-            type="button"
-            onClick={() => {
-              setView("workbook");
-              setActiveDataset(d.dataset_id);
-            }}
-            className="text-left"
-          >
-            <p
-              className={`text-lg font-medium tabular-nums ${hasValues(d) ? "text-foreground" : "text-text-muted"}`}
-            >
-              {datasetCount(d)}
-            </p>
-            <p className="mt-0.5 text-xs text-text-secondary">{tabLabel(workbook, d)}</p>
-          </button>
-        ))}
-        </div>
-        {/* Value-state totals: their own row until there is room beside
-            the dataset counts, so they never wrap into a ragged column. */}
-        <div className="flex gap-6 border-t border-border pt-3 xl:border-l xl:border-t-0 xl:pl-6 xl:pt-0">
-
-          {[
-            ["Verified", qa.verified, "text-success"],
-            ["Needs Review", qa.needs_review, qa.needs_review > 0 ? "text-warning" : "text-foreground"],
-            ["Missing", qa.missing, "text-text-secondary"],
-          ].map(([label, count, tone]) => (
-            <div key={label as string}>
-              <p className={`text-lg font-medium tabular-nums ${tone}`}>{count}</p>
-              <p className="mt-0.5 text-xs text-text-secondary">{label} values</p>
-            </div>
-          ))}
-        </div>
-      </div>
-
       <div role="tablist" aria-label="Workbook views" className="flex gap-4 border-b border-border text-sm">
         {(
           [
             ["workbook", "Staging Workbook"],
-            ["source", "Source & Transcript"],
+            ["source", "Source"],
           ] as [View, string][]
         ).map(([id, label]) => (
           <button
@@ -341,61 +311,109 @@ export default function StagingWorkbook({
       </div>
 
       {view === "source" ? (
-        <SourceTranscription documentId={documentId} documentName={documentName ?? workbook.document_filename} />
+        <SourceTranscription
+          documentId={documentId}
+          documentName={documentName ?? workbook.document_filename}
+          modes
+          modeLabels={DOCUMENT_MODES}
+          focus={documentFocus}
+        />
       ) : (
-        <>
-          <div
-            role="tablist"
-            aria-label="Datasets"
-            className="flex gap-1 overflow-x-auto border-b border-border pb-px"
-          >
-            {workbook.datasets
-              .filter((d) => isShown(workbook, d) || activeDataset === d.dataset_id)
-              .map((d) => (
-                <button
-                  key={d.dataset_id}
-                  type="button"
-                  role="tab"
-                  aria-selected={activeDataset === d.dataset_id}
-                  onClick={() => setActiveDataset(d.dataset_id)}
-                  className={[
-                    "whitespace-nowrap border-b-2 px-3 py-2 text-sm font-medium transition",
-                    activeDataset === d.dataset_id
-                      ? "border-success text-foreground"
-                      : hasValues(d)
-                        ? "border-transparent text-text-secondary hover:text-foreground"
-                        : "border-transparent font-normal text-text-muted hover:text-text-secondary",
-                  ].join(" ")}
-                >
-                  {tabLabel(workbook, d)}
-                  <span className="ml-1.5 text-xs text-text-muted">({datasetCount(d)})</span>
-                </button>
-              ))}
-          </div>
-
-          {dataset?.description && (
-            <p className="text-xs text-text-secondary">{dataset.description}</p>
-          )}
-
-          {dataset &&
-            (dataset.cardinality === "single" ? (
-              <StagingFieldList
-                dataset={dataset}
-                onOpenSource={onOpenSource}
-                selectedId={selectedSourceId}
-              />
-            ) : (
-              <StagingDatasetTable
-                key={dataset.dataset_id}
-                dataset={dataset}
-                documentId={documentId}
-                onOpenSource={onOpenSource}
-                onOpenDataset={setActiveDataset}
-                selectedId={selectedSourceId}
-              />
-            ))}
-        </>
+        <PresentationWorkspace workbook={workbook} documentId={documentId} onOpenSource={onOpenSource} />
       )}
     </div>
+  );
+}
+
+function QaPane({
+  workbook,
+  onOpenDataset,
+}: {
+  workbook: Workbook;
+  onOpenDataset: (datasetId: string) => void;
+}) {
+  const qa = workbook.datasets.find((dataset) => dataset.dataset_id === "qa_review");
+  if (!qa) {
+    return <p className="text-sm text-text-secondary">No QA review rows for this document.</p>;
+  }
+  return (
+    <StagingDatasetTable dataset={qa} onOpenDataset={onOpenDataset} />
+  );
+}
+
+function ContractPanes({
+  workbook,
+  documentId,
+  active,
+  onSelect,
+  onOpenSource,
+  selectedSourceId,
+}: {
+  workbook: Workbook;
+  documentId: string;
+  active: string;
+  onSelect: (id: string) => void;
+  onOpenSource?: (request: import("@/components/source-verification-panel").SourceViewRequest) => void;
+  selectedSourceId?: string | null;
+}) {
+  const tabs = contractTabs(workbook.datasets);
+  const current = tabs.find((tab) => tab.id === active) ?? tabs[0];
+  const datasets = (current?.datasetIds ?? [])
+    .map((id) => workbook.datasets.find((dataset) => dataset.dataset_id === id))
+    .filter((dataset): dataset is StagingDataset => Boolean(dataset));
+
+  return (
+    <>
+      <div role="tablist" aria-label="Datasets" className="flex flex-wrap gap-1.5">
+        {tabs.map((tab) => {
+          const count = tab.datasetIds.reduce((sum, id) => {
+            const dataset = workbook.datasets.find((item) => item.dataset_id === id);
+            return sum + (dataset?.records.length ?? 0);
+          }, 0);
+          const selected = current?.id === tab.id;
+          return (
+            <button
+              key={tab.id}
+              type="button"
+              role="tab"
+              aria-selected={selected}
+              aria-label={tab.label}
+              onClick={() => onSelect(tab.id)}
+              className={[
+                "rounded-md border px-2.5 py-1 text-[13px]",
+                selected
+                  ? "border-primary bg-primary text-white"
+                  : "border-border bg-surface text-text-secondary hover:bg-surface-soft",
+              ].join(" ")}
+            >
+              {tab.label}
+              {tab.id !== "summary" && <span className={selected ? "text-white/75" : "text-text-muted"}> {count}</span>}
+            </button>
+          );
+        })}
+      </div>
+      {datasets.map((dataset) => (
+        <section key={dataset.dataset_id} className="space-y-2">
+          {datasets.length > 1 && (
+            <h4 className="text-sm font-medium text-foreground">{dataset.display_name}</h4>
+          )}
+          {dataset.dataset_id === "contract_summary" ? (
+            <ContractSummaryPanel dataset={dataset} onOpenSource={onOpenSource} />
+          ) : dataset.cardinality === "single" ? (
+            <StagingFieldList dataset={dataset} onOpenSource={onOpenSource} selectedId={selectedSourceId} />
+          ) : (
+            <StagingDatasetTable
+              key={dataset.dataset_id}
+              dataset={dataset}
+              documentId={documentId}
+              onOpenSource={onOpenSource}
+              onOpenDataset={onSelect}
+              selectedId={selectedSourceId}
+              dense
+            />
+          )}
+        </section>
+      ))}
+    </>
   );
 }

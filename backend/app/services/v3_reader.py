@@ -35,6 +35,17 @@ from app.services.extraction_outcome import build_extraction_outcome
 from app.services.source_documents_builder import build_source_documents
 
 
+def _all_fields_status(label: str, value: str, stored: str) -> str:
+    """Already-persisted rows stay on disk. Indefensible associations are
+    not presented as Verified when the workbook or CSV is read."""
+
+    from app.services.all_fields_builder import association_is_defensible
+
+    if stored == "Verified" and not association_is_defensible(label, value or ""):
+        return "Needs Review"
+    return stored
+
+
 def _evidence_page(evidence_json: dict | None) -> int:
     if not evidence_json:
         return 1
@@ -78,7 +89,7 @@ def _all_fields(database: Session, document: Document) -> list[AllFieldsRow]:
             source_page=_evidence_page(row.evidence_json),
             evidence=_evidence_text(row.evidence_json),
             extraction_method=row.extraction_method,
-            qa_status=(row.evidence_json or {}).get("qa_status", "Needs Review"),
+            qa_status=_all_fields_status(row.label, row.value, (row.evidence_json or {}).get("qa_status", "Needs Review")),
             row_provenance=_row_provenance(
                 "field", row.id, row.evidence_json, row.extraction_method
             ),

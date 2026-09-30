@@ -123,6 +123,7 @@ export default function IntegrationsPage() {
   return (
     <>
       <PageHero
+        compact
         eyebrow="Enterprise Governance & Integration"
         title="Integration Center & Approved Data"
         description="Synchronize verified document intelligence, metadata, and extracted CLIN line items into downstream ERP, automation workflows, and enterprise databases."

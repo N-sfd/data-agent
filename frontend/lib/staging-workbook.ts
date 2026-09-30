@@ -29,6 +29,11 @@ export interface CellProvenance {
   source_region_id: string | null;
   anchor_text: string | null;
   highlight_text: string | null;
+  /** OCR-read values only: lowest word confidence, and whether the OCR
+   * passes disagreed. Absent for native text and HTML. */
+  ocr_confidence?: number | null;
+  ocr_gate?: boolean;
+  ocr_contested?: boolean;
 }
 
 export interface ValidationCheck {

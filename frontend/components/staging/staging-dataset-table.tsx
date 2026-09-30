@@ -12,7 +12,7 @@ import {
 import StagingRecordDrawer from "@/components/staging/staging-record-drawer";
 import type { StagingColumn, StagingDataset, StagingRecord } from "@/lib/staging-workbook";
 
-type StatusFilter = "all" | "Verified" | "Needs Review";
+type StatusFilter = "all" | "Verified" | "Needs Review" | "complete" | "partial";
 
 interface StagingDatasetTableProps {
   dataset: StagingDataset;
@@ -22,6 +22,7 @@ interface StagingDatasetTableProps {
   onOpenDataset?: (datasetId: string) => void;
   selectedId?: string | null;
   pageSize?: number;
+  dense?: boolean;
 }
 
 const DEFAULT_PAGE_SIZE = 25;
@@ -60,6 +61,7 @@ export default function StagingDatasetTable({
   onOpenDataset,
   selectedId,
   pageSize = DEFAULT_PAGE_SIZE,
+  dense = false,
 }: StagingDatasetTableProps) {
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [page, setPage] = useState(0);
@@ -71,17 +73,31 @@ export default function StagingDatasetTable({
   // with its evidence, is in the record detail drawer.
   const hasDetails = (dataset.grid_fields?.length ?? 0) > 0 && (!dataset.compact || Boolean(documentId));
   const isBusiness = dataset.role === "business";
-  const showEvidence = isBusiness && !hasDetails;
+  const showEvidence = isBusiness && !hasDetails && !dense;
   const hasStatus = isBusiness && dataset.records.some((r) => r.record_status != null);
   const hasLinks = dataset.records.some((r) => r.links_to_dataset);
 
-  const filtered = useMemo(
-    () =>
-      statusFilter === "all"
-        ? dataset.records
-        : dataset.records.filter((r) => r.record_status === statusFilter),
-    [dataset.records, statusFilter],
-  );
+  const isClin = dataset.dataset_id === "clins";
+
+  function clinShape(record: StagingRecord): "complete" | "partial" {
+    const value = (field: string) => record.cells[field]?.value;
+    const described = Boolean(value("contract.clin.description"));
+    const priced = Boolean(
+      value("contract.clin.max_amount") ||
+        value("contract.clin.unit_price") ||
+        value("contract.clin.max_quantity") ||
+        value("contract.clin.unit"),
+    );
+    return described && priced ? "complete" : "partial";
+  }
+
+  const filtered = useMemo(() => {
+    if (statusFilter === "all") return dataset.records;
+    if (statusFilter === "complete" || statusFilter === "partial") {
+      return dataset.records.filter((record) => clinShape(record) === statusFilter);
+    }
+    return dataset.records.filter((record) => record.record_status === statusFilter);
+  }, [dataset.records, statusFilter]);
 
   // Reset to the first page when the filter or dataset changes (render-time
   // state adjustment, as in React's docs, instead of an extra effect pass).
@@ -113,11 +129,21 @@ export default function StagingDatasetTable({
   }
 
   return (
-    <div className="space-y-2">
+      <div className="space-y-2">
+      {isClin && (
+        <p className="text-xs text-text-secondary">
+          {dataset.records.filter((record) => clinShape(record) === "complete").length} complete ·{" "}
+          {dataset.records.filter((record) => clinShape(record) === "partial").length} partial. Partial rows
+          only have a CLIN identifier in the source; missing description, quantity, unit, or amount is not filled in.
+        </p>
+      )}
       <div className="flex flex-wrap items-center justify-between gap-2">
-        {hasStatus ? (
-          <div className="flex gap-1 rounded-lg border border-border bg-surface-soft p-0.5 text-xs">
-            {(["all", "Verified", "Needs Review"] as StatusFilter[]).map((value) => (
+        {hasStatus || isClin ? (
+          <div className="flex flex-wrap gap-1 rounded-lg border border-border bg-surface-soft p-0.5 text-xs">
+            {(isClin
+              ? (["all", "complete", "partial", "Needs Review"] as StatusFilter[])
+              : (["all", "Verified", "Needs Review"] as StatusFilter[])
+            ).map((value) => (
               <button
                 key={value}
                 type="button"
@@ -129,7 +155,7 @@ export default function StagingDatasetTable({
                     : "text-text-secondary hover:text-foreground",
                 ].join(" ")}
               >
-                {value === "all" ? "All" : value}
+                {value === "all" ? "All" : value === "complete" ? "Complete" : value === "partial" ? "Partial" : value}
               </button>
             ))}
           </div>
@@ -149,13 +175,17 @@ export default function StagingDatasetTable({
       ) : (
         <>
           <div className="max-h-[65vh] overflow-auto rounded-xl border border-border">
-            <table className="w-full min-w-max divide-y divide-border text-sm">
+            <table className={`w-full min-w-max divide-y divide-border text-sm ${dense ? "[&_td]:py-1.5 [&_th]:py-1.5" : ""}`}>
               <thead className="sticky top-0 z-10 bg-surface-soft">
                 <tr>
-                  {columns.map((column) => (
+                  {columns.map((column, columnIndex) => (
                     <th
                       key={column.canonical_field}
-                      className="min-w-[110px] whitespace-nowrap px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-text-secondary"
+                      className={[
+                        "whitespace-nowrap px-3 text-left text-[11px] font-medium text-text-muted",
+                        dense ? "py-2" : "min-w-[110px] py-2 text-xs font-semibold uppercase tracking-wide text-text-secondary",
+                        dense && columnIndex === 0 ? "sticky left-0 z-20 bg-surface-soft" : "",
+                      ].join(" ")}
                     >
                       {column.display_label}
                     </th>
@@ -185,7 +215,7 @@ export default function StagingDatasetTable({
                   const isExpanded = expanded.has(record.record_id);
                   return (
                     <tr key={record.record_id} className="align-top hover:bg-surface-soft/60">
-                      {columns.map((column) => {
+                      {columns.map((column, columnIndex) => {
                         const cell = record.cells[column.canonical_field];
                         const requestId = `${dataset.dataset_id}:${record.record_id}:${column.canonical_field}`;
                         const request = cell ? cellSourceRequest(cell, requestId) : null;
@@ -194,15 +224,16 @@ export default function StagingDatasetTable({
                         return (
                           <td
                             key={column.canonical_field}
-                            className={`max-w-xs px-3 py-2 ${selected ? "bg-primary/[0.08]" : ""}`}
+                            className={[
+                              "max-w-xs px-3",
+                              dense ? "h-11 max-w-[16rem] py-0 align-middle" : "py-2 align-top",
+                              selected ? "bg-primary/[0.08]" : "",
+                              dense && columnIndex === 0 ? "sticky left-0 bg-surface" : "",
+                            ].join(" ")}
                             title={text}
                           >
                             {!text ? (
-                              cell?.review_status === "Missing" ? (
-                                <ReviewStatusBadge status="Missing" />
-                              ) : (
-                                <span className="text-text-muted">—</span>
-                              )
+                              <span className="text-text-muted">—</span>
                             ) : request && onOpenSource ? (
                               <button
                                 type="button"

@@ -85,6 +85,24 @@
   --radius-card: 18px;
 }
 
+/* Visible keyboard focus everywhere; mouse clicks stay clean. */
+:where(a, button, input, select, textarea, summary, [tabindex]):focus-visible {
+  outline: 2px solid var(--accent-lavender);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
 body {
   background: var(--background);
   color: var(--foreground);
@@ -706,14 +724,54 @@ body {
   }
 }
 
+/* Copy leads on small screens; the illustration follows (and is capped)
+   so the headline and CTAs stay above the fold. */
 .page-hero-visual {
-  order: -1;
+  max-width: 28rem;
+  width: 100%;
+  margin: 0 auto;
 }
 
 @media (min-width: 1024px) {
   .page-hero-visual {
-    order: 0;
+    max-width: none;
   }
+}
+
+@media (max-width: 639px) {
+  .page-hero-title {
+    font-size: clamp(2.25rem, 10vw, 3rem);
+    line-height: 1.02;
+  }
+}
+
+/* Task pages: short hero so the working surface is visible immediately. */
+.page-hero-compact .page-hero-inner {
+  padding-top: 2rem;
+  padding-bottom: 2.25rem;
+}
+
+@media (min-width: 1024px) {
+  .page-hero-compact .page-hero-inner {
+    padding-top: 2.5rem;
+    padding-bottom: 2.75rem;
+  }
+}
+
+.page-hero-compact .page-hero-title {
+  max-width: 28ch;
+  margin-top: 0.625rem;
+  font-size: clamp(1.75rem, 3.2vw, 2.5rem);
+  line-height: 1.1;
+  letter-spacing: -0.03em;
+}
+
+.page-hero-compact .page-hero-description-wrap {
+  margin-top: 0.875rem;
+}
+
+.page-hero-compact .page-hero-actions {
+  margin-top: 1.25rem;
 }
 
 /* Shaped document containers — the app's recurring "clipped document

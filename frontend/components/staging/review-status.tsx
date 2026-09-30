@@ -4,17 +4,22 @@ import type { SourceViewRequest } from "@/components/source-verification-panel";
 import type { ReviewStatus, StagingCell } from "@/lib/staging-workbook";
 
 const TONE: Record<ReviewStatus, string> = {
-  Verified: "bg-success/15 text-success",
-  "Needs Review": "bg-warning/15 text-warning",
-  Missing: "bg-surface-soft text-text-muted",
+  Verified: "text-success",
+  "Needs Review": "text-warning",
+  Missing: "text-text-muted",
+};
+
+const MARK: Record<ReviewStatus, string> = {
+  Verified: "✓",
+  "Needs Review": "!",
+  Missing: "—",
 };
 
 export function ReviewStatusBadge({ status }: { status: ReviewStatus | null }) {
   if (!status) return null;
   return (
-    <span
-      className={`inline-block whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-medium ${TONE[status]}`}
-    >
+    <span className={`inline-flex items-center gap-1 whitespace-nowrap text-xs font-medium ${TONE[status]}`}>
+      <span aria-hidden="true">{MARK[status]}</span>
       {status}
     </span>
   );

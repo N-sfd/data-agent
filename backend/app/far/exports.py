@@ -21,6 +21,7 @@ SHEETS = {
     "05_EXTRACTION_GUIDE": None,
     "06_CANONICAL_MODEL": "Canonical FAR Transformation Model",
     "07_ORACLE_OUTPUT_MAP": TITLE,
+    "08_BUSINESS_EXPORT": "FAR Part 52 — Business Export",
 }
 SUBTITLES = {
     "01_FAR_STAGING": "One FAR record per row, structural alternates on their own rows after their basic clause. "
@@ -31,6 +32,11 @@ SUBTITLES = {
     "Alternates are separate records linked by Basic Clause Key; structural and reserved records are kept with "
     "Load Eligible = NO.",
     "07_ORACLE_OUTPUT_MAP": NOTICE,
+    "08_BUSINESS_EXPORT": (
+        "Final business columns only. Intent, Start Date, Attribute Category and Attribute 1 "
+        "stay blank until an approved rule or Oracle target template supports them. "
+        "Text is complete in CSV and JSON; Excel cells follow the existing long-text limit and 99_LONG_TEXT."
+    ),
 }
 
 
@@ -52,6 +58,8 @@ def sheet_rows(sheet: str, rows: list[DocumentFarRecord], summary: dict | None) 
         return views.CANONICAL_COLUMNS, [views.canonical_row(r) for r in rows]
     if sheet == "07_ORACLE_OUTPUT_MAP":
         return views.OUTPUT_MAP_COLUMNS, views.output_map_rows()
+    if sheet == "08_BUSINESS_EXPORT":
+        return views.BUSINESS_COLUMNS, [views.business_row(r) for r in rows]
     raise KeyError(sheet)
 
 
@@ -89,7 +97,15 @@ def build_far_workbook(rows: list[DocumentFarRecord], summary: dict | None) -> b
         ws.freeze_panes = ws.cell(row=header_row + 1, column=1)
         for index, column in enumerate(columns, start=1):
             letter = ws.cell(row=header_row, column=index).column_letter
-            wide = column in ("Actual Section Text", "Source Text", "Text", "Transformation Rule", "Notes", "Extraction / Formatting Rule")
+            wide = column in (
+                "Actual Section Text",
+                "Source Text",
+                "Text",
+                "Description",
+                "Transformation Rule",
+                "Notes",
+                "Extraction / Formatting Rule",
+            )
             ws.column_dimensions[letter].width = 70 if wide else 22
         for row in ws.iter_rows(min_row=header_row + 1):
             for cell in row:
@@ -130,6 +146,7 @@ def build_far_json(rows: list[DocumentFarRecord], summary: dict | None, document
         ],
         "validation": views.validation_rows(rows, summary),
         "oracle_output_mapping": {"title": TITLE, "notice": NOTICE, "rows": views.output_map_rows()},
+        "business_export": [views.business_row(r) for r in rows],
     }
     return json.dumps(payload, ensure_ascii=False, indent=1)
 
@@ -141,4 +158,5 @@ CSV_SHEETS = (
     "04_STRUCTURED_FAR",
     "06_CANONICAL_MODEL",
     "07_ORACLE_OUTPUT_MAP",
+    "08_BUSINESS_EXPORT",
 )

@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { ArrowRight, Loader2, Sparkles, Upload } from "lucide-react";
+import { ArrowRight, CloudOff, Sparkles, Upload } from "lucide-react";
 
 import AnimatedWorkflowDiagram from "@/components/illustrations/animated-workflow-diagram";
 import CapabilitySection from "@/components/capability-section";
@@ -57,7 +57,7 @@ export default function HomePage() {
         specialization={
           <Link
             href="/clauses"
-            className="inline-flex items-center gap-1.5 text-sm font-medium text-text-teal transition hover:text-primary"
+            className="inline-flex items-center gap-1.5 text-sm font-medium text-sirion-teal-soft underline-offset-4 transition hover:text-white hover:underline"
           >
             Contract Intelligence
             <ArrowRight className="h-3.5 w-3.5" />
@@ -95,10 +95,17 @@ export default function HomePage() {
         <CapabilitySection />
 
         {loading ? (
-          <div className="mt-14 flex items-center gap-2 text-sm text-text-secondary">
-            <Loader2 className="h-4 w-4 animate-spin" />
-            Building document intelligence...
-          </div>
+          <section className="mt-14" aria-busy="true" aria-label="Loading metrics">
+            <div className="skeleton mb-4 h-5 w-48" />
+            <div className="metric-grid">
+              {Array.from({ length: 8 }, (_, i) => (
+                <div key={i} className="metric-cell">
+                  <div className="skeleton h-7 w-16" />
+                  <div className="skeleton mt-3 h-4 w-28" />
+                </div>
+              ))}
+            </div>
+          </section>
         ) : stats ? (
           <>
             <section className="mt-14">
@@ -154,14 +161,14 @@ export default function HomePage() {
                   href="/repository"
                   className="inline-flex items-center gap-1 text-sm text-text-secondary hover:text-foreground"
                 >
-                  View repository
+                  View documents
                   <ArrowRight className="h-3.5 w-3.5" />
                 </Link>
               </div>
               <div className="editorial-card overflow-hidden">
                 <DocumentResultsTable
                   documents={recent}
-                  emptyMessage="No documents yet. Upload a contract to begin extraction."
+                  emptyMessage="No documents yet. Upload a document to begin extraction."
                   dashboardMode
                 />
               </div>
@@ -188,7 +195,28 @@ export default function HomePage() {
               </section>
             )}
           </>
-        ) : null}
+        ) : (
+          <section className="editorial-card mt-14 flex flex-wrap items-center justify-between gap-4 p-6 sm:p-8">
+            <div className="flex items-start gap-3">
+              <span className="file-icon-wrap h-10 w-10 shrink-0">
+                <CloudOff className="h-5 w-5" />
+              </span>
+              <div>
+                <p className="font-medium text-foreground">
+                  Metrics are unavailable right now
+                </p>
+                <p className="mt-1 text-sm text-text-secondary">
+                  The processing service may be waking up. You can still start a
+                  new extraction.
+                </p>
+              </div>
+            </div>
+            <Link href="/extraction/new" className="btn-primary">
+              <Upload className="h-4 w-4" />
+              New Extraction
+            </Link>
+          </section>
+        )}
       </ContentSection>
     </>
   );

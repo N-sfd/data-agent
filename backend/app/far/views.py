@@ -10,7 +10,7 @@ from __future__ import annotations
 import re
 from collections import Counter
 
-from app.far.canonical import CLAUSE_OR_PROVISION, RESERVED, SUBPART
+from app.far.canonical import ALTERNATE, CLAUSE_OR_PROVISION, RESERVED, SUBPART
 from app.far.oracle_map import (
     OUTPUT_MAP,
     PENDING_TEMPLATE,
@@ -37,6 +37,80 @@ STRUCTURED_COLUMNS = (
     "Prescription", "Alternate", "Alternate Date", "Alternate Instruction", "Embedded FAR References",
     "Actual Section Text", "Section", "Subsection", "Paragraph", "Subparagraph",
 )
+BUSINESS_COLUMNS = (
+    "Date Published",
+    "Number",
+    "Title",
+    "Display Name",
+    "Provision",
+    "Clause",
+    "Clause Type",
+    "Reserved",
+    "Description",
+    "Text",
+    "Intent",
+    "Start Date",
+    "Attribute Category",
+    "Attribute 1",
+    "Source Reference",
+)
+
+
+def _yes(flag: bool) -> str | None:
+    return "Yes" if flag else None
+
+
+def source_reference(row: DocumentFarRecord) -> str | None:
+    """Trace a record to its HTML source. No page number is invented."""
+
+    prov = row.provenance_json or {}
+    section = prov.get("section_path") or []
+    trail = " › ".join(str(part) for part in section) if isinstance(section, list) else ""
+    element = prov.get("element_id")
+    dom = prov.get("dom_path")
+    pieces = [part for part in (trail, f"id:{element}" if element else None, None if element else dom) if part]
+    return " | ".join(pieces) or None
+
+
+def business_row(row: DocumentFarRecord) -> dict:
+    """Final business export. Blank means unsupported, never a guessed value.
+
+    Date Published is the source revision/publication date. Start Date is
+    not copied from it. Intent and Oracle attributes stay blank until an
+    approved rule or target template exists.
+    """
+
+    if row.content_type == RESERVED:
+        clause_type = "Reserved"
+    elif row.content_type == SUBPART:
+        clause_type = "Subpart"
+    elif row.content_type == ALTERNATE:
+        clause_type = "Alternate"
+    elif row.clause_type in ("Clause", "Provision"):
+        clause_type = row.clause_type
+    else:
+        clause_type = None
+    title = row.subpart_title if row.content_type == SUBPART else row.title
+    description = row.official_heading or row.alternate_heading or title
+    return {
+        "Date Published": row.version_date,
+        "Number": row.far_number,
+        "Title": title,
+        "Display Name": row.display_name,
+        "Provision": _yes(clause_type == "Provision"),
+        "Clause": _yes(clause_type == "Clause"),
+        "Clause Type": clause_type,
+        "Reserved": "Yes" if row.content_type == RESERVED else "No",
+        "Description": description,
+        "Text": row.source_text,
+        "Intent": None,
+        "Start Date": None,
+        "Attribute Category": None,
+        "Attribute 1": None,
+        "Source Reference": source_reference(row),
+    }
+
+
 CANONICAL_COLUMNS = (
     "Source Sequence ID", "Clause Key", "Parent Clause Key", "FAR Number", "Content Type", "Title",
     "Display Name", "Version Date", "Alternate Code", "Basic Clause Key", "Prescription Reference",

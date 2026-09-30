@@ -50,6 +50,9 @@ export default function GlobalHeader({ onOpenSearch }: GlobalHeaderProps) {
 
         {/* Primary nav — Platform, Intelligence, Review stay visible */}
         <nav className="header-nav" aria-label="Main navigation">
+          <Link href="/documents" className="nav-menu-button whitespace-nowrap">
+            Documents
+          </Link>
           <NavDropdown
             label="Platform"
             overviewTitle="Platform Overview"
@@ -86,7 +89,7 @@ export default function GlobalHeader({ onOpenSearch }: GlobalHeaderProps) {
         <div className="header-actions">
           <Link href="/extraction/new" className="btn-new-extraction shrink-0">
             <Plus className="h-4 w-4 shrink-0" strokeWidth={2} />
-            <span className="whitespace-nowrap">New Extraction</span>
+            <span className="whitespace-nowrap">New Document</span>
           </Link>
 
           <Link href="/ask" className="btn-ask-agent shrink-0">
@@ -111,15 +114,8 @@ export default function GlobalHeader({ onOpenSearch }: GlobalHeaderProps) {
             <Bell className="h-4 w-4" strokeWidth={1.75} />
           </button>
 
-          <div className="flex shrink-0 items-center gap-3 border-l border-white/10 pl-3">
+          <div className="flex shrink-0 items-center border-l border-white/10 pl-3">
             <BackendStatusPill />
-            <Image
-              src="/consult-america-logo.jpg"
-              alt="Consult America"
-              width={32}
-              height={32}
-              className="h-8 w-8 rounded-full object-contain bg-white"
-            />
           </div>
         </div>
 

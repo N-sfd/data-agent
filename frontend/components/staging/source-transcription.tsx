@@ -16,6 +16,14 @@ import type {
 interface SourceTranscriptionProps {
   documentId: string;
   documentName?: string;
+  /** Contract workspace: Original page or Transcript, one at a time. */
+  modes?: boolean;
+  /** Names of the two modes; the reading-order text defaults to
+   * "Transcript". */
+  modeLabels?: { original: string; text: string };
+  /** A value to show on the original: its page is opened and its region
+   * highlighted. */
+  focus?: SourceViewRequest | null;
 }
 
 /** Runs of one visual line ("Roll No.   516522") are joined by the backend
@@ -35,7 +43,15 @@ function LineText({ text }: { text: string }) {
 /** Source & Transcript: the original page beside its reading-order
  * transcript. Clicking a transcript line highlights its source region;
  * the raw OCR text is kept only as a diagnostic. */
-export default function SourceTranscription({ documentId, documentName }: SourceTranscriptionProps) {
+export default function SourceTranscription({
+  documentId,
+  documentName,
+  modes = false,
+  modeLabels,
+  focus = null,
+}: SourceTranscriptionProps) {
+  const textLabel = modeLabels?.text ?? "Transcript";
+  const [sourceMode, setSourceMode] = useState<"original" | "transcript">("original");
   const [pages, setPages] = useState<DocumentPage[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [pageIndex, setPageIndex] = useState(0);
@@ -61,13 +77,22 @@ export default function SourceTranscription({ documentId, documentName }: Source
   const current = pages && pages.length > 0 ? pages[Math.min(pageIndex, pages.length - 1)] : null;
   const pageNumber = current?.page_number ?? null;
 
+  // A focused value opens its own page on the original, highlighted.
+  const [appliedFocus, setAppliedFocus] = useState<SourceViewRequest | null>(null);
+  if (focus && focus !== appliedFocus && pages) {
+    setAppliedFocus(focus);
+    const index = pages.findIndex((page) => page.page_number === focus.pageNumber);
+    if (index >= 0) setPageIndex(index);
+    setSourceMode("original");
+  }
+
   useEffect(() => {
     if (pageNumber == null) return;
     let cancelled = false;
     setTranscript(null);
     setTranscriptError(null);
     setSelectedLine(null);
-    setRequest({ pageNumber });
+    setRequest(appliedFocus && appliedFocus.pageNumber === pageNumber ? appliedFocus : { pageNumber });
     getPageTranscript(documentId, pageNumber)
       .then((result) => {
         if (!cancelled) setTranscript(result);
@@ -78,7 +103,7 @@ export default function SourceTranscription({ documentId, documentName }: Source
     return () => {
       cancelled = true;
     };
-  }, [documentId, pageNumber]);
+  }, [documentId, pageNumber, appliedFocus]);
 
   if (error) {
     return <p className="rounded-xl border border-border p-6 text-sm text-danger">{error}</p>;
@@ -107,7 +132,7 @@ export default function SourceTranscription({ documentId, documentName }: Source
     setRequest({
       pageNumber,
       region: line.bbox,
-      label: "Transcript",
+      label: textLabel,
       value: line.text.replaceAll("   ", " "),
     });
   }
@@ -197,16 +222,16 @@ export default function SourceTranscription({ documentId, documentName }: Source
 
   const transcriptPane = (
     <section
-      aria-label="Transcript"
+      aria-label={textLabel}
       className="flex min-h-[420px] flex-col overflow-hidden rounded-xl border border-border bg-surface"
     >
       <div className="border-b border-border px-4 py-3">
         <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-text-teal">
-          {textOnly ? "Text-only transcription" : "Transcript"}
+          {textOnly ? (modeLabels ? `${textLabel} (text only)` : "Text-only transcription") : textLabel}
         </p>
         <p className="text-xs text-text-secondary">
           {textOnly
-            ? "Source positioning was not available for this page. Transcript text is shown below; source highlighting is unavailable."
+            ? `Source positioning was not available for this page. ${modeLabels ? "The text" : "Transcript text"} is shown below; source highlighting is unavailable.`
             : "Reading order reconstructed from the page. Click a line to highlight it in the source."}
         </p>
       </div>
@@ -226,8 +251,25 @@ export default function SourceTranscription({ documentId, documentName }: Source
 
   return (
     <div className="space-y-3">
-      <div className={isHtml ? "" : "grid gap-4 lg:grid-cols-2"}>
-        {!isHtml && (
+      {modes && !isHtml && (
+        <div className="flex gap-2 text-sm">
+          {(["original", "transcript"] as const).map((mode) => (
+            <button
+              key={mode}
+              type="button"
+              onClick={() => setSourceMode(mode)}
+              className={[
+                "rounded-md border px-3 py-1",
+                sourceMode === mode ? "border-primary bg-primary text-white" : "border-border text-text-secondary",
+              ].join(" ")}
+            >
+              {mode === "original" ? (modeLabels?.original ?? "Original") : textLabel}
+            </button>
+          ))}
+        </div>
+      )}
+      <div className={isHtml || (modes && sourceMode !== "original") ? "" : "grid gap-4 lg:grid-cols-2"}>
+        {(!modes || sourceMode === "original") && !isHtml && (
           <SourceVerificationPanel
             documentId={documentId}
             documentName={documentName ?? ""}
@@ -235,7 +277,7 @@ export default function SourceTranscription({ documentId, documentName }: Source
             request={request}
           />
         )}
-        {transcriptPane}
+        {(!modes || sourceMode === "transcript" || isHtml) && transcriptPane}
       </div>
 
       <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-text-secondary">

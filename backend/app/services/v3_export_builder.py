@@ -169,6 +169,13 @@ def _all_fields_rows(doc: NormalizedV3Document) -> list[list[Any]]:
     ]
 
 
+def _all_fields_business_rows(doc: NormalizedV3Document) -> list[list[Any]]:
+    return [
+        [r.category, r.normalized_field, r.value, "text", r.qa_status]
+        for r in doc.all_fields
+    ]
+
+
 def _contract_summary_row(doc: NormalizedV3Document) -> list[Any]:
     s = doc.contract_summary
     if s is None:
@@ -181,8 +188,11 @@ def _contract_summary_row(doc: NormalizedV3Document) -> list[Any]:
     ]
 
 
+_ALL_FIELDS_BUSINESS_HEADERS = ["Category", "Field", "Value", "Type", "Status"]
+
 _DATASET_BUILDERS: dict[str, tuple[list[str], Any]] = {
     "all-fields": (_ALL_FIELDS_HEADERS, _all_fields_rows),
+    "all-fields-business": (_ALL_FIELDS_BUSINESS_HEADERS, _all_fields_business_rows),
     "clins": (_CLIN_HEADERS, _clin_rows),
     "funding": (_FUNDING_HEADERS, _funding_rows),
     "performance-delivery": (_PERFORMANCE_HEADERS, _performance_rows),

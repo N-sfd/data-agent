@@ -8,6 +8,8 @@ interface PageHeroProps {
   visual?: ReactNode;
   /** Small secondary line under the description (e.g. specialization link). */
   specialization?: ReactNode;
+  /** Shorter hero for task pages, so the working surface sits above the fold. */
+  compact?: boolean;
 }
 
 export default function PageHero({
@@ -17,9 +19,10 @@ export default function PageHero({
   actions,
   visual,
   specialization,
+  compact = false,
 }: PageHeroProps) {
   return (
-    <section className="page-hero">
+    <section className={compact ? "page-hero page-hero-compact" : "page-hero"}>
       <div
         className={[
           "page-hero-inner",

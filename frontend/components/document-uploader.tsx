@@ -393,7 +393,7 @@ export default function DocumentUploader({
         </h2>
 
         <p className="mt-2 text-sm leading-6 text-text-secondary">
-          Contracts, financial documents, lab records, BRDs, and scanned files.
+          Contracts, invoices, regulatory documents, spreadsheets, scans, images, and business records. Data Agent detects the document type and staging profile.
         </p>
       </div>
 

@@ -2,6 +2,6 @@
 
 import DocumentsHome from "@/components/documents/documents-home";
 
-export default function RepositoryPage() {
+export default function DocumentsPage() {
   return <DocumentsHome />;
 }

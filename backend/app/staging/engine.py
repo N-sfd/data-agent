@@ -71,7 +71,12 @@ def _display_value(value: object) -> object:
     return value
 
 
-def _build_dataset(definition: DatasetDefinition, raws: list[RawRecord]) -> StagingDataset:
+def _build_dataset(
+    definition: DatasetDefinition,
+    raws: list[RawRecord],
+    column_labels: dict[str, str] | None = None,
+) -> StagingDataset:
+    labels = column_labels or {}
     if definition.cardinality == "single" and definition.role == "business" and not raws:
         # A single-record dataset with nothing found still renders every
         # expected field as Missing, rather than an empty panel.
@@ -93,7 +98,7 @@ def _build_dataset(definition: DatasetDefinition, raws: list[RawRecord]) -> Stag
             )
             cells[field_def.canonical_field] = StagingCell(
                 canonical_field=field_def.canonical_field,
-                display_label=field_def.display_label,
+                display_label=labels.get(field_def.canonical_field, field_def.display_label),
                 value=None if is_empty(value) else _display_value(value),
                 raw_value=None if is_empty(value) else str(value),
                 value_type=field_def.value_type,
@@ -138,7 +143,7 @@ def _build_dataset(definition: DatasetDefinition, raws: list[RawRecord]) -> Stag
             StagingColumn(
                 canonical_field=f.canonical_field,
                 key=f.key,
-                display_label=f.display_label,
+                display_label=labels.get(f.canonical_field, f.display_label),
                 value_type=f.value_type,
                 expected=f.expected,
             )
@@ -239,7 +244,11 @@ def assemble_workbook(
     metadata: ProcessingMetadata,
 ) -> StagingWorkbook:
     datasets = [
-        _build_dataset(definition, adapter_result.records.get(definition.dataset_id, []))
+        _build_dataset(
+            definition,
+            adapter_result.records.get(definition.dataset_id, []),
+            adapter_result.column_labels.get(definition.dataset_id),
+        )
         for definition in profile.datasets
     ]
     if profile.auto_qa_dataset:

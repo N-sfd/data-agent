@@ -131,6 +131,7 @@ export default function ExtractionModelsPage() {
   return (
     <>
       <PageHero
+        compact
         eyebrow="Settings"
         title="Extraction Models"
         description="Define reusable field templates for document extraction runs."

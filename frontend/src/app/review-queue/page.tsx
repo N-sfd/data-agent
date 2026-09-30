@@ -3,20 +3,15 @@
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import {
-  AlertTriangle,
   CheckCheck,
-  CheckCircle2,
-  HelpCircle,
   Inbox,
   RefreshCw,
   Search,
   ShieldAlert,
-  XCircle,
 } from "lucide-react";
 
 import ContentSection from "@/components/layout/ContentSection";
 import PageHero from "@/components/layout/PageHero";
-import ConfidenceBadge from "@/components/confidence-badge";
 import {
   acceptAllMetadataFields,
   getReviewQueue,
@@ -24,62 +19,31 @@ import {
 } from "@/lib/documents";
 import {
   DOCUMENT_TYPE_OPTIONS,
-  type ReviewQueueBucket,
   type ReviewQueueEntry,
   type ReviewQueueFieldItem,
 } from "@/types/document";
 
 const DEFAULT_REVIEWER = "Consult America";
 
-const SECTIONS: {
-  bucket: ReviewQueueBucket;
-  label: string;
-  description: string;
-  icon: typeof CheckCircle2;
-  tone: string;
-  chipActive: string;
-}[] = [
-  {
-    bucket: "high",
-    label: "High Confidence",
-    description: "Fields extracted cleanly — spot-check and accept.",
-    icon: CheckCircle2,
-    tone: "text-emerald-600",
-    chipActive: "bg-emerald-600 text-white",
-  },
-  {
-    bucket: "medium",
-    label: "Medium Confidence",
-    description: "Worth a closer look before accepting.",
-    icon: AlertTriangle,
-    tone: "text-amber-600",
-    chipActive: "bg-amber-600 text-white",
-  },
-  {
-    bucket: "low",
-    label: "Low Confidence",
-    description: "Extraction struggled — review carefully.",
-    icon: AlertTriangle,
-    tone: "text-red-600",
-    chipActive: "bg-red-600 text-white",
-  },
-  {
-    bucket: "rejected",
-    label: "Rejected",
-    description: "At least one field was rejected by a reviewer.",
-    icon: XCircle,
-    tone: "text-red-600",
-    chipActive: "bg-red-600 text-white",
-  },
-  {
-    bucket: "unknown",
-    label: "Unknown",
-    description: "Marked unknown and needs a human decision.",
-    icon: HelpCircle,
-    tone: "text-slate-500",
-    chipActive: "bg-slate-600 text-white",
-  },
-];
+function issueKind(
+  item: ReviewQueueFieldItem,
+): "extraction" | "validation" | "missing" | "conflicts" {
+  const text = [
+    ...(item.reason_labels ?? []),
+    ...(item.reasons ?? []),
+    item.review_status,
+  ]
+    .join(" ")
+    .toLowerCase();
+  if (/missing|unknown|empty|blank|not found/.test(text)) return "missing";
+  if (/conflict|disagree|reject/.test(text)) return "conflicts";
+  if (/validat|type|format|failed|mismatch/.test(text)) return "validation";
+  return "extraction";
+}
+
+function issueLabel(item: ReviewQueueFieldItem): string {
+  return item.reason_labels?.[0] || issueKind(item);
+}
 
 export default function ReviewQueuePage() {
   const [entries, setEntries] = useState<ReviewQueueEntry[]>([]);
@@ -89,9 +53,9 @@ export default function ReviewQueuePage() {
 
   const [query, setQuery] = useState("");
   const [documentType, setDocumentType] = useState("");
-  const [activeBucket, setActiveBucket] = useState<
-    ReviewQueueBucket | "needs_review" | "all"
-  >("needs_review");
+  const [issueFilter, setIssueFilter] = useState<
+    "all" | "extraction" | "validation" | "missing" | "conflicts"
+  >("all");
 
   const [acceptingId, setAcceptingId] = useState<string | null>(null);
   const [rowErrors, setRowErrors] = useState<Record<string, string>>({});
@@ -158,22 +122,6 @@ export default function ReviewQueuePage() {
     });
   }, [entries, query, documentType]);
 
-  const bucketCounts = useMemo(() => {
-    const counts: Record<ReviewQueueBucket, number> = {
-      high: 0,
-      medium: 0,
-      low: 0,
-      rejected: 0,
-      unknown: 0,
-    };
-
-    for (const entry of filteredEntries) {
-      counts[entry.queue_bucket] += 1;
-    }
-
-    return counts;
-  }, [filteredEntries]);
-
   async function handleAcceptAll(entry: ReviewQueueEntry) {
     setAcceptingId(entry.document_id);
     setRowErrors((current) => {
@@ -200,23 +148,44 @@ export default function ReviewQueuePage() {
     }
   }
 
-  const needsReviewCount = useMemo(
-    () =>
-      filteredEntries.filter((entry) => entry.queue_bucket !== "high").length,
-    [filteredEntries],
-  );
+  const attentionItems = useMemo(() => {
+    return fieldItems.filter((item) => {
+      const needs =
+        item.decision_status === "needs_review" || item.reasons.length > 0;
+      if (!needs) return false;
+      if (issueFilter === "all") return true;
+      return issueKind(item) === issueFilter;
+    });
+  }, [fieldItems, issueFilter]);
 
-  const visibleSections = SECTIONS.filter((section) => {
-    if (activeBucket === "all") return true;
-    if (activeBucket === "needs_review") return section.bucket !== "high";
-    return activeBucket === section.bucket;
-  });
+  useEffect(() => {
+    function onKey(event: KeyboardEvent) {
+      const target = event.target as HTMLElement | null;
+      if (
+        target &&
+        (target.tagName === "INPUT" ||
+          target.tagName === "TEXTAREA" ||
+          target.tagName === "SELECT")
+      ) {
+        return;
+      }
+      if (event.key === "n" || event.key === "N") {
+        const next = attentionItems[0];
+        if (next) {
+          window.location.assign(`/documents/${next.document_id}?view=qa`);
+        }
+      }
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [attentionItems]);
 
   return (
     <>
       <PageHero
+        compact
         eyebrow="Review"
-        title="Review Queue"
+        title="Review"
         description="Route machine extraction into human governance — accept, correct, or reject with a durable audit trail."
         actions={
           <button
@@ -234,78 +203,34 @@ export default function ReviewQueuePage() {
       />
 
       <ContentSection>
-      <div className="mb-4 flex flex-wrap items-center gap-2">
-        <button
-          type="button"
-          onClick={() => setActiveBucket("needs_review")}
-          className={[
-            "inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-semibold transition",
-            activeBucket === "needs_review"
-              ? "bg-primary text-white"
-              : "border border-border bg-surface text-text-secondary hover:bg-surface-soft",
-          ].join(" ")}
-        >
-          Needs Review
-          <span
-            className={
-              activeBucket === "needs_review"
-                ? "text-white/80"
-                : "text-text-muted"
-            }
-          >
-            {needsReviewCount}
-          </span>
-        </button>
-        <button
-          type="button"
-          onClick={() => setActiveBucket("all")}
-          className={[
-            "inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-semibold transition",
-            activeBucket === "all"
-              ? "bg-primary text-white"
-              : "border border-border bg-surface text-text-secondary hover:bg-surface-soft",
-          ].join(" ")}
-        >
-          All
-          <span
-            className={
-              activeBucket === "all" ? "text-white/80" : "text-text-muted"
-            }
-          >
-            {filteredEntries.length}
-          </span>
-        </button>
-
-        {SECTIONS.map((section) => (
-          <button
-            key={section.bucket}
-            type="button"
-            onClick={() =>
-              setActiveBucket((current) =>
-                current === section.bucket ? "all" : section.bucket,
-              )
-            }
-            className={[
-              "inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-semibold transition",
-              activeBucket === section.bucket
-                ? `${section.chipActive} border-transparent`
-                : "border-border bg-surface text-text-secondary hover:bg-surface-soft",
-            ].join(" ")}
-          >
-            <section.icon className="h-3.5 w-3.5" />
-            {section.label}
-            <span
-              className={
-                activeBucket === section.bucket
-                  ? "opacity-80"
-                  : "text-text-muted"
-              }
+        <p className="mb-3 text-sm text-text-secondary">
+          {attentionItems.length} items need attention
+        </p>
+        <div className="mb-4 flex flex-wrap items-center gap-2">
+          {(
+            [
+              ["all", "All"],
+              ["extraction", "Extraction"],
+              ["validation", "Validation"],
+              ["missing", "Missing"],
+              ["conflicts", "Conflicts"],
+            ] as const
+          ).map(([id, label]) => (
+            <button
+              key={id}
+              type="button"
+              onClick={() => setIssueFilter(id)}
+              className={[
+                "rounded-full px-3 py-1.5 text-xs font-semibold",
+                issueFilter === id
+                  ? "bg-primary text-white"
+                  : "border border-border bg-surface text-text-secondary",
+              ].join(" ")}
             >
-              {bucketCounts[section.bucket]}
-            </span>
-          </button>
-        ))}
-      </div>
+              {label}
+            </button>
+          ))}
+        </div>
 
       <div className="mb-6 flex flex-wrap items-center gap-3">
         <div className="relative min-w-[240px] flex-1">
@@ -344,23 +269,14 @@ export default function ReviewQueuePage() {
           <div className="flex items-center gap-2 border-b border-border px-6 py-4">
             <ShieldAlert className="h-4 w-4 text-amber-600" />
             <div>
-              <p className="text-sm font-semibold text-foreground">
-                Fields needing attention
-                <span className="ml-2 text-xs font-normal text-text-muted">
-                  {fieldItems.length}
-                </span>
-              </p>
+              <p className="text-sm font-semibold text-foreground">Review</p>
               <p className="text-xs text-text-secondary">
-                Routed from validation, confidence, ambiguity, and AI escalation
-                signals.
+                Why a person needs to look — extraction, validation, a missing value, or a conflict.
               </p>
             </div>
           </div>
           <div className="divide-y divide-border">
-            {fieldItems
-              .filter((item) => item.decision_status === "needs_review" || item.reasons.length > 0)
-              .slice(0, 40)
-              .map((item) => (
+            {attentionItems.slice(0, 40).map((item) => (
                 <div
                   key={`${item.document_id}:${item.field_key}`}
                   className="flex flex-wrap items-center justify-between gap-3 px-6 py-3"
@@ -373,19 +289,13 @@ export default function ReviewQueuePage() {
                       </span>
                     </p>
                     <p className="truncate text-xs text-text-secondary">
-                      {item.value || "—"}
-                      {item.reason_labels.length > 0 && (
-                        <> · {item.reason_labels.join(", ")}</>
-                      )}
+                      {issueLabel(item)}
+                      {item.value ? ` · ${item.value}` : ""}
                     </p>
                   </div>
                   <div className="flex items-center gap-3">
-                    <ConfidenceBadge confidence={item.confidence} />
                     <Link
-                      href={
-                        item.review_href ||
-                        `/extraction/new?documentId=${item.document_id}`
-                      }
+                      href={`/documents/${item.document_id}?view=qa`}
                       className="text-xs font-semibold text-text-teal hover:text-primary"
                     >
                       Review
@@ -430,32 +340,22 @@ export default function ReviewQueuePage() {
         )}
 
       <div className="space-y-6">
-        {visibleSections.map((section) => {
-          const sectionEntries = filteredEntries.filter(
-            (entry) => entry.queue_bucket === section.bucket,
-          );
-
-          if (sectionEntries.length === 0) return null;
-
-          return (
-            <div key={section.bucket} className="editorial-card overflow-hidden">
-              <div className="flex items-center gap-2 border-b border-border px-6 py-4">
-                <section.icon className={`h-4 w-4 ${section.tone}`} />
-                <div>
+        {filteredEntries.length > 0 && (
+            <div className="editorial-card overflow-hidden">
+              <div className="border-b border-border px-6 py-4">
                   <p className="text-sm font-semibold text-foreground">
-                    {section.label}
+                    Documents
                     <span className="ml-2 text-xs font-normal text-text-muted">
-                      {sectionEntries.length}
+                      {filteredEntries.length}
                     </span>
                   </p>
                   <p className="text-xs text-text-secondary">
-                    {section.description}
+                    Open a document to verify the field in source.
                   </p>
-                </div>
               </div>
 
               <div className="divide-y divide-border">
-                {sectionEntries.map((entry) => (
+                {filteredEntries.map((entry) => (
                   <div
                     key={entry.document_id}
                     className="flex flex-wrap items-center justify-between gap-3 px-6 py-3"
@@ -482,10 +382,6 @@ export default function ReviewQueuePage() {
                     </div>
 
                     <div className="flex items-center gap-3">
-                      {entry.confidence !== null && (
-                        <ConfidenceBadge confidence={entry.confidence} />
-                      )}
-
                       <button
                         type="button"
                         onClick={() => handleAcceptAll(entry)}
@@ -499,10 +395,7 @@ export default function ReviewQueuePage() {
                       </button>
 
                       <Link
-                        href={
-                          entry.review_href ||
-                          `/documents/${entry.document_id}/review`
-                        }
+                        href={`/documents/${entry.document_id}?view=qa`}
                         className="text-xs font-semibold text-text-teal hover:text-primary"
                       >
                         Review
@@ -512,8 +405,7 @@ export default function ReviewQueuePage() {
                 ))}
               </div>
             </div>
-          );
-        })}
+        )}
       </div>
       </ContentSection>
     </>
