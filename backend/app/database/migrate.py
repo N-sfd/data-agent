@@ -1,9 +1,17 @@
+import logging
 from pathlib import Path
+import time
 
 from alembic import command
 from alembic.config import Config
 from sqlalchemy import inspect, text
 from sqlalchemy.engine import Engine
+from sqlalchemy.exc import OperationalError
+
+logger = logging.getLogger(__name__)
+
+_MIGRATION_ATTEMPTS = 8
+_MIGRATION_RETRY_SECONDS = 5
 
 _BACKEND_ROOT = Path(__file__).resolve().parents[2]
 
@@ -20,7 +28,23 @@ def run_alembic_upgrade() -> None:
     alembic_cfg.set_main_option(
         "script_location", str(_BACKEND_ROOT / "migrations")
     )
-    command.upgrade(alembic_cfg, "head")
+    # Migrations run in one transaction with a short lock_timeout (see
+    # migrations/env.py), so a lock timeout rolls back cleanly and is
+    # safe to retry once the previous instance's transactions finish.
+    for attempt in range(1, _MIGRATION_ATTEMPTS + 1):
+        try:
+            command.upgrade(alembic_cfg, "head")
+            return
+        except OperationalError as exc:
+            if "lock timeout" not in str(exc).lower() or attempt == _MIGRATION_ATTEMPTS:
+                raise
+            logger.warning(
+                "Migration lock timeout (attempt %d/%d); retrying in %ds",
+                attempt,
+                _MIGRATION_ATTEMPTS,
+                _MIGRATION_RETRY_SECONDS,
+            )
+            time.sleep(_MIGRATION_RETRY_SECONDS)
 
 
 # Column type strings, keyed by dialect name. "sqlite" doubles as the

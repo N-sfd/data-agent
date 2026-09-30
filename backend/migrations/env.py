@@ -90,8 +90,11 @@ config = context.config
 
 # Interpret the config file for Python logging.
 # This line sets up loggers basically.
+# disable_existing_loggers=False: the default would silence uvicorn's
+# error logger when migrations run at app startup, hiding the traceback
+# of a failed migration (Render only showed "Exited with status 3").
 if config.config_file_name is not None:
-    fileConfig(config.config_file_name)
+    fileConfig(config.config_file_name, disable_existing_loggers=False)
 
 target_metadata = Base.metadata
 
@@ -141,6 +144,14 @@ def run_migrations_online() -> None:
     )
 
     with connectable.connect() as connection:
+        if connection.dialect.name == "postgresql":
+            # During a rolling deploy the previous instance still holds
+            # locks on hot tables (documents) while it serves requests and
+            # runs jobs. Bound the wait so a queued ALTER never stalls live
+            # traffic; run_alembic_upgrade retries on lock timeout.
+            connection.exec_driver_sql("SET lock_timeout = '5s'")
+            connection.commit()
+
         context.configure(
             connection=connection, target_metadata=target_metadata
         )

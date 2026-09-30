@@ -17,8 +17,17 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    op.add_column("documents", sa.Column("owner_workspace", sa.String(length=64), nullable=True))
-    op.create_index(op.f("ix_documents_owner_workspace"), "documents", ["owner_workspace"], unique=False)
+    # Idempotent: the startup column patcher (ensure_documents_columns) may
+    # already have added owner_workspace on a database behind this revision.
+    inspector = sa.inspect(op.get_bind())
+    document_columns = {c["name"] for c in inspector.get_columns("documents")}
+    document_indexes = {i["name"] for i in inspector.get_indexes("documents")}
+    if "owner_workspace" not in document_columns:
+        op.add_column("documents", sa.Column("owner_workspace", sa.String(length=64), nullable=True))
+    if "ix_documents_owner_workspace" not in document_indexes:
+        op.create_index(op.f("ix_documents_owner_workspace"), "documents", ["owner_workspace"], unique=False)
+    if inspector.has_table("staged_uploads"):
+        return
     op.create_table(
         "staged_uploads",
         sa.Column("id", sa.String(length=36), nullable=False),
