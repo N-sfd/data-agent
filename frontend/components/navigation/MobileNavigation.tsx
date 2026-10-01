@@ -62,7 +62,7 @@ export default function MobileNavigation({
               className="flex w-full items-center justify-center gap-2 rounded-xl border border-black/10 bg-black/5 px-4 py-3 text-sm font-semibold text-text-dark transition hover:bg-black/10 dark:border-white/15 dark:bg-white/5 dark:text-white dark:hover:bg-white/10"
             >
               <Plus className="h-4 w-4 shrink-0" strokeWidth={2} />
-              <span className="whitespace-nowrap">New Extraction</span>
+              <span className="whitespace-nowrap">New Document</span>
             </Link>
 
             <Link
@@ -85,7 +85,7 @@ export default function MobileNavigation({
                 {menu.label}
                 <span className="text-[11px] font-medium normal-case tracking-normal">Overview →</span>
               </Link>
-              <MegaMenu sections={menu.sections} onNavigate={onClose} />
+              <MegaMenu overviewTitle={menu.label} sections={menu.sections} onNavigate={onClose} />
             </div>
           ))}
         </div>

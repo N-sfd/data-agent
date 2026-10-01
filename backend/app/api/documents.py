@@ -32,6 +32,7 @@ from app.schemas.contract_analysis import (
 from app.schemas.document import (
     DocumentHierarchyResponse,
     DocumentSearchResponse,
+    DocumentStatusCountsResponse,
     DocumentSummaryResponse,
     EmbeddedFileSummary,
     ExistingDocumentSummary,
@@ -1169,7 +1170,7 @@ async def delete_document(
     "/search",
     response_model=DocumentSearchResponse,
 )
-async def search_documents(
+def search_documents(
     q: str = "",
     status: str | None = None,
     document_type: str | None = None,
@@ -1242,15 +1243,7 @@ async def search_documents(
         )
 
     if family:
-        # The staging family the document resolved to (invoice,
-        # academic_transcript, government_contract, correspondence …).
-        base_query = base_query.where(
-            Document.id.in_(
-                select(DocumentStagingWorkbook.document_id).where(
-                    DocumentStagingWorkbook.document_family == family
-                )
-            )
-        )
+        base_query = _filter_by_family(base_query, family)
 
     needs_computed_filter = bool(
         status
@@ -1322,6 +1315,52 @@ async def search_documents(
     page = summaries[page_offset : page_offset + page_limit]
 
     return DocumentSearchResponse(documents=page, total=total)
+
+
+def _filter_by_family(query, family: str):
+    # The staging family the document resolved to (invoice,
+    # academic_transcript, government_contract, correspondence …).
+    return query.where(
+        Document.id.in_(
+            select(DocumentStagingWorkbook.document_id).where(
+                DocumentStagingWorkbook.document_family == family
+            )
+        )
+    )
+
+
+@router.get(
+    "/status-counts",
+    response_model=DocumentStatusCountsResponse,
+)
+def get_document_status_counts(
+    family: str | None = None,
+    database: Session = Depends(get_database),
+    actor: ActorContext = Depends(get_current_actor),
+) -> DocumentStatusCountsResponse:
+    """Per-status totals for the Documents header in one scan, instead of
+    one capped summary scan per status through /search."""
+
+    base_query = scope_documents(select(Document), actor)
+    if family:
+        base_query = _filter_by_family(base_query, family)
+
+    total = (
+        database.scalar(
+            select(func.count()).select_from(base_query.subquery())
+        )
+        or 0
+    )
+    scan_cap = max(50, int(get_settings().search_scan_cap))
+    candidates = database.scalars(
+        base_query.order_by(Document.uploaded_at.desc()).limit(scan_cap)
+    )
+    by_status: dict[str, int] = {}
+    for document in candidates:
+        status = _build_document_summary(database, document).status
+        by_status[status] = by_status.get(status, 0) + 1
+
+    return DocumentStatusCountsResponse(total=total, by_status=by_status)
 
 
 @router.get(

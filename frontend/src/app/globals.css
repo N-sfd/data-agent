@@ -525,6 +525,26 @@ body {
   }
 }
 
+/* Below ~1320px the five menus no longer fit beside the labelled CTAs:
+   collapse the CTAs to icons (label stays in the accessibility tree). */
+@media (max-width: 1320px) and (min-width: 1024px) {
+  .header-action-label {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+  }
+}
+
+/* …and drop the wordmark next to the logo on the narrowest desktops. */
+@media (max-width: 1180px) and (min-width: 1024px) {
+  .header-brand-text {
+    display: none;
+  }
+}
+
 .nav-menu-button {
   display: inline-flex;
   align-items: center;

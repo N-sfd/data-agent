@@ -43,7 +43,7 @@ export default function GlobalHeader({ onOpenSearch }: GlobalHeaderProps) {
               className="h-8 w-8 rounded-full object-contain bg-white sm:h-9 sm:w-9"
               priority
             />
-            <div className="min-w-0">
+            <div className="header-brand-text min-w-0">
               <p className="truncate text-xs font-bold uppercase tracking-wide text-text-on-dark sm:text-sm">
                 Consult America
               </p>
@@ -74,14 +74,14 @@ export default function GlobalHeader({ onOpenSearch }: GlobalHeaderProps) {
 
         {/* Actions — never shrink, never wrap onto nav */}
         <div className="header-actions">
-          <Link href="/extraction/new" className="btn-new-extraction shrink-0">
+          <Link href="/extraction/new" className="btn-new-extraction shrink-0" title="New Document">
             <Plus className="h-4 w-4 shrink-0" strokeWidth={2} />
-            <span className="whitespace-nowrap">New Document</span>
+            <span className="header-action-label whitespace-nowrap">New Document</span>
           </Link>
 
-          <Link href="/ask" className="btn-ask-agent shrink-0">
+          <Link href="/ask" className="btn-ask-agent shrink-0" title="Ask Data Agent">
             <Sparkles className="h-4 w-4 shrink-0" strokeWidth={1.75} />
-            <span className="whitespace-nowrap">Ask Data Agent</span>
+            <span className="header-action-label whitespace-nowrap">Ask Data Agent</span>
           </Link>
 
           <button

@@ -6,7 +6,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { ChevronLeft, ChevronRight, Plus, Search, X } from "lucide-react";
 
 import { ErrorState, LoadingState } from "@/components/layout/StatusState";
-import { searchDocuments } from "@/lib/documents";
+import { getDocumentStatusCounts, searchDocuments } from "@/lib/documents";
 import {
   presentDocument,
   statusMark,
@@ -64,19 +64,14 @@ export default function DocumentsHome() {
 
   useEffect(() => {
     let active = true;
-    Promise.all([
-      searchDocuments({ limit: 1, family: family || undefined }),
-      searchDocuments({ status: "review_required", limit: 1, family: family || undefined }),
-      searchDocuments({ status: "completed", limit: 1, family: family || undefined }),
-      searchDocuments({ status: "failed", limit: 1, family: family || undefined }),
-    ])
-      .then(([all, review, ready, failed]) => {
+    getDocumentStatusCounts(family || undefined)
+      .then(({ total, by_status }) => {
         if (!active) return;
         setCounts({
-          all: all.total,
-          review: review.total,
-          ready: ready.total,
-          failed: failed.total,
+          all: total,
+          review: by_status.review_required ?? 0,
+          ready: by_status.completed ?? 0,
+          failed: by_status.failed ?? 0,
         });
       })
       .catch(() => {

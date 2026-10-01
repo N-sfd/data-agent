@@ -50,7 +50,15 @@ export default function MegaMenu({
         >
           {sections.map((section) => (
             <div key={section.title}>
-              <p className="mega-menu-section-title">{section.title}</p>
+              {/* A section named like the menu would repeat its heading. Beside an
+                  overview column keep the space so the tiles stay aligned. */}
+              {section.title.toLowerCase() !== overviewTitle.toLowerCase() ? (
+                <p className="mega-menu-section-title">{section.title}</p>
+              ) : overviewLinks.length > 0 ? (
+                <p className="mega-menu-section-title invisible" aria-hidden="true">
+                  {section.title}
+                </p>
+              ) : null}
               <div className="mt-3 grid gap-2">
                 {section.tiles.map((tile) => (
                   <Link

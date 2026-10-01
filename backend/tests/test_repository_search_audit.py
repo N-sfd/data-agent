@@ -397,3 +397,17 @@ def test_document_hierarchy_includes_confirmed_parent_child() -> None:
         child["document_id"] == child_id
         for child in parent_node["children"]
     )
+
+
+def test_status_counts_match_status_filtered_search() -> None:
+    counts = client.get("/api/documents/status-counts")
+    assert counts.status_code == 200, counts.text
+    body = counts.json()
+
+    everything = client.get("/api/documents/search", params={"limit": 1}).json()
+    assert body["total"] == everything["total"]
+    for status in ("review_required", "completed", "failed"):
+        filtered = client.get(
+            "/api/documents/search", params={"status": status, "limit": 1}
+        ).json()
+        assert body["by_status"].get(status, 0) == filtered["total"], status

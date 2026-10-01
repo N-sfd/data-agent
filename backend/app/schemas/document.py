@@ -88,6 +88,13 @@ class DocumentSearchResponse(BaseModel):
     total: int
 
 
+class DocumentStatusCountsResponse(BaseModel):
+    total: int
+    # Computed summary status -> count, over the same capped scan window
+    # /search uses for status filters.
+    by_status: dict[str, int]
+
+
 class HierarchyNode(BaseModel):
     document_id: str
     title: str

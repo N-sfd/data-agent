@@ -16,6 +16,7 @@ import type {
   DocumentPage,
   PageTranscript,
   DocumentSearchResponse,
+  DocumentStatusCountsResponse,
   DocumentSummary,
   DocumentTarget,
   DuplicateResolution,
@@ -94,6 +95,13 @@ export async function searchDocuments(
   query.set("offset", String(params.offset ?? 0));
 
   return apiFetch(`/api/documents/search?${query.toString()}`);
+}
+
+export async function getDocumentStatusCounts(
+  family?: string,
+): Promise<DocumentStatusCountsResponse> {
+  const query = family ? `?family=${encodeURIComponent(family)}` : "";
+  return apiFetch(`/api/documents/status-counts${query}`);
 }
 
 export async function getGlobalAuditLog(
