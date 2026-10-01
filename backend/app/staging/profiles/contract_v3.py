@@ -997,6 +997,20 @@ CONTRACT_V3_PROFILE = StagingProfile(
     adapter=adapt_contract_v3,
     materializer=materialize_contract_structure,
     export_capabilities=(
+        # What the three tabs show, in full: every dataset, every column
+        # the source prints (even empty), long text, provenance.
+        ExportCapability(
+            capability_id="contract_workbook_xlsx",
+            label="Contract Workbook (Excel)",
+            format="xlsx",
+            href="/api/documents/{document_id}/staging-workbook/export.xlsx",
+        ),
+        ExportCapability(
+            capability_id="contract_workbook_json",
+            label="Contract Workbook (JSON)",
+            format="json",
+            href="/api/documents/{document_id}/staging-workbook/export.json",
+        ),
         ExportCapability(
             capability_id="professional_excel",
             label="Professional Excel (V3 workbook)",
@@ -1005,8 +1019,27 @@ CONTRACT_V3_PROFILE = StagingProfile(
         ),
         *(
             ExportCapability(
-                capability_id="dataset_csv",
+                capability_id=f"staging_csv_{dataset_id}",
                 label=f"{name} CSV",
+                format="csv",
+                href=f"/api/documents/{{document_id}}/staging-workbook/datasets/{dataset_id}.csv",
+                dataset_id=dataset_id,
+            )
+            for dataset_id, name in (
+                ("contract_details", "Contract Details"),
+                ("line_items", "Line Items"),
+                ("delivery_information", "Delivery Information"),
+                ("contract_attachments", "Attachments"),
+                ("contract_sections", "Contract Sections"),
+                ("section_tables", "Section Tables"),
+                ("contract_clauses", "Clauses"),
+                ("clause_transformation", "Clause Transformation"),
+            )
+        ),
+        *(
+            ExportCapability(
+                capability_id="dataset_csv",
+                label=f"V3 {name} CSV",
                 format="csv",
                 href=f"/api/documents/{{document_id}}/v3/{csv_name}.csv",
                 dataset_id=dataset_id,

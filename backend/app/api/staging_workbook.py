@@ -103,6 +103,23 @@ async def export_staging_workbook_xlsx(
     )
 
 
+@router.get("/{document_id}/staging-workbook/export.json")
+async def export_staging_workbook_json(
+    document_id: str,
+    database: Session = Depends(get_database),
+    actor: ActorContext = Depends(require_permission("export.read")),
+) -> Response:
+    """The full workbook as JSON — every record with every cell, its
+    provenance and checks (the browser view is compacted for its grids)."""
+    workbook = _workbook_or_404(database, document_id)
+    filename = f"{workbook.document_filename.rsplit('.', 1)[0]}_staging.json"
+    return Response(
+        content=workbook.model_dump_json(indent=1),
+        media_type="application/json",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
 @router.get("/{document_id}/staging-workbook/datasets/{dataset_id}.csv")
 async def export_staging_dataset_csv(
     document_id: str,

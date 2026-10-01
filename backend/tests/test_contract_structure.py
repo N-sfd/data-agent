@@ -466,6 +466,31 @@ def test_navy_contract_staging_workbook():
     # V3 is untouched: its summary keeps exactly its 14 columns.
     assert len(datasets["contract_summary"]["columns"]) == 14
 
+    # Exports carry what the tabs show, in full.
+    labels = [c["label"] for c in workbook["profile"]["export_capabilities"]]
+    assert labels[:2] == ["Contract Workbook (Excel)", "Contract Workbook (JSON)"]
+    exported = client.get(f"/api/documents/{document_id}/staging-workbook/export.json")
+    assert exported.status_code == 200
+    full = {d["dataset_id"]: d for d in exported.json()["datasets"]}
+    clause = next(
+        r for r in full["contract_clauses"]["records"]
+        if r["cells"]["contract.contract_clause.clause_number"]["value"] == "52.211-10"
+    )
+    assert clause["cells"]["contract.contract_clause.text"]["value"].startswith("The Contractor shall be required to")
+    csv_text = client.get(f"/api/documents/{document_id}/staging-workbook/datasets/line_items.csv").text
+    assert csv_text.splitlines()[0].startswith("ITEM NO,SUPPLIES/SERVICES,MAX QUANTITY,UNIT,UNIT PRICE,MAX AMOUNT")
+    xlsx = client.get(f"/api/documents/{document_id}/staging-workbook/export.xlsx")
+    assert xlsx.status_code == 200 and xlsx.content[:2] == b"PK"
+
+
+def test_xlsx_cells_drop_control_characters_and_mark_truncation():
+    from app.staging.export import _xlsx_value
+
+    assert _xlsx_value("a\x02b\x0cc\nd\te") == "a b c\nd\te"
+    long = _xlsx_value("x" * 40_000)
+    assert len(long) == 32_767 and long.endswith("see the CSV or JSON export]")
+    assert _xlsx_value(12) == 12
+
 
 # --- contract body (47QRCA25DSF07) --------------------------------------------------
 

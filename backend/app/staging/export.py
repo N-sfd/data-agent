@@ -11,6 +11,21 @@ import re
 
 from app.staging.models import StagingDataset, StagingWorkbook
 
+# Excel limits: control characters cannot be stored, and a cell holds at
+# most 32,767 characters. CSV/JSON keep the text unchanged.
+_XLSX_ILLEGAL = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f]")
+_XLSX_CELL_LIMIT = 32_767
+
+
+def _xlsx_value(value: object) -> object:
+    if not isinstance(value, str):
+        return value
+    text = _XLSX_ILLEGAL.sub(" ", value)
+    if len(text) > _XLSX_CELL_LIMIT:
+        note = f" … [truncated for Excel: {len(text):,} characters in full — see the CSV or JSON export]"
+        text = text[: _XLSX_CELL_LIMIT - len(note)] + note
+    return text
+
 # Excel forbids these in sheet names ("Customer / Bill-To") and caps them at 31.
 _INVALID_SHEET_CHARS = re.compile(r"[\[\]:*?/\\]")
 
@@ -80,7 +95,7 @@ def build_workbook_xlsx(workbook: StagingWorkbook) -> bytes:
         for cell in sheet[1]:
             cell.font = Font(bold=True)
         for row in _rows(dataset):
-            sheet.append(row)
+            sheet.append([_xlsx_value(value) for value in row])
 
     buffer = io.BytesIO()
     wb.save(buffer)
