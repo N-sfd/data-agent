@@ -135,6 +135,9 @@ function GroupBody({
       )}
       {sections.map((section) => (
         <section key={section.id} aria-label={section.title ?? group.label} className="space-y-2">
+          {section.supertitle && (
+            <h3 className="border-b border-border pb-1 pt-2 text-sm font-semibold text-foreground">{section.supertitle}</h3>
+          )}
           {section.title && (
             <h4 className="text-xs font-semibold uppercase tracking-[0.08em] text-text-secondary">{section.title}</h4>
           )}

@@ -264,6 +264,31 @@ def test_air_force_schedule_without_repeated_headers(air_force):
 
 
 @_requires(AIR_FORCE)
+def test_air_force_clauses_keep_contract_sections_and_list_columns(air_force):
+    groups: dict[tuple[str, str], list[str]] = {}
+    for clause in air_force["clauses"]:
+        groups.setdefault((clause["contract_section"], clause["source_heading"]), []).append(clause["clause_number"])
+    assert list(groups)[:8] == [
+        ("Section E - Inspection and Acceptance", "FAR Clauses Incorporated by Reference"),
+        ("Section E - Inspection and Acceptance", "DFARS Clauses Incorporated by Reference"),
+        ("Section F - Deliveries or Performance", "FAR Clauses Incorporated by Reference"),
+        ("Section F - Deliveries or Performance", "DFARS Clauses Incorporated by Reference"),
+        ("Section G - Contract Administration Data", "DFARS Clauses Incorporated by Reference"),
+        ("Section G - Contract Administration Data", "DFARS Clauses Incorporated by Full Text"),
+        ("Section H - Special Contract Requirements", "DFARS Clauses Incorporated by Full Text"),
+        ("Section I - Contract Clauses", "FAR Clauses Incorporated by Reference"),
+    ]
+    assert groups[("Section F - Deliveries or Performance", "FAR Clauses Incorporated by Reference")] == ["52.242-15", "52.247-34"]
+    assert groups[("Section F - Deliveries or Performance", "DFARS Clauses Incorporated by Reference")] == ["252.247-7023"]
+    assert "252.232-7006" in groups[("Section G - Contract Administration Data", "DFARS Clauses Incorporated by Full Text")]
+    stop_work = next(c for c in air_force["clauses"] if c["clause_number"] == "52.242-15")
+    assert stop_work["list_columns"] == ["Number", "Title", "Effective Date", "Alternate/Deviation", "Variation Effective Date"]
+    assert (stop_work["title"], stop_work["date"], stop_work["alternate"], stop_work["variation_date"]) == (
+        "Stop-Work Order. (Alternate I)", "Apr 1984", "Alternate I", "Apr 1984",
+    )
+
+
+@_requires(AIR_FORCE)
 def test_air_force_far_and_dfars_clause_context(air_force):
     counts = _counts(air_force)
     assert counts[("FAR", BY_REFERENCE)] == 100 and counts[("DFARS", BY_REFERENCE)] == 60
@@ -411,12 +436,14 @@ def test_navy_contract_staging_workbook():
 
     clauses = datasets["contract_clauses"]
     assert clauses["compact"] is True
-    assert clauses["grid_fields"] == [
+    assert clauses["grid_fields"][:3] == [
         "contract.contract_clause.clause_number",
         "contract.contract_clause.title",
         "contract.contract_clause.date",
-        "contract.contract_clause.incorporation_type",
     ]
+    assert "contract.contract_clause.contract_section" in clauses["grid_fields"]
+    first = clauses["records"][0]["cells"]
+    assert first["contract.contract_clause.contract_section"]["value"] == "Section 00 70 00 - Conditions of the Contract"
     full_text = [
         r for r in clauses["records"]
         if r["cells"]["contract.contract_clause.incorporation_type"]["value"] == IN_FULL_TEXT

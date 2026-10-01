@@ -184,11 +184,17 @@ CONTRACT_CLAUSES = DatasetDefinition(
         "full-text clauses keep their complete text."
     ),
     identity_fields=("contract.contract_clause.clause_number",),
+    # Section and heading travel with each row so the view can group the
+    # clauses as the contract does; blank columns are not shown.
     grid_fields=(
         "contract.contract_clause.clause_number",
         "contract.contract_clause.title",
         "contract.contract_clause.date",
+        "contract.contract_clause.alternate",
+        "contract.contract_clause.variation_date",
         "contract.contract_clause.incorporation_type",
+        "contract.contract_clause.contract_section",
+        "contract.contract_clause.source_heading",
     ),
     fields=(
         F("contract.contract_clause.clause_number", "clause_number", "Clause Number", "code", expected=True),
@@ -198,6 +204,8 @@ CONTRACT_CLAUSES = DatasetDefinition(
         F("contract.contract_clause.incorporation_type", "incorporation_type", "Incorporation Type", grounding="derived"),
         # Joined from the pieces printed around the number and title.
         F("contract.contract_clause.alternate", "alternate", "Alternate / Deviation", grounding="derived"),
+        F("contract.contract_clause.variation_date", "variation_date", "Variation Effective Date"),
+        F("contract.contract_clause.contract_section", "contract_section", "Contract Section"),
         F("contract.contract_clause.source_heading", "source_heading", "Section Heading"),
         F("contract.contract_clause.text", "text", "Clause Text"),
     ),
@@ -665,6 +673,29 @@ def _table_records(document: Document, structure: dict, kind: str) -> tuple[list
     return records, labels
 
 
+# A clause list's printed headings -> the clause field they caption.
+_CLAUSE_HEADER_FIELDS = (
+    (re.compile(r"^variation", re.IGNORECASE), "contract.contract_clause.variation_date"),
+    (re.compile(r"^(effective\s+)?date$", re.IGNORECASE), "contract.contract_clause.date"),
+    (re.compile(r"^alternate|deviation", re.IGNORECASE), "contract.contract_clause.alternate"),
+    (re.compile(r"^(number|far clause|clause)$", re.IGNORECASE), "contract.contract_clause.clause_number"),
+    (re.compile(r"^title", re.IGNORECASE), "contract.contract_clause.title"),
+)
+
+
+def _clause_column_labels(structure: dict) -> dict[str, str]:
+    """Use the clause lists' own column headings ("Effective Date",
+    "Alternate/Deviation", "Variation Effective Date") as captions."""
+    labels: dict[str, str] = {}
+    for clause in structure.get("clauses", []):
+        for header in clause.get("list_columns") or []:
+            for pattern, field in _CLAUSE_HEADER_FIELDS:
+                if pattern.search(header) and field not in labels:
+                    labels[field] = header
+                    break
+    return labels
+
+
 def _clause_records(document: Document, structure: dict) -> tuple[list[RawRecord], list[RawRecord]]:
     clauses: list[RawRecord] = []
     transforms: list[RawRecord] = []
@@ -704,6 +735,14 @@ def _clause_records(document: Document, structure: dict) -> tuple[list[RawRecord
             "regulation": heading,
             "source_heading": heading,
         }
+        if clause.get("contract_section"):
+            cell_provenance["contract_section"] = make_provenance(
+                document,
+                page=clause["page"],
+                evidence=clause["contract_section"],
+                extraction_method="clause_section_layout",
+                region_id=f"{record_id}:section",
+            )
         if text_provenance:
             cell_provenance["text"] = text_provenance
         clauses.append(
@@ -717,6 +756,8 @@ def _clause_records(document: Document, structure: dict) -> tuple[list[RawRecord
                     "regulation": clause["regulation"],
                     "alternate": clause.get("alternate"),
                     "source_heading": clause["source_heading"],
+                    "contract_section": clause.get("contract_section"),
+                    "variation_date": clause.get("variation_date"),
                     "text": text,
                 },
                 provenance=row,
@@ -751,6 +792,7 @@ def adapt_contract_v3(database: Session, document: Document) -> AdapterResult:
     line_items, line_labels = _table_records(document, structure, "line_items")
     deliveries, delivery_labels = _table_records(document, structure, "delivery_information")
     clauses, transforms = _clause_records(document, structure)
+    clause_labels = _clause_column_labels(structure)
 
     records: dict[str, list[RawRecord]] = {
         "contract_details": _details_records(document, structure, doc, geometry),
@@ -805,7 +847,11 @@ def adapt_contract_v3(database: Session, document: Document) -> AdapterResult:
     return AdapterResult(
         records=records,
         outcome_provenance=document.ingestion_provenance,
-        column_labels={"line_items": line_labels, "delivery_information": delivery_labels},
+        column_labels={
+            "line_items": line_labels,
+            "delivery_information": delivery_labels,
+            "contract_clauses": clause_labels,
+        },
     )
 
 

@@ -66,6 +66,12 @@ class ClauseRecord:
     source_heading: str
     text: str | None = None
     end_page: int | None = None
+    # The contract section the list sits in ("Section G - Contract
+    # Administration Data"), the list's own printed column headings, and
+    # the Variation Effective Date column (FA30 lists).
+    contract_section: str | None = None
+    list_columns: list[str] | None = None
+    variation_date: str | None = None
 
 
 @dataclass
@@ -181,6 +187,26 @@ def _is_column_header(row: list[list[Word]]) -> bool:
     return "title" in key and ("date" in key or "number" in key) and not re.search(r"\d", key)
 
 
+def _list_columns(rows: list[list[list[Word]]], before: float) -> list[str] | None:
+    """The clause list's printed column headings above its first row,
+    stacked headings joined ("Variation" / "Effective" / "Date")."""
+    header = [p for row in rows if (row[0][0].y0 + row[0][0].y1) / 2 < before for p in row]
+    if not header or not any(compact(_text(p)) in {"title", "number"} for p in header):
+        return None
+    columns: list[list[list[Word]]] = []
+    for phrase in sorted(header, key=lambda p: (p[0].x0, p[0].y0)):
+        host = next((c for c in columns if abs(c[0][0].x0 - phrase[0].x0) <= 12), None)
+        if host is None:
+            columns.append([phrase])
+        else:
+            host.append(phrase)
+    labels = []
+    for column in sorted(columns, key=lambda c: c[0][0].x0):
+        text = " ".join(_text(p) for p in sorted(column, key=lambda p: p[0].y0))
+        labels.append(re.sub(r"/\s+", "/", text).strip())
+    return labels
+
+
 def _reference_rows(
     page: PageLines, top: float, bottom: float, context: _Context
 ) -> list[ClauseRecord]:
@@ -204,6 +230,8 @@ def _reference_rows(
 
     def centre(i: int) -> float:
         return (rows[i][0][0].y0 + rows[i][0][0].y1) / 2
+
+    list_columns = _list_columns(_row_groups(words), centre(anchor_rows[0]) - 4)
 
     def has_title(i: int) -> bool:
         number_text = _text(rows[i][0])
@@ -242,6 +270,7 @@ def _reference_rows(
         dev = number_match.group("dev")
         pieces: list[str] = []
         date = None
+        variation_date = None
         extra: list[str] = []
         phrases = [(i, p) for i in sorted(owned[a]) for p in rows[i] if p is not number_phrase]
         if remainder:
@@ -251,8 +280,8 @@ def _reference_rows(
             if _DATE_ONLY.match(text):
                 if date is None:
                     date = text.strip("()")
-                elif extra:
-                    extra[-1] = f"{extra[-1]} ({text.strip('()')})"  # the deviation's own date
+                elif variation_date is None:
+                    variation_date = text.strip("()")  # the Variation Effective Date column
                 continue
             # Alternate / deviation column values, wherever the row puts
             # them ("Deviation 2022-O0001 Oct 2021" merges with its date).
@@ -293,8 +322,10 @@ def _reference_rows(
                 bbox=(min(w.x0 for w in used), min(w.y0 for w in used), max(w.x1 for w in used), max(w.y1 for w in used)),
                 # Source phrases in column order: number, title lines, date
                 # (the date sits between wrapped title lines on the page).
-                evidence=" ".join(part for part in [number_text, *pieces, date or "", *extra] if part),
+                evidence=" ".join(part for part in [number_text, *pieces, date or "", *extra, variation_date or ""] if part),
                 source_heading=context.heading,
+                list_columns=list_columns,
+                variation_date=variation_date,
             )
         )
     return records
@@ -368,6 +399,7 @@ def _visual_rows(page: PageLines) -> list[LogicalLine]:
 def read_clauses(pages: list[PageLines]) -> list[ClauseRecord]:
     records: list[ClauseRecord] = []
     context: _Context | None = None
+    section: str | None = None
     open_clause: ClauseRecord | None = None
     body: list[LogicalLine] = []
 
@@ -402,8 +434,10 @@ def read_clauses(pages: list[PageLines]) -> list[ClauseRecord]:
             )
             if heading or ends_context:
                 if segment_top is not None and context and context.incorporation == BY_REFERENCE:
-                    records.extend(_reference_rows(page, segment_top, line.y0, context))
+                    records.extend(_with_section(_reference_rows(page, segment_top, line.y0, context), section))
                 close()
+                if _SECTION_HEADING.match(text):
+                    section = re.sub(r"\s{2,}", " ", text)
                 segment_top = None
                 context = heading
                 if context and context.incorporation == BY_REFERENCE:
@@ -412,7 +446,7 @@ def read_clauses(pages: list[PageLines]) -> list[ClauseRecord]:
                 continue
             if outline_clause and (context is None or context.incorporation == BY_REFERENCE):
                 if segment_top is not None and context:
-                    records.extend(_reference_rows(page, segment_top, line.y0, context))
+                    records.extend(_with_section(_reference_rows(page, segment_top, line.y0, context), section))
                 segment_top = None
                 hint = next((name for token, name in _REGULATION_HINTS if token in compact(text)[:12]), None)
                 context = _Context(IN_FULL_TEXT, hint, text)
@@ -435,6 +469,7 @@ def read_clauses(pages: list[PageLines]) -> list[ClauseRecord]:
                         bbox=(min(l.x0 for l in used), min(l.y0 for l in used), max(l.x1 for l in used), max(l.y1 for l in used)),
                         evidence=" ".join(l.text.strip() for l in used),
                         source_heading=context.heading,
+                        contract_section=section,
                     )
                     index += consumed
                     continue
@@ -443,6 +478,12 @@ def read_clauses(pages: list[PageLines]) -> list[ClauseRecord]:
                     open_clause.end_page = page.page_number
             index += 1
         if segment_top is not None and context and context.incorporation == BY_REFERENCE:
-            records.extend(_reference_rows(page, segment_top, page.height + 1, context))
+            records.extend(_with_section(_reference_rows(page, segment_top, page.height + 1, context), section))
     close()
+    return records
+
+
+def _with_section(records: list[ClauseRecord], section: str | None) -> list[ClauseRecord]:
+    for record in records:
+        record.contract_section = section
     return records

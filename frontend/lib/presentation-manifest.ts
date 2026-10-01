@@ -46,6 +46,9 @@ export interface PresentationSection {
   inlineReview?: boolean;
   /** Short note under the section heading. */
   note?: string;
+  /** Enclosing source heading shown above this section when it changes
+   * ("Section G - Contract Administration Data"). */
+  supertitle?: string;
 }
 
 export interface PresentationGroup {
@@ -588,17 +591,28 @@ function sourceGrid(
   dataset: StagingDataset | undefined,
   title: string,
   noun: [string, string],
-  options: { allColumns?: boolean; inlineReview?: boolean; view?: string; note?: string } = {},
+  options: {
+    allColumns?: boolean;
+    inlineReview?: boolean;
+    view?: string;
+    note?: string;
+    id?: string;
+    supertitle?: string;
+    hide?: string[];
+  } = {},
 ): PresentationSection | null {
   if (!dataset || dataset.records.length === 0) return null;
   const { columns, detailColumns } = gridColumns(dataset);
   const byField = new Map(dataset.columns.map((column) => [column.canonical_field, column]));
   // A target template (Transformation View) shows every target column,
   // filled or not; business grids only populated source columns.
-  const shown = options.allColumns ? dataset.columns : columns.map((column) => byField.get(column.canonical_field) ?? column);
+  const shown = (
+    options.allColumns ? dataset.columns : columns.map((column) => byField.get(column.canonical_field) ?? column)
+  ).filter((column) => !options.hide?.includes(column.canonical_field));
   if (shown.length === 0) return null;
   return {
-    id: options.view ? `${dataset.dataset_id}:${options.view}` : dataset.dataset_id,
+    id: options.id ?? (options.view ? `${dataset.dataset_id}:${options.view}` : dataset.dataset_id),
+    supertitle: options.supertitle,
     title,
     pattern: "grid",
     items: [],
@@ -642,6 +656,39 @@ function contractDetailSections(dataset: StagingDataset): PresentationSection[] 
     .map(([title, items]) => ({ id: `contract_details:${title}`, title, pattern: "detail" as const, items }));
 }
 
+const CLAUSE_SECTION = "contract.contract_clause.contract_section";
+const CLAUSE_HEADING = "contract.contract_clause.source_heading";
+
+/** Clauses as the contract lays them out: each contract section (Section
+ * G …), and inside it each incorporation heading ("DFARS Clauses
+ * Incorporated by Reference") as its own list, in document order. */
+function clauseGroups(dataset: StagingDataset | undefined): PresentationSection[] {
+  if (!dataset || dataset.records.length === 0) return [];
+  const groups = new Map<string, { section: string; heading: string; records: StagingRecord[] }>();
+  for (const record of dataset.records) {
+    const section = valueText(record.cells[CLAUSE_SECTION]);
+    const heading = valueText(record.cells[CLAUSE_HEADING]) || "Clauses";
+    const key = `${section}\u0000${heading}`;
+    const group = groups.get(key) ?? { section, heading, records: [] };
+    group.records.push(record);
+    groups.set(key, group);
+  }
+  const sections: PresentationSection[] = [];
+  let previous: string | null = null;
+  [...groups.values()].forEach((group, index) => {
+    const grid = sourceGrid({ ...dataset, records: group.records }, group.heading, ["clause", "clauses"], {
+      inlineReview: true,
+      view: "Contract View",
+      id: `contract_clauses:${index}`,
+      supertitle: group.section && group.section !== previous ? group.section : undefined,
+      hide: [CLAUSE_SECTION, CLAUSE_HEADING],
+    });
+    previous = group.section || previous;
+    if (grid) sections.push(grid);
+  });
+  return sections;
+}
+
 /** Contracts: Contract Details, Contract Data and Clauses — what is inside
  * each comes from the document's own form, tables and clause sections. */
 function composeContract(workbook: StagingWorkbook): PresentationManifest {
@@ -674,7 +721,7 @@ function composeContract(workbook: StagingWorkbook): PresentationManifest {
 
   const clauses = find("contract_clauses");
   const clauseSections = [
-    sourceGrid(clauses, "Clauses", ["clause", "clauses"], { inlineReview: true, view: "Contract View" }),
+    ...clauseGroups(clauses),
     sourceGrid(find("clause_transformation"), "Clause Transformation", ["clause", "clauses"], {
       allColumns: true,
       inlineReview: true,
