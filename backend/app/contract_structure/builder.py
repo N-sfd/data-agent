@@ -18,7 +18,7 @@ from app.models.document import Document
 from app.models.document_contract_structure import DocumentContractStructure
 
 # Bump when extraction changes so stored structures are rebuilt.
-EXTRACTOR_VERSION = 6
+EXTRACTOR_VERSION = 7
 
 
 def build_contract_structure(database: Session, document: Document) -> dict:

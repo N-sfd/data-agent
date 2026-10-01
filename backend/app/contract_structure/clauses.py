@@ -190,8 +190,12 @@ def _is_column_header(row: list[list[Word]]) -> bool:
 def _list_columns(rows: list[list[list[Word]]], before: float) -> list[str] | None:
     """The clause list's printed column headings above its first row,
     stacked headings joined ("Variation" / "Effective" / "Date")."""
-    header = [p for row in rows if (row[0][0].y0 + row[0][0].y1) / 2 < before for p in row]
-    if not header or not any(compact(_text(p)) in {"title", "number"} for p in header):
+    # Heading labels are capitalised words — not a URL or a sentence line above the list.
+    header = [
+        p for row in rows if (row[0][0].y0 + row[0][0].y1) / 2 < before for p in row
+        if _text(p)[:1].isupper() and not re.search(r"www\.|https?:|\.(gov|com|mil)", _text(p), re.IGNORECASE)
+    ]
+    if not header or not any(re.match(r"^(title|number|farclause|clause)", compact(_text(p))) for p in header):
         return None
     columns: list[list[list[Word]]] = []
     for phrase in sorted(header, key=lambda p: (p[0].x0, p[0].y0)):
