@@ -244,7 +244,7 @@ BUSINESS = DatasetDefinition(
         "far.business.provision",
         "far.business.clause",
         "far.business.clause_type",
-        "far.business.reserved",
+        "far.business.type",
     ),
     fields=tuple(
         F(f"far.business.{key}", key, label, grounding="derived")
@@ -256,7 +256,7 @@ BUSINESS = DatasetDefinition(
             ("provision", "Provision"),
             ("clause", "Clause"),
             ("clause_type", "Clause Type"),
-            ("reserved", "Reserved"),
+            ("type", "Type"),
             ("description", "Description"),
             ("text", "Text"),
             ("intent", "Intent"),

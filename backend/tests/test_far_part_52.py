@@ -256,7 +256,7 @@ def test_business_export_columns_do_not_invent_dates_or_attributes():
     by_key = {r.clause_key: views.business_row(r) for r in rows}
     assert list(views.BUSINESS_COLUMNS) == [
         "Date Published", "Number", "Title", "Display Name", "Provision", "Clause",
-        "Clause Type", "Reserved", "Description", "Text", "Intent", "Start Date",
+        "Clause Type", "Type", "Description", "Text", "Intent", "Start Date",
         "Attribute Category", "Attribute 1", "Source Reference",
     ]
     basic = by_key["FAR-52.204-3"]
@@ -266,7 +266,7 @@ def test_business_export_columns_do_not_invent_dates_or_attributes():
     assert basic["Intent"] is None and basic["Start Date"] is None
     assert basic["Attribute Category"] is None and basic["Attribute 1"] is None
     assert basic["Source Reference"] and "page" not in basic["Source Reference"].lower()
-    assert by_key["FAR-52.203-1"]["Reserved"] == "Yes"
+    assert by_key["FAR-52.203-1"]["Type"] == "Reserved"
     assert by_key["FAR-52.203-1"]["Clause Type"] == "Reserved"
     assert by_key["FAR-52.203-1"]["Clause"] is None
     alternate = by_key["FAR-52.215-1-ALT-I"]
