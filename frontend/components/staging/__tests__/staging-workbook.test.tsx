@@ -231,8 +231,8 @@ describe("StagingWorkbook rendering", () => {
     getWorkbook.mockResolvedValue(contractWorkbook());
     render(<StagingWorkbook documentId="doc-1" />);
 
-    expect(await screen.findByRole("tab", { name: "Contract Summary" })).toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: "CLINs" })).toBeInTheDocument();
+    expect(await screen.findByRole("tab", { name: "Contract Details" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Contract Data" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Government Contract" })).toBeInTheDocument();
     expect(screen.getByText("47QRCA25DSF07")).toBeInTheDocument();
     // NAICS has no value: not rendered as a "—" row.
@@ -242,6 +242,143 @@ describe("StagingWorkbook rendering", () => {
       expect(screen.queryByRole("columnheader", { name: technical })).toBeNull();
     }
     expect(screen.queryByRole("status")).toBeNull();
+  });
+
+  it("composes contracts into Contract Details, Contract Data and Clauses from source-adaptive datasets", async () => {
+    const detail = (id: string, label: string, value: string, section: string, sourceLabel = label) => ({
+      record_id: `detail:${id}`,
+      cells: {
+        "contract.detail.label": cell("contract.detail.label", "Field", label, null, null),
+        "contract.detail.value": cell("contract.detail.value", "Value", value, "Verified", provenance({ source_page: 1 })),
+        "contract.detail.section": cell("contract.detail.section", "Section", section, null, null),
+        "contract.detail.source_label": cell("contract.detail.source_label", "Source Label", sourceLabel, null, null),
+        "contract.detail.field_id": cell("contract.detail.field_id", "Field ID", id, null, null),
+      },
+      record_status: "Verified" as const,
+      links_to_dataset: null,
+    });
+    const col = (canonical_field: string, display_label: string, expected = false) => ({
+      canonical_field,
+      key: canonical_field.split(".").pop()!,
+      display_label,
+      value_type: "text",
+      expected,
+    });
+    const base = contractWorkbook();
+    getWorkbook.mockResolvedValue({
+      ...base,
+      datasets: [
+        dataset({
+          dataset_id: "contract_details",
+          display_name: "Contract Details",
+          columns: [
+            col("contract.detail.label", "Field"),
+            col("contract.detail.value", "Value"),
+            col("contract.detail.section", "Section"),
+            col("contract.detail.source_label", "Source Label"),
+            col("contract.detail.field_id", "Field ID"),
+          ],
+          records: [
+            detail("contract.issued_by_code", "7. ISSUED BY — CODE", "N40192", "Issuing Office"),
+            detail("contract.solicitation_number", "1. SOLICITATION NO.", "N4019221R28000019", "Solicitation & Award"),
+            detail("contract.bonds_required", "Performance and Payment Bonds Required", "Yes", "Performance"),
+          ],
+        }),
+        dataset({
+          dataset_id: "line_items",
+          display_name: "Line Items",
+          columns: [
+            col("contract.line.item_number", "ITEM NO", true),
+            col("contract.line.quantity", "MAX QUANTITY"),
+            col("contract.line.amount", "MAX AMOUNT"),
+          ],
+          records: [
+            {
+              record_id: "line_items:0:0001",
+              cells: {
+                "contract.line.item_number": cell("contract.line.item_number", "ITEM NO", "0001", "Verified"),
+                "contract.line.quantity": cell("contract.line.quantity", "MAX QUANTITY", "600,000,000", "Verified"),
+                "contract.line.amount": cell("contract.line.amount", "MAX AMOUNT", "$600,000,000.00 NTE", "Verified"),
+              },
+              record_status: "Verified",
+              links_to_dataset: null,
+            },
+          ],
+        }),
+        dataset({
+          dataset_id: "contract_clauses",
+          display_name: "Clauses",
+          grid_fields: [
+            "contract.contract_clause.clause_number",
+            "contract.contract_clause.title",
+            "contract.contract_clause.date",
+            "contract.contract_clause.incorporation_type",
+          ],
+          compact: true,
+          columns: [
+            col("contract.contract_clause.clause_number", "Clause Number", true),
+            col("contract.contract_clause.title", "Title", true),
+            col("contract.contract_clause.date", "Date"),
+            col("contract.contract_clause.incorporation_type", "Incorporation Type"),
+            col("contract.contract_clause.text", "Clause Text"),
+          ],
+          records: [
+            {
+              record_id: "clause:0:52.211-10",
+              cells: {
+                "contract.contract_clause.clause_number": cell("contract.contract_clause.clause_number", "Clause Number", "52.211-10", "Verified"),
+                "contract.contract_clause.title": cell("contract.contract_clause.title", "Title", "COMMENCEMENT, PROSECUTION, AND COMPLETION OF WORK", "Verified"),
+                "contract.contract_clause.date": cell("contract.contract_clause.date", "Date", "APR 1984", "Verified"),
+                "contract.contract_clause.incorporation_type": cell("contract.contract_clause.incorporation_type", "Incorporation Type", "Incorporated in Full Text", "Verified"),
+              },
+              record_status: "Verified",
+              links_to_dataset: null,
+            },
+          ],
+        }),
+        dataset({
+          dataset_id: "clause_transformation",
+          display_name: "Clause Transformation",
+          columns: [col("contract.clause_transform.number", "Number"), col("contract.clause_transform.lock_text_yn", "Lock Text Yn")],
+          records: [
+            {
+              record_id: "transform:0:52.211-10",
+              cells: {
+                "contract.clause_transform.number": cell("contract.clause_transform.number", "Number", "52.211-10", "Verified"),
+                "contract.clause_transform.lock_text_yn": cell("contract.clause_transform.lock_text_yn", "Lock Text Yn", null, null),
+              },
+              record_status: "Verified",
+              links_to_dataset: null,
+            },
+          ],
+        }),
+      ],
+    });
+    render(<StagingWorkbook documentId="doc-1" />);
+
+    const tabs = (await screen.findAllByRole("tab")).map((tab) => tab.getAttribute("aria-label"));
+    expect(tabs).toEqual(expect.arrayContaining(["Contract Details", "Contract Data", "Clauses"]));
+    expect(tabs).not.toContain("Contract Summary");
+    // Sections follow the professional order; labels are the source's own.
+    const headings = screen.getAllByRole("heading", { level: 4 }).map((heading) => heading.textContent);
+    expect(headings).toEqual(["Solicitation & Award", "Issuing Office", "Performance"]);
+    expect(screen.getByText("1. SOLICITATION NO.")).toBeInTheDocument();
+    expect(screen.getByText("7. ISSUED BY — CODE")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("tab", { name: "Contract Data" }));
+    const headers = screen.getAllByRole("columnheader").map((th) => th.textContent?.trim());
+    expect(headers).toEqual(["ITEM NO", "MAX QUANTITY", "MAX AMOUNT"]);
+
+    fireEvent.click(screen.getByRole("tab", { name: "Clauses" }));
+    expect(screen.getAllByRole("columnheader").map((th) => th.textContent?.trim())).toEqual([
+      "Clause Number",
+      "Title",
+      "Date",
+      "Incorporation Type",
+    ]);
+    expect(screen.getByText("Incorporated in Full Text")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Transformation View" }));
+    expect(screen.getAllByRole("columnheader").map((th) => th.textContent?.trim())).toEqual(["Number", "Lock Text Yn"]);
   });
 
   it("renders a different profile from metadata alone", async () => {
@@ -292,7 +429,7 @@ describe("StagingWorkbook rendering", () => {
     const onOpenSource = vi.fn();
     render(<StagingWorkbook documentId="doc-1" onOpenSource={onOpenSource} />);
 
-    fireEvent.click(await screen.findByRole("tab", { name: /CLINs/ }));
+    fireEvent.click(await screen.findByRole("tab", { name: /Contract Data/ }));
     fireEvent.click(screen.getByRole("button", { name: "0.00" }));
     expect(screen.getByRole("dialog", { name: "Evidence" })).toHaveTextContent("Max Amount");
     fireEvent.click(screen.getByRole("button", { name: "View in Document" }));

@@ -29,6 +29,7 @@ from app.far.canonical import (
     SUBPART,
     build_canonical,
 )
+from app.contract_structure.builder import materialize_contract_structure
 from app.far.dom import extract_far, recognize_far_part_52
 from app.main import app
 from app.models.document import Document
@@ -328,7 +329,13 @@ def test_resolution_uses_structure_never_the_filename():
 def test_existing_profiles_keep_their_capabilities():
     for key in ("contract_v3", "invoice", "generic_business_document"):
         profile = registry.latest(key)
-        assert profile.document_recognizer is None and profile.materializer is None
+        assert profile.document_recognizer is None
+        # Contracts materialize their source-adaptive structure once; the
+        # other pre-FAR profiles still build nothing up front.
+        if key == "contract_v3":
+            assert profile.materializer is materialize_contract_structure
+        else:
+            assert profile.materializer is None
         assert profile.contract_pipeline is True
         if key != "contract_v3":
             assert all(not d.grid_fields for d in profile.datasets)

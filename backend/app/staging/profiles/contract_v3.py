@@ -6,12 +6,16 @@ tables and V3 export schema untouched.
 
 from __future__ import annotations
 
+import re
+
 from sqlalchemy.orm import Session
 
+from app.contract_structure.builder import load_contract_structure, materialize_contract_structure
+from app.contract_structure.forms import FINANCIAL
 from app.models.document import Document
 from app.schemas.v3_document import NormalizedV3Document, RowProvenance
 from app.services.v3_reader import get_normalized_v3_document
-from app.staging.models import ExportCapability
+from app.staging.models import ExportCapability, ValidationCheck
 from app.staging.profile import (
     AdapterResult,
     DatasetDefinition,
@@ -22,6 +26,7 @@ from app.staging.profile import (
 )
 from app.source_structure.ocr_geometry import PageGeometry
 from app.staging.provenance import make_provenance
+from app.staging.validation import value_in_evidence
 
 F = FieldDefinition
 
@@ -114,6 +119,117 @@ CONTRACT_SUMMARY = DatasetDefinition(
             rules=(FieldRule("pattern", pattern=r"\d{6}", message="NAICS must be 6 digits."),),
         ),
         F("contract.size_standard", "size_standard", "Size Standard", expected=True),
+    ),
+)
+
+# --- Source-adaptive contract datasets (app.contract_structure) -------------
+# Built from the PDF layout, independent of V3: the V3 tables, columns and
+# exports above/below are unchanged. Visible labels and column headings are
+# the source's own; canonical ids stay stable.
+
+CONTRACT_DETAILS = DatasetDefinition(
+    dataset_id="contract_details",
+    display_name="Contract Details",
+    cardinality="repeating",
+    description="Document-level fields under the labels the source prints, grouped by section.",
+    identity_fields=("contract.detail.field_id",),
+    fields=(
+        F("contract.detail.label", "label", "Field", grounding="none"),
+        # Checkbox answers ("Yes", "Negotiated (RFP)") are read from a mark, not
+        # copied; the adapter checks literal values against their evidence.
+        F("contract.detail.value", "value", "Value", grounding="derived"),
+        F("contract.detail.section", "section", "Section", grounding="none"),
+        F("contract.detail.source_label", "source_label", "Source Label", grounding="none"),
+        F("contract.detail.field_id", "field_id", "Field ID", grounding="none"),
+    ),
+)
+
+LINE_ITEMS = DatasetDefinition(
+    dataset_id="line_items",
+    display_name="Line Items",
+    cardinality="repeating",
+    description="Schedule line items (CLINs) under the source's column headings, merged across continuation pages.",
+    identity_fields=("contract.line.item_number",),
+    fields=(
+        F("contract.line.item_number", "item_number", "Item No.", "code", expected=True),
+        F("contract.line.description", "description", "Supplies/Services"),
+        F("contract.line.quantity", "quantity", "Quantity"),
+        F("contract.line.unit", "unit", "Unit"),
+        F("contract.line.unit_price", "unit_price", "Unit Price"),
+        F("contract.line.amount", "amount", "Amount"),
+    ),
+)
+
+DELIVERY_INFORMATION = DatasetDefinition(
+    dataset_id="delivery_information",
+    display_name="Delivery Information",
+    cardinality="repeating",
+    description="Delivery schedule rows under the source's column headings.",
+    identity_fields=("contract.delivery.clin",),
+    fields=(
+        F("contract.delivery.clin", "clin", "CLIN", "code", expected=True),
+        F("contract.delivery.delivery_date", "delivery_date", "Delivery Date"),
+        F("contract.delivery.quantity", "quantity", "Quantity"),
+        F("contract.delivery.ship_to", "ship_to", "Ship To Address"),
+        F("contract.delivery.dodaac_cage", "dodaac_cage", "DODAAC / CAGE"),
+    ),
+)
+
+CONTRACT_CLAUSES = DatasetDefinition(
+    dataset_id="contract_clauses",
+    display_name="Clauses",
+    cardinality="repeating",
+    description=(
+        "Clauses with the incorporation context of the section heading they appear under; "
+        "full-text clauses keep their complete text."
+    ),
+    identity_fields=("contract.contract_clause.clause_number",),
+    grid_fields=(
+        "contract.contract_clause.clause_number",
+        "contract.contract_clause.title",
+        "contract.contract_clause.date",
+        "contract.contract_clause.incorporation_type",
+    ),
+    fields=(
+        F("contract.contract_clause.clause_number", "clause_number", "Clause Number", "code", expected=True),
+        F("contract.contract_clause.title", "title", "Title", expected=True),
+        F("contract.contract_clause.date", "date", "Date"),
+        F("contract.contract_clause.regulation", "regulation", "Regulation", grounding="derived"),
+        F("contract.contract_clause.incorporation_type", "incorporation_type", "Incorporation Type", grounding="derived"),
+        # Joined from the pieces printed around the number and title.
+        F("contract.contract_clause.alternate", "alternate", "Alternate / Deviation", grounding="derived"),
+        F("contract.contract_clause.source_heading", "source_heading", "Section Heading"),
+        F("contract.contract_clause.text", "text", "Clause Text"),
+    ),
+)
+
+# One transformation dataset with the target clause-library columns. Only
+# values the source supports or an approved deterministic rule produces are
+# filled; everything else stays empty until a rule or reference is approved.
+_TRANSFORMATION_COLUMNS = (
+    ("action", "Action"), ("date_published", "Date Published"), ("number", "Number"), ("title", "Title"),
+    ("display_name", "Display Name"), ("intent", "Intent"), ("language", "Language"),
+    ("clause_type", "Clause Type"), ("status", "Status"), ("description", "Description"),
+    ("provision_yn", "Provision Yn"), ("global_yn", "Global Yn"), ("lock_text_yn", "Lock Text Yn"),
+    ("insert_by_reference", "Insert By Reference"), ("text", "Text"), ("start_date", "Start Date"),
+    ("attribute_category", "Attribute Category"), ("attribute1", "Attribute 1"), ("source_xml", "Source XML"),
+)
+_DERIVED_TRANSFORMATION = {"display_name", "insert_by_reference"}
+
+CLAUSE_TRANSFORMATION = DatasetDefinition(
+    dataset_id="clause_transformation",
+    display_name="Clause Transformation",
+    cardinality="repeating",
+    description="Clause records in the target clause-library columns (source-supported values only).",
+    identity_fields=("contract.clause_transform.number",),
+    fields=tuple(
+        F(
+            f"contract.clause_transform.{key}",
+            key,
+            label,
+            grounding="derived" if key in _DERIVED_TRANSFORMATION else "evidence",
+        )
+        for key, label in _TRANSFORMATION_COLUMNS
     ),
 )
 
@@ -379,11 +495,269 @@ def _summary_record(
     ]
 
 
+# V3 summary columns folded into Contract Details when the forms did not
+# already supply them (canonical id they correspond to, if any).
+_V3_DETAIL_FIELDS = {
+    "contract_vehicle": None,
+    "agency_office": "contract.issued_by",
+    "contractor": "contract.offeror",
+    "award_date": "contract.award_date",
+    "ceiling_max_aggregate": None,
+    "minimum_guarantee": None,
+    "base_period": None,
+    "options": None,
+    "max_duration": None,
+    "task_order_range": None,
+    "naics": "contract.naics",
+    "size_standard": None,
+}
+
+
+# V3 summary columns V3 itself treats as derived (e.g. "5 years" from a
+# sentence) keep that rule when shown in Contract Details.
+_SUMMARY_GROUNDING = {field.key: field.grounding for field in CONTRACT_SUMMARY.fields}
+
+
+def _literal_check(value: str, evidence: str) -> list[ValidationCheck]:
+    grounded = value_in_evidence(value, evidence, "text")
+    return [
+        ValidationCheck(
+            check="grounded_in_evidence",
+            passed=grounded,
+            message=None if grounded else "Value does not appear as-is in its source evidence.",
+        )
+    ]
+
+
+# Values read from a checkbox mark or composed from a number and its printed
+# unit ("10 calendar days") are not literal copies of their evidence.
+_DERIVED_DETAIL_IDS = {
+    "contract.solicitation_type",
+    "contract.bonds_required",
+    "contract.bond_due_days",
+    "contract.performance_start",
+    "contract.performance_period_type",
+    "contract.offer_guarantee_required",
+    "contract.acceptance_period",
+    "contract.page_of_pages",
+}
+
+
+def _details_records(
+    document: Document, structure: dict, doc: NormalizedV3Document, geometry: PageGeometry
+) -> list[RawRecord]:
+    records: list[RawRecord] = []
+    present: set[str] = set()
+    for field in structure.get("fields", []):
+        present.add(field["field_id"])
+        provenance = make_provenance(
+            document,
+            page=field["page"],
+            evidence=field["evidence"],
+            bbox=field["bbox"],
+            extraction_method=field["method"],
+            region_id=f"contract_details:{field['field_id']}",
+        )
+        checks = [] if field["field_id"] in _DERIVED_DETAIL_IDS else _literal_check(field["value"], field["evidence"])
+        records.append(
+            RawRecord(
+                record_id=f"detail:{field['field_id']}",
+                values={
+                    "label": field["label"],
+                    "value": field["value"],
+                    "section": field["section"],
+                    "source_label": field["source_label"],
+                    "field_id": field["field_id"],
+                },
+                cell_provenance={"value": provenance},
+                cell_checks={"value": checks},
+            )
+        )
+    summary = doc.contract_summary
+    if summary is not None:
+        values = summary.model_dump()
+        headers = dict(_SUMMARY_COLUMNS)
+        for attr, canonical in _V3_DETAIL_FIELDS.items():
+            value = values.get(attr)
+            field_prov = summary.field_provenance.get(headers[attr])
+            if not value or not field_prov or not field_prov.get("evidence") or (canonical and canonical in present):
+                continue
+            field_id = canonical or f"contract.{attr}"
+            evidence = field_prov.get("evidence")
+            derived = _SUMMARY_GROUNDING.get(attr) == "derived"
+            records.append(
+                RawRecord(
+                    record_id=f"detail:{field_id}",
+                    values={
+                        "label": headers[attr],
+                        "value": str(value),
+                        "section": FINANCIAL,
+                        "source_label": headers[attr],
+                        "field_id": field_id,
+                    },
+                    cell_provenance={
+                        "value": make_provenance(
+                            document,
+                            page=field_prov.get("page"),
+                            evidence=evidence,
+                            bbox=geometry.pdf_bbox(field_prov.get("page"), field_prov.get("bbox"), field_prov.get("bbox_space")),
+                            extraction_method=field_prov.get("extraction_method"),
+                            region_id=f"contract_details:{field_id}",
+                        )
+                    },
+                    cell_checks={"value": [] if derived else _literal_check(str(value), evidence)},
+                )
+            )
+    return records
+
+
+_AMOUNT_CODES = re.compile(r"\d|^(NSP|N/A|UNDEFINED|NOT TO EXCEED|TBD)\b", re.IGNORECASE)
+
+
+def _amount_checks(values: dict) -> dict[str, list[ValidationCheck]]:
+    """An amount cell must carry a figure or a printed code (NSP, N/A);
+    a lone label such as "Firm Price" means the figure was not captured."""
+    amount = values.get("amount")
+    if not amount:
+        return {}
+    passed = bool(_AMOUNT_CODES.search(amount.strip()))
+    return {
+        "amount": [
+            ValidationCheck(
+                check="amount_has_figure",
+                passed=passed,
+                message=None if passed else "No amount figure was captured for this line item.",
+            )
+        ]
+    }
+
+
+def _table_records(document: Document, structure: dict, kind: str) -> tuple[list[RawRecord], dict[str, str]]:
+    table = structure.get("tables", {}).get(kind)
+    if not table:
+        return [], {}
+    prefix = "contract.line" if kind == "line_items" else "contract.delivery"
+    labels = {f"{prefix}.{column['key']}": column["header"] for column in table["columns"]}
+    records: list[RawRecord] = []
+    for index, record in enumerate(table["records"]):
+        item = record["values"].get("item_number") or record["values"].get("clin") or str(index)
+        records.append(
+            RawRecord(
+                record_id=f"{kind}:{index}:{item}",
+                values=record["values"],
+                # Each cell's evidence is the source text read from that cell
+                # (a delivery row's columns interleave line by line).
+                cell_provenance={
+                    key: make_provenance(
+                        document,
+                        page=page,
+                        evidence=record["values"].get(key) or record["evidence"],
+                        bbox=bbox,
+                        extraction_method="schedule_table_layout",
+                        region_id=f"{kind}:{index}:{key}",
+                        anchor=item,
+                    )
+                    for key, (page, bbox) in record["cell_boxes"].items()
+                },
+                cell_checks=_amount_checks(record["values"]) if kind == "line_items" else {},
+            )
+        )
+    return records, labels
+
+
+def _clause_records(document: Document, structure: dict) -> tuple[list[RawRecord], list[RawRecord]]:
+    clauses: list[RawRecord] = []
+    transforms: list[RawRecord] = []
+    for index, clause in enumerate(structure.get("clauses", [])):
+        record_id = f"clause:{index}:{clause['clause_number']}"
+        row = make_provenance(
+            document,
+            page=clause["page"],
+            evidence=clause["evidence"],
+            bbox=clause["bbox"],
+            extraction_method="clause_section_layout",
+            region_id=record_id,
+            anchor=clause["clause_number"],
+        )
+        heading = make_provenance(
+            document,
+            page=clause["page"],
+            evidence=clause["source_heading"],
+            extraction_method="clause_section_layout",
+            region_id=f"{record_id}:context",
+        )
+        text = clause.get("text")
+        text_provenance = (
+            make_provenance(
+                document,
+                page=clause["page"],
+                evidence=text,
+                extraction_method="clause_section_layout",
+                region_id=f"{record_id}:text",
+                anchor=clause["clause_number"],
+            )
+            if text
+            else None
+        )
+        cell_provenance = {
+            "incorporation_type": heading,
+            "regulation": heading,
+            "source_heading": heading,
+        }
+        if text_provenance:
+            cell_provenance["text"] = text_provenance
+        clauses.append(
+            RawRecord(
+                record_id=record_id,
+                values={
+                    "clause_number": clause["clause_number"],
+                    "title": clause["title"],
+                    "date": clause.get("date"),
+                    "incorporation_type": clause["incorporation_type"],
+                    "regulation": clause["regulation"],
+                    "alternate": clause.get("alternate"),
+                    "source_heading": clause["source_heading"],
+                    "text": text,
+                },
+                provenance=row,
+                cell_provenance=cell_provenance,
+            )
+        )
+        by_reference = clause["incorporation_type"] == "Incorporated by Reference"
+        transform_provenance = {"text": text_provenance} if text_provenance else {}
+        transform_provenance["insert_by_reference"] = heading
+        transforms.append(
+            RawRecord(
+                record_id=f"transform:{index}:{clause['clause_number']}",
+                values={
+                    "number": clause["clause_number"],
+                    "title": clause["title"],
+                    "display_name": f"{clause['clause_number']} {clause['title']}",
+                    "insert_by_reference": "Y" if by_reference else "N",
+                    "text": text,
+                },
+                provenance=row,
+                cell_provenance=transform_provenance,
+            )
+        )
+    return clauses, transforms
+
+
 def adapt_contract_v3(database: Session, document: Document) -> AdapterResult:
     doc = get_normalized_v3_document(database, document.id)
     geometry = PageGeometry(database, document.id)
 
+    structure = load_contract_structure(database, document)
+    line_items, line_labels = _table_records(document, structure, "line_items")
+    deliveries, delivery_labels = _table_records(document, structure, "delivery_information")
+    clauses, transforms = _clause_records(document, structure)
+
     records: dict[str, list[RawRecord]] = {
+        "contract_details": _details_records(document, structure, doc, geometry),
+        "line_items": line_items,
+        "delivery_information": deliveries,
+        "contract_clauses": clauses,
+        "clause_transformation": transforms,
         "contract_summary": _summary_record(document, geometry, doc),
         "clins": [
             _row_record(document, geometry, "clin", i, row, anchor=row.clin or None)
@@ -428,7 +802,11 @@ def adapt_contract_v3(database: Session, document: Document) -> AdapterResult:
             for i, row in enumerate(doc.qa_review)
         ],
     }
-    return AdapterResult(records=records, outcome_provenance=document.ingestion_provenance)
+    return AdapterResult(
+        records=records,
+        outcome_provenance=document.ingestion_provenance,
+        column_labels={"line_items": line_labels, "delivery_information": delivery_labels},
+    )
 
 
 CONTRACT_V3_PROFILE = StagingProfile(
@@ -441,6 +819,11 @@ CONTRACT_V3_PROFILE = StagingProfile(
     ),
     document_families=("government_contract",),
     datasets=(
+        CONTRACT_DETAILS,
+        LINE_ITEMS,
+        DELIVERY_INFORMATION,
+        CONTRACT_CLAUSES,
+        CLAUSE_TRANSFORMATION,
         CONTRACT_SUMMARY,
         CLINS,
         FUNDING,
@@ -454,6 +837,7 @@ CONTRACT_V3_PROFILE = StagingProfile(
         QA_REVIEW,
     ),
     adapter=adapt_contract_v3,
+    materializer=materialize_contract_structure,
     export_capabilities=(
         ExportCapability(
             capability_id="professional_excel",

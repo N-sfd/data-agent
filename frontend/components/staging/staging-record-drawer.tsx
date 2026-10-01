@@ -22,6 +22,8 @@ interface StagingRecordDrawerProps {
   record: StagingRecord;
   onClose: () => void;
   onOpenSource?: (request: SourceViewRequest) => void;
+  /** Business views list only fields that hold a value. */
+  hideBlank?: boolean;
 }
 
 const LONG_VALUE = 400;
@@ -35,6 +37,7 @@ export default function StagingRecordDrawer({
   record,
   onClose,
   onOpenSource,
+  hideBlank = false,
 }: StagingRecordDrawerProps) {
   const [loaded, setLoaded] = useState<{ id: string; record: StagingRecord | null; error: string | null } | null>(
     null,
@@ -96,6 +99,7 @@ export default function StagingRecordDrawer({
               const cell = full.cells[column.canonical_field];
               if (!cell) return null;
               const text = formatCellValue(cell);
+              if (hideBlank && !text) return null;
               const requestId = `${dataset.dataset_id}:${full.record_id}:${column.canonical_field}`;
               const request = cellSourceRequest(cell, requestId);
               return (

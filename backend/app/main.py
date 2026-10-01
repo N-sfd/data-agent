@@ -60,6 +60,7 @@ from app.models import document_qa_review as document_qa_review_model  # noqa: F
 from app.models import document_staging_workbook as document_staging_workbook_model  # noqa: F401
 from app.models import document_source_structure as document_source_structure_model  # noqa: F401
 from app.models import document_far_record as document_far_record_model  # noqa: F401
+from app.models import document_contract_structure as document_contract_structure_model  # noqa: F401
 from app.models import staged_upload as staged_upload_model  # noqa: F401
 from app.models import far_master_clause as far_master_clause_model  # noqa: F401
 from app.models import (  # noqa: F401

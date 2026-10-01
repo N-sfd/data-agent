@@ -40,6 +40,12 @@ export interface PresentationSection {
   /** Populated but too sparse for the grid; shown in row details. */
   detailColumns?: StagingColumn[];
   noun?: [string, string];
+  /** Alternative views of one tab ("Contract View" / "Transformation View"). */
+  view?: string;
+  /** Review state as a subtle row mark; the identity value opens the record. */
+  inlineReview?: boolean;
+  /** Short note under the section heading. */
+  note?: string;
 }
 
 export interface PresentationGroup {
@@ -565,7 +571,138 @@ function subtitleFrom(groups: GroupDraft[], heading: string): string | null {
   return null;
 }
 
+// --- contract staging: three source-adaptive tabs ---------------------------------
+
+const CONTRACT_SECTION_ORDER = [
+  "Solicitation & Award",
+  "Issuing Office",
+  "Contractor / Offeror",
+  "Contacts",
+  "Performance",
+  "Financial / Administrative",
+];
+
+/** A grid that keeps the source's own column headings ("MAX QUANTITY",
+ * "Unit Price") — never shortened or renamed for display. */
+function sourceGrid(
+  dataset: StagingDataset | undefined,
+  title: string,
+  noun: [string, string],
+  options: { allColumns?: boolean; inlineReview?: boolean; view?: string; note?: string } = {},
+): PresentationSection | null {
+  if (!dataset || dataset.records.length === 0) return null;
+  const { columns, detailColumns } = gridColumns(dataset);
+  const byField = new Map(dataset.columns.map((column) => [column.canonical_field, column]));
+  // A target template (Transformation View) shows every target column,
+  // filled or not; business grids only populated source columns.
+  const shown = options.allColumns ? dataset.columns : columns.map((column) => byField.get(column.canonical_field) ?? column);
+  if (shown.length === 0) return null;
+  return {
+    id: options.view ? `${dataset.dataset_id}:${options.view}` : dataset.dataset_id,
+    title,
+    pattern: "grid",
+    items: [],
+    dataset,
+    columns: shown,
+    detailColumns: options.allColumns ? [] : detailColumns,
+    noun,
+    view: options.view,
+    inlineReview: options.inlineReview,
+    note: options.note,
+  };
+}
+
+function contractDetailSections(dataset: StagingDataset): PresentationSection[] {
+  const buckets = new Map<string, FieldItem[]>();
+  for (const record of dataset.records) {
+    const cells = record.cells;
+    const cell = cells["contract.detail.value"];
+    const label = valueText(cells["contract.detail.label"]);
+    if (!cell || isBlank(cell.value) || !label) continue;
+    const section = valueText(cells["contract.detail.section"]) || "Solicitation & Award";
+    buckets.set(section, [
+      ...(buckets.get(section) ?? []),
+      {
+        id: `${dataset.dataset_id}:${record.record_id}`,
+        label,
+        cell,
+        context: section,
+        sourceLabel: valueText(cells["contract.detail.source_label"]) || null,
+        fieldId: valueText(cells["contract.detail.field_id"]) || null,
+        category: null,
+      },
+    ]);
+  }
+  const rank = (title: string) => {
+    const index = CONTRACT_SECTION_ORDER.indexOf(title);
+    return index === -1 ? CONTRACT_SECTION_ORDER.length : index;
+  };
+  return [...buckets.entries()]
+    .sort(([a], [b]) => rank(a) - rank(b))
+    .map(([title, items]) => ({ id: `contract_details:${title}`, title, pattern: "detail" as const, items }));
+}
+
+/** Contracts: Contract Details, Contract Data and Clauses — what is inside
+ * each comes from the document's own form, tables and clause sections. */
+function composeContract(workbook: StagingWorkbook): PresentationManifest {
+  const find = (id: string) => workbook.datasets.find((dataset) => dataset.dataset_id === id);
+  const reasons: string[] = [];
+  const groups: PresentationGroup[] = [];
+
+  const details = find("contract_details");
+  let detailSections = details && details.records.length > 0 ? contractDetailSections(details) : [];
+  const summary = find("contract_summary");
+  if (detailSections.length === 0 && summary && summary.records.length > 0) {
+    const items = singleItems(summary, "Contract Details");
+    if (items.length > 0) detailSections = [{ id: "contract_summary", title: null, pattern: "detail", items }];
+  }
+  if (detailSections.length > 0) groups.push({ id: "contract_details", label: "Contract Details", sections: detailSections });
+
+  const lineItems = find("line_items");
+  const dataSections = [
+    sourceGrid(
+      lineItems && lineItems.records.length > 0 ? lineItems : find("clins"),
+      "Line Items",
+      ["line item", "line items"],
+      { inlineReview: true },
+    ),
+    sourceGrid(find("delivery_information"), "Delivery Information", ["delivery", "deliveries"], { inlineReview: true }),
+    sourceGrid(find("funding"), "Funding", ["funding line", "funding lines"], { inlineReview: true }),
+    sourceGrid(find("attachments"), "Attachments / References", ["attachment", "attachments"], { inlineReview: true }),
+  ].filter((section): section is PresentationSection => section !== null);
+  if (dataSections.length > 0) groups.push({ id: "contract_data", label: "Contract Data", sections: dataSections });
+
+  const clauses = find("contract_clauses");
+  const clauseSections = [
+    sourceGrid(clauses, "Clauses", ["clause", "clauses"], { inlineReview: true, view: "Contract View" }),
+    sourceGrid(find("clause_transformation"), "Clause Transformation", ["clause", "clauses"], {
+      allColumns: true,
+      inlineReview: true,
+      view: "Transformation View",
+      note: "Only source-supported values are filled; empty columns have no approved source or rule yet.",
+    }),
+  ].filter((section): section is PresentationSection => section !== null);
+  if (clauseSections.length > 0) groups.push({ id: "clauses", label: "Clauses", sections: clauseSections });
+
+  for (const dataset of workbook.datasets) reasons.push(`contract:${dataset.dataset_id}:${dataset.records.length}`);
+  const drafts = groups.map((group, rank) => ({ ...group, rank }));
+  const heading = headingFrom(workbook, drafts);
+  return {
+    heading,
+    subtitle: subtitleFrom(drafts, heading),
+    family: workbook.processing_metadata.document_family,
+    groups,
+    technical: workbook.datasets,
+    reasons,
+  };
+}
+
 export function composePresentation(workbook: StagingWorkbook): PresentationManifest {
+  // A PDF Portfolio (special source) still explains itself through its
+  // source documents, whatever the profile.
+  if (workbook.profile.profile_id === "contract_v3" && workbook.outcome.status !== "special_source") {
+    return composeContract(workbook);
+  }
   const reasons: string[] = [];
   const drafts = new Map<string, GroupDraft>();
   const add = (id: string, label: string, rank: number, ...sections: (PresentationSection | null)[]) => {

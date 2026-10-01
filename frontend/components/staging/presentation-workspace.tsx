@@ -107,13 +107,38 @@ function GroupBody({
   onSelect: (target: EvidenceTarget) => void;
   onOpenSource?: (request: SourceViewRequest) => void;
 }) {
+  // A tab may offer alternative views of the same records (Contract View /
+  // Transformation View); sections without a view always show.
+  const views = [...new Set(group.sections.map((section) => section.view).filter((view): view is string => Boolean(view)))];
+  const [view, setView] = useState(views[0] ?? "");
+  const activeView = views.includes(view) ? view : views[0];
+  const sections = group.sections.filter((section) => !section.view || section.view === activeView);
   return (
     <div className="space-y-6">
-      {group.sections.map((section) => (
+      {views.length > 1 && (
+        <div className="flex gap-0.5 self-start rounded-lg border border-border bg-surface-soft p-0.5 text-xs" role="group" aria-label={`${group.label} view`}>
+          {views.map((name) => (
+            <button
+              key={name}
+              type="button"
+              aria-pressed={name === activeView}
+              onClick={() => setView(name)}
+              className={[
+                "rounded-md px-3 py-1 font-medium",
+                name === activeView ? "bg-surface text-foreground shadow-sm" : "text-text-secondary hover:text-foreground",
+              ].join(" ")}
+            >
+              {name}
+            </button>
+          ))}
+        </div>
+      )}
+      {sections.map((section) => (
         <section key={section.id} aria-label={section.title ?? group.label} className="space-y-2">
           {section.title && (
             <h4 className="text-xs font-semibold uppercase tracking-[0.08em] text-text-secondary">{section.title}</h4>
           )}
+          {section.note && <p className="text-xs text-text-muted">{section.note}</p>}
           {section.pattern === "grid" ? (
             <RecordGrid section={section} groupLabel={group.label} documentId={documentId} onSelect={onSelect} onOpenSource={onOpenSource} />
           ) : section.pattern === "summary" ? (
@@ -270,7 +295,8 @@ function RecordGrid({
   const pages = Math.max(1, Math.ceil(records.length / PAGE_SIZE));
   const clamped = Math.min(page, pages - 1);
   const paged = records.slice(clamped * PAGE_SIZE, clamped * PAGE_SIZE + PAGE_SIZE);
-  const needsDetails = flagged > 0 || (section.detailColumns?.length ?? 0) > 0 || Boolean(dataset.compact);
+  const needsDetails =
+    !section.inlineReview && (flagged > 0 || (section.detailColumns?.length ?? 0) > 0 || Boolean(dataset.compact));
   const [singular, plural] = section.noun ?? ["record", "records"];
   const identity = columns.find((column) => /description|title|name|clause|far_number|clin/i.test(column.canonical_field)) ?? columns[0];
 
@@ -339,7 +365,8 @@ function RecordGrid({
       )}
 
       <div className="max-h-[65vh] overflow-auto rounded-xl border border-border bg-surface">
-        <table className="w-full text-sm">
+        {/* Wide target templates scroll sideways instead of squeezing every value. */}
+        <table className={columns.length > 8 ? "w-max min-w-full text-sm" : "w-full text-sm"}>
           <thead className="sticky top-0 z-10 bg-surface-soft">
             <tr>
               {columns.map((column) => (
@@ -360,13 +387,33 @@ function RecordGrid({
           <tbody className="divide-y divide-border">
             {paged.map((record) => (
               <tr key={record.record_id} className="hover:bg-surface-soft/60">
-                {columns.map((column) => {
+                {columns.map((column, index) => {
                   const cell = record.cells[column.canonical_field];
                   const text = cell && !isBlank(cell.value) ? formatCellValue(cell) : "";
+                  // Inline review: the record's identity (clause number,
+                  // title) opens its details; review state is a small mark.
+                  const opensRecord = section.inlineReview && (index === 0 || column.canonical_field.endsWith(".title"));
                   return (
-                    <td key={column.canonical_field} className="max-w-[24rem] px-3 py-2 align-top" title={text}>
-                      {text ? (
-                        <ValueButton text={text} onOpen={() => openCell(record, column)} />
+                    <td
+                      key={column.canonical_field}
+                      // Content-sized (wide) tables: short values (numbers, codes) are
+                      // never truncated; long text keeps its ellipsis.
+                      className={`max-w-[24rem] px-3 py-2 align-top ${columns.length > 8 && text.length <= 32 ? "pr-6" : ""}`}
+                      title={text}
+                    >
+                      {text && section.inlineReview && index === 0 && record.record_status === "Needs Review" ? (
+                        <span className="flex min-w-0 items-baseline gap-1">
+                          <span className="shrink-0 text-[11px] font-semibold text-warning" title="Needs review — open details" aria-label="Needs review">
+                            !
+                          </span>
+                          <ValueButton text={text} onOpen={() => setOpenRecord(record)} />
+                        </span>
+                      ) : text ? (
+                        <ValueButton
+                          text={text}
+                          onOpen={() => (opensRecord ? setOpenRecord(record) : openCell(record, column))}
+                          className={columns.length > 8 && text.length <= 32 ? "max-w-none" : ""}
+                        />
                       ) : null}
                     </td>
                   );
@@ -420,6 +467,7 @@ function RecordGrid({
           record={openRecord}
           onClose={() => setOpenRecord(null)}
           onOpenSource={onOpenSource}
+          hideBlank={section.inlineReview}
         />
       )}
     </div>
