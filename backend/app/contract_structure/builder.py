@@ -7,6 +7,7 @@ from __future__ import annotations
 from dataclasses import asdict
 
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.contract_structure.clauses import read_clauses
@@ -67,7 +68,11 @@ def materialize_contract_structure(database: Session, document: Document) -> dic
     else:
         row.extractor_version = EXTRACTOR_VERSION
         row.payload = payload
-    database.commit()
+    try:
+        database.commit()
+    except IntegrityError:
+        # Two first opens rebuilt it at once; the other one stored it.
+        database.rollback()
     return payload
 
 

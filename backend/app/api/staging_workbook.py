@@ -50,8 +50,11 @@ def _workbook_or_404(database: Session, document_id: str) -> StagingWorkbook:
 _GZIP_MIN_BYTES = 256 * 1024
 
 
+# Workbook handlers are plain functions: FastAPI runs them in its thread
+# pool, so building a workbook (or a contract's first-open structure
+# rebuild) never blocks other requests on the event loop.
 @router.get("/{document_id}/staging-workbook", response_model=StagingWorkbook)
-async def read_staging_workbook(
+def read_staging_workbook(
     document_id: str,
     request: Request,
     database: Session = Depends(get_database),
@@ -70,7 +73,7 @@ async def read_staging_workbook(
     "/{document_id}/staging-workbook/datasets/{dataset_id}/records/{record_id:path}",
     response_model=StagingRecord,
 )
-async def read_staging_record(
+def read_staging_record(
     document_id: str,
     dataset_id: str,
     record_id: str,
@@ -89,7 +92,7 @@ async def read_staging_record(
 
 
 @router.get("/{document_id}/staging-workbook/export.xlsx")
-async def export_staging_workbook_xlsx(
+def export_staging_workbook_xlsx(
     document_id: str,
     database: Session = Depends(get_database),
     actor: ActorContext = Depends(require_permission("export.read")),
@@ -104,7 +107,7 @@ async def export_staging_workbook_xlsx(
 
 
 @router.get("/{document_id}/staging-workbook/export.json")
-async def export_staging_workbook_json(
+def export_staging_workbook_json(
     document_id: str,
     database: Session = Depends(get_database),
     actor: ActorContext = Depends(require_permission("export.read")),
@@ -121,7 +124,7 @@ async def export_staging_workbook_json(
 
 
 @router.get("/{document_id}/staging-workbook/datasets/{dataset_id}.csv")
-async def export_staging_dataset_csv(
+def export_staging_dataset_csv(
     document_id: str,
     dataset_id: str,
     database: Session = Depends(get_database),
@@ -142,7 +145,7 @@ async def export_staging_dataset_csv(
 
 
 @router.get("/{document_id}/staging-workbook/exports/{export_id}")
-async def export_staging_profile_artifact(
+def export_staging_profile_artifact(
     document_id: str,
     export_id: str,
     database: Session = Depends(get_database),
@@ -188,7 +191,7 @@ _CELL_ID = re.compile(r"^(?P<table>.+):r(?P<row>\d+)(?::c(?P<col>\d+))?$")
 
 
 @router.get("/{document_id}/source-structure", response_model=StructuredSourceDocument)
-async def read_source_structure(
+def read_source_structure(
     document_id: str,
     database: Session = Depends(get_database),
     actor: ActorContext = Depends(require_permission("documents.view")),
@@ -200,7 +203,7 @@ async def read_source_structure(
 
 
 @router.get("/{document_id}/pages/{page_number}/transcript")
-async def read_page_transcript(
+def read_page_transcript(
     document_id: str,
     page_number: int,
     database: Session = Depends(get_database),
@@ -223,7 +226,7 @@ async def read_page_transcript(
     "/{document_id}/source-structure/regions/{region_id:path}",
     response_model=RegionContext,
 )
-async def read_region_context(
+def read_region_context(
     document_id: str,
     region_id: str,
     database: Session = Depends(get_database),
