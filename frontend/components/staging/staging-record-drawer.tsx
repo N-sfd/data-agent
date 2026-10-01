@@ -73,7 +73,7 @@ export default function StagingRecordDrawer({
     .join(" · ");
 
   return (
-    <div className="fixed inset-0 z-40 flex justify-end" role="dialog" aria-modal="true" aria-label="Evidence">
+    <div className="fixed inset-0 z-40 flex justify-end" role="dialog" aria-modal="true" aria-label="Record details">
       <button type="button" aria-label="Close details" className="flex-1 bg-black/20" onClick={onClose} />
       <aside className="flex h-full w-full max-w-2xl flex-col border-l border-border bg-surface shadow-xl">
         <header className="flex items-start justify-between gap-3 border-b border-border px-5 py-4">

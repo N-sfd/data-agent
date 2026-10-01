@@ -140,6 +140,11 @@ export interface DocumentSearchResponse {
   total: number;
 }
 
+export interface DocumentStatusCountsResponse {
+  total: number;
+  by_status: Partial<Record<DocumentStatus, number>>;
+}
+
 export interface GlobalAuditEntry {
   document_id: string;
   document_filename: string;
@@ -673,7 +678,7 @@ export interface MetadataField {
 
   confidence: number;
 
-  extraction_method: "label_value" | "regex" | "ai";
+  extraction_method: string;
 
   evidence: SourceEvidence;
 

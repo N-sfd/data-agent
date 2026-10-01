@@ -369,6 +369,20 @@ def get_metadata_field(
     )
 
 
+def _persisted_evidence(evidence_json: dict | None) -> SourceEvidence:
+    """Rows written by other extractors (target, V3 all-fields) store a
+    looser evidence shape; fill the keys SourceEvidence requires."""
+
+    evidence = dict(evidence_json or {})
+    page_number = evidence.get("page_number")
+    evidence["page_number"] = page_number if isinstance(page_number, int) else 0
+    evidence["source_text"] = evidence.get("source_text") or ""
+    evidence["source_reference"] = evidence.get("source_reference") or (
+        f"page {page_number}" if isinstance(page_number, int) else ""
+    )
+    return SourceEvidence(**evidence)
+
+
 def field_to_result(
     field: DocumentMetadataField,
 ) -> MetadataFieldResult:
@@ -381,7 +395,7 @@ def field_to_result(
         value=field.value,
         confidence=field.confidence,
         extraction_method=field.extraction_method,
-        evidence=SourceEvidence(**field.evidence_json),
+        evidence=_persisted_evidence(field.evidence_json),
         verified=field.verified,
         review_status=field.review_status,
         original_value=field.original_value,

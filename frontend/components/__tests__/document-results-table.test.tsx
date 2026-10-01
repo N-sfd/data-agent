@@ -53,7 +53,7 @@ describe("DocumentResultsTable repository mode", () => {
 
     fireEvent.click(screen.getByText("invoice.pdf"));
     expect(pushMock).toHaveBeenCalledWith(
-      "/extraction/new?documentId=doc-1",
+      "/documents/doc-1",
     );
   });
 

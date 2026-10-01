@@ -102,11 +102,10 @@ class MetadataFieldResult(BaseModel):
 
     confidence: float = Field(ge=0, le=1)
 
-    extraction_method: Literal[
-        "label_value",
-        "regex",
-        "ai",
-    ]
+    # Rows in document_metadata_fields come from several extractors
+    # (contract metadata, target extraction, V3 all-fields), each with its
+    # own method vocabulary, so this mirrors the free-form DB column.
+    extraction_method: str = Field(min_length=1, max_length=40)
 
     evidence: SourceEvidence
 

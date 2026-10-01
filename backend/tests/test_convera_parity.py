@@ -15,11 +15,14 @@ from unittest.mock import patch
 from uuid import uuid4
 
 import fitz
+import pytest
 from fastapi.testclient import TestClient
 
+from app.core.config import get_settings
 from app.main import app
 from app.services.ai_provider import AIProvider
 from app.services.contract_field_schema import FieldSpec
+from app.services.document_provider import should_use_convera_documents
 
 
 client = TestClient(app)
@@ -178,6 +181,10 @@ def analyze(document_id: str) -> dict:
     return response.json()
 
 
+@pytest.mark.skipif(
+    not should_use_convera_documents(get_settings()),
+    reason="Convera document routing is disabled in this environment",
+)
 def test_convera_routes_extraction_method() -> None:
     document_id = upload_and_extract(
         create_pdf(["Contract Title: Convera Routing Check"]),
