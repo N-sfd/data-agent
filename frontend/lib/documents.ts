@@ -64,6 +64,8 @@ export interface DocumentSearchParams {
   confidence_min?: number;
   confidence_max?: number;
   repositoryStatus?: string;
+  /** Staging family: invoice, academic_transcript, government_contract … */
+  family?: string;
   limit?: number;
   offset?: number;
 }
@@ -87,6 +89,7 @@ export async function searchDocuments(
   if (params.repositoryStatus) {
     query.set("repository_status", params.repositoryStatus);
   }
+  if (params.family) query.set("family", params.family);
   query.set("limit", String(params.limit ?? 25));
   query.set("offset", String(params.offset ?? 0));
 

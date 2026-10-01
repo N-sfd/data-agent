@@ -64,10 +64,16 @@ export default function EvidenceDrawer({ target, onClose, onViewInDocument }: Ev
     ["Extraction method", method ?? ""],
     [
       "OCR confidence",
-      provenance?.ocr_confidence != null ? `${Math.round(provenance.ocr_confidence * 100)}%` : "",
+      provenance?.ocr_confidence != null
+        ? `${Math.round(provenance.ocr_confidence * 100)}%`
+        : provenance?.source_type === "image"
+          ? "Unavailable for this value"
+          : "",
     ],
+    ["OCR passes", provenance?.ocr_contested ? "Disagreed — confirm against the image" : ""],
+    ["Location", location ?? ""],
     ["Source label", target.sourceLabel ?? ""],
-    ["Field ID", target.fieldId ?? cell.canonical_field],
+    ["Canonical ID", target.fieldId ?? cell.canonical_field],
     ["Bounding box", bbox ? bbox.map((v) => v.toFixed(1)).join(", ") : ""],
     ["Source locator", locator?.dom_path ?? locator?.cell_ref ?? ""],
   ].filter(([, v]) => v) as [string, string][];

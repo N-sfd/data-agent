@@ -235,13 +235,7 @@ export default function StagingWorkbook({
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h3 className="text-base font-semibold text-foreground">{profile.display_name}</h3>
-          <p className="text-xs text-text-secondary">
-            {workbook.processing_metadata.document_family_label ?? "Select any value to see its source evidence."}
-          </p>
-        </div>
+      <div className="flex flex-wrap items-start justify-end gap-3">
         {profile.export_capabilities.length > 0 && (
           <div className="relative" ref={exportMenuRef}>
             <button
@@ -319,7 +313,12 @@ export default function StagingWorkbook({
           focus={documentFocus}
         />
       ) : (
-        <PresentationWorkspace workbook={workbook} documentId={documentId} onOpenSource={onOpenSource} />
+        <PresentationWorkspace
+          workbook={workbook}
+          documentId={documentId}
+          onOpenSource={onOpenSource}
+          onViewInDocument={viewInDocument}
+        />
       )}
     </div>
   );

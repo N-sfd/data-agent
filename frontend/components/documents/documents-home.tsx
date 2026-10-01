@@ -2,8 +2,8 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
-import { ChevronLeft, ChevronRight, Plus, Search } from "lucide-react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { ChevronLeft, ChevronRight, Plus, Search, X } from "lucide-react";
 
 import { ErrorState, LoadingState } from "@/components/layout/StatusState";
 import { searchDocuments } from "@/lib/documents";
@@ -25,6 +25,19 @@ const FILTERS: { id: Filter; label: string; status?: DocumentStatus }[] = [
   { id: "failed", label: "Failed", status: "failed" },
 ];
 
+/** Document types reachable from the Documents menu (staging families). */
+export const FAMILY_LABELS: Record<string, string> = {
+  invoice: "Invoices",
+  academic_transcript: "Transcripts & certificates",
+  government_contract: "Contracts",
+  far_regulation: "FAR regulations",
+  correspondence: "Correspondence",
+};
+
+function isFilter(value: string | null): value is Filter {
+  return FILTERS.some((item) => item.id === value);
+}
+
 const TONE: Record<OperationalStatus, string> = {
   ready: "text-success",
   verified: "text-success",
@@ -35,9 +48,12 @@ const TONE: Record<OperationalStatus, string> = {
 
 export default function DocumentsHome() {
   const router = useRouter();
-  const [filter, setFilter] = useState<Filter>("all");
-  const [query, setQuery] = useState("");
-  const [debouncedQuery, setDebouncedQuery] = useState("");
+  const params = useSearchParams();
+  const urlFilter = params.get("filter");
+  const family = params.get("family") ?? "";
+  const [filter, setFilter] = useState<Filter>(isFilter(urlFilter) ? urlFilter : "all");
+  const [query, setQuery] = useState(params.get("q") ?? "");
+  const [debouncedQuery, setDebouncedQuery] = useState(query.trim());
   const [reloadKey, setReloadKey] = useState(0);
   const [offset, setOffset] = useState(0);
   const [documents, setDocuments] = useState<DocumentSummary[]>([]);
@@ -49,10 +65,10 @@ export default function DocumentsHome() {
   useEffect(() => {
     let active = true;
     Promise.all([
-      searchDocuments({ limit: 1 }),
-      searchDocuments({ status: "review_required", limit: 1 }),
-      searchDocuments({ status: "completed", limit: 1 }),
-      searchDocuments({ status: "failed", limit: 1 }),
+      searchDocuments({ limit: 1, family: family || undefined }),
+      searchDocuments({ status: "review_required", limit: 1, family: family || undefined }),
+      searchDocuments({ status: "completed", limit: 1, family: family || undefined }),
+      searchDocuments({ status: "failed", limit: 1, family: family || undefined }),
     ])
       .then(([all, review, ready, failed]) => {
         if (!active) return;
@@ -69,7 +85,15 @@ export default function DocumentsHome() {
     return () => {
       active = false;
     };
-  }, []);
+  }, [family]);
+
+  // The Documents menu links here with ?filter= / ?family=; follow it.
+  const [seenFilter, setSeenFilter] = useState(urlFilter);
+  if (seenFilter !== urlFilter) {
+    setSeenFilter(urlFilter);
+    setFilter(isFilter(urlFilter) ? urlFilter : "all");
+    setOffset(0);
+  }
 
   useEffect(() => {
     const timer = setTimeout(() => setDebouncedQuery(query.trim()), 250);
@@ -87,6 +111,7 @@ export default function DocumentsHome() {
         const result = await searchDocuments({
           q: debouncedQuery || undefined,
           status,
+          family: family || undefined,
           limit: PAGE_SIZE,
           offset,
         });
@@ -106,7 +131,7 @@ export default function DocumentsHome() {
     return () => {
       active = false;
     };
-  }, [filter, debouncedQuery, offset, reloadKey]);
+  }, [filter, debouncedQuery, offset, reloadKey, family]);
 
   const from = total === 0 ? 0 : offset + 1;
   const to = Math.min(offset + PAGE_SIZE, total);
@@ -115,10 +140,22 @@ export default function DocumentsHome() {
     <div className="mx-auto w-full max-w-6xl px-4 py-8 sm:px-6">
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight text-foreground">Documents</h1>
+          <h1 className="text-2xl font-semibold tracking-tight text-foreground">
+            {family ? FAMILY_LABELS[family] ?? "Documents" : "Documents"}
+          </h1>
           <p className="mt-1 text-sm text-text-secondary">
             Every extracted document, with the staging profile Data Agent resolved.
           </p>
+          {family && (
+            <Link
+              href="/documents"
+              className="mt-2 inline-flex items-center gap-1 rounded-full border border-primary/30 bg-primary-soft px-2.5 py-0.5 text-xs font-medium text-primary hover:border-primary"
+              aria-label={`Clear type filter ${FAMILY_LABELS[family] ?? family}`}
+            >
+              Type: {FAMILY_LABELS[family] ?? family}
+              <X className="h-3 w-3" aria-hidden="true" />
+            </Link>
+          )}
         </div>
         <Link href="/extraction/new" className="btn-hero-primary">
           <Plus className="h-4 w-4" />

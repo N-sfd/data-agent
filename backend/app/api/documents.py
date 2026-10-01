@@ -23,6 +23,7 @@ from app.database.dependencies import get_database
 from app.models.document import Document
 from app.models.document_metadata_field import DocumentMetadataField
 from app.models.document_page import DocumentPage
+from app.models.document_staging_workbook import DocumentStagingWorkbook
 from app.models.metadata_field_audit_log import MetadataFieldAuditLog
 from app.schemas.contract_analysis import (
     GlobalAuditEntry,
@@ -1175,6 +1176,7 @@ async def search_documents(
     confidence_min: float | None = None,
     confidence_max: float | None = None,
     repository_status: str | None = None,
+    family: str | None = None,
     limit: int = 25,
     offset: int = 0,
     database: Session = Depends(get_database),
@@ -1237,6 +1239,17 @@ async def search_documents(
     if document_type:
         base_query = base_query.where(
             Document.document_type == document_type
+        )
+
+    if family:
+        # The staging family the document resolved to (invoice,
+        # academic_transcript, government_contract, correspondence …).
+        base_query = base_query.where(
+            Document.id.in_(
+                select(DocumentStagingWorkbook.document_id).where(
+                    DocumentStagingWorkbook.document_family == family
+                )
+            )
         )
 
     needs_computed_filter = bool(

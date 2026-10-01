@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { cellSourceRequest } from "@/components/staging/review-status";
@@ -227,18 +227,20 @@ describe("StagingWorkbook rendering", () => {
     getWorkbook.mockReset();
   });
 
-  it("renders the profile's own datasets as tabs and opens on the first with values", async () => {
+  it("renders business groups from the profile's datasets, omitting blank fields", async () => {
     getWorkbook.mockResolvedValue(contractWorkbook());
     render(<StagingWorkbook documentId="doc-1" />);
 
-    expect(await screen.findAllByText("Contract")).not.toHaveLength(0);
-    expect(screen.getByText("(contract_v3@1)")).toBeInTheDocument();
+    expect(await screen.findByRole("tab", { name: "Contract Summary" })).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "CLINs" })).toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: "Contract Summary" })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("tab", { name: "Contract Summary" }));
+    expect(screen.getByRole("heading", { name: "Government Contract" })).toBeInTheDocument();
     expect(screen.getByText("47QRCA25DSF07")).toBeInTheDocument();
-    expect(screen.getByText("Missing information")).toBeInTheDocument();
-    // No banner for a clean, populated outcome.
+    // NAICS has no value: not rendered as a "—" row.
+    expect(screen.queryByText("NAICS")).toBeNull();
+    expect(screen.queryByText("—")).toBeNull();
+    for (const technical of ["Location", "Method", "Status"]) {
+      expect(screen.queryByRole("columnheader", { name: technical })).toBeNull();
+    }
     expect(screen.queryByRole("status")).toBeNull();
   });
 
@@ -249,6 +251,10 @@ describe("StagingWorkbook rendering", () => {
           ...contractWorkbook().profile,
           profile_id: "generic_business_document",
           display_name: "Generic Business Document",
+        },
+        processing_metadata: {
+          ...contractWorkbook().processing_metadata,
+          document_family_label: "Unknown / General Document",
         },
         datasets: [
           dataset({
@@ -275,19 +281,21 @@ describe("StagingWorkbook rendering", () => {
     );
     render(<StagingWorkbook documentId="doc-1" />);
 
-    expect(await screen.findByText("Generic Business Document")).toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: /Key Fields/ })).toBeInTheDocument();
-    expect(screen.queryByRole("tab", { name: /CLINs/ })).toBeNull();
+    expect(await screen.findByRole("tab", { name: "Document Details" })).toBeInTheDocument();
+    expect(screen.queryByRole("tab", { name: /Key Fields|CLINs/ })).toBeNull();
+    expect(screen.getByText("Email")).toBeInTheDocument();
     expect(screen.getByText("billing@example.com")).toBeInTheDocument();
   });
 
-  it("opens source verification with the clicked CELL's provenance, not the row's", async () => {
+  it("opens a value's details, then source verification with that CELL's provenance", async () => {
     getWorkbook.mockResolvedValue(contractWorkbook());
     const onOpenSource = vi.fn();
     render(<StagingWorkbook documentId="doc-1" onOpenSource={onOpenSource} />);
 
     fireEvent.click(await screen.findByRole("tab", { name: /CLINs/ }));
     fireEvent.click(screen.getByRole("button", { name: "0.00" }));
+    expect(screen.getByRole("dialog", { name: "Evidence" })).toHaveTextContent("Max Amount");
+    fireEvent.click(screen.getByRole("button", { name: "View in Document" }));
 
     expect(onOpenSource).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -300,7 +308,7 @@ describe("StagingWorkbook rendering", () => {
     );
   });
 
-  it("explains a PDF Portfolio and opens Source Documents instead of a blank workbook", async () => {
+  it("explains a PDF Portfolio and shows its source documents instead of a blank workbook", async () => {
     const base = contractWorkbook();
     getWorkbook.mockResolvedValue({
       ...base,
@@ -337,6 +345,16 @@ describe("StagingWorkbook rendering", () => {
     expect(screen.getByText("Not extracted (embedded file)")).toBeInTheDocument();
     expect(getWorkbook).toHaveBeenCalledTimes(1);
   });
+
+  it("keeps every staged dataset in a collapsed technical view", async () => {
+    getWorkbook.mockResolvedValue(contractWorkbook());
+    render(<StagingWorkbook documentId="doc-1" />);
+    fireEvent.click(await screen.findByRole("button", { name: /Show technical view/ }));
+    for (const id of ["contract_summary", "clins", "source_documents"]) {
+      expect(screen.getByRole("button", { name: id })).toBeInTheDocument();
+    }
+    expect(screen.getByRole("columnheader", { name: "Method" })).toBeInTheDocument();
+  });
 });
 
 describe("cellSourceRequest", () => {
@@ -368,7 +386,8 @@ describe("cellSourceRequest", () => {
   });
 });
 
-describe("StagingWorkbook presentation", () => {
+
+describe("Generic presentation", () => {
   beforeEach(() => getWorkbook.mockReset());
 
   function genericWorkbook(): Workbook {
@@ -382,7 +401,15 @@ describe("StagingWorkbook presentation", () => {
           dataset_id: "document_summary",
           display_name: "Document Summary",
           cardinality: "single",
-          records: [{ record_id: "s", cells: { "document.document_type": cell("document.document_type", "Document Type", "Certificate", "Verified") }, record_status: "Verified", links_to_dataset: null }],
+          columns: [{ canonical_field: "document.document_type", key: "document_type", display_label: "Document Type", value_type: "text", expected: true }],
+          records: [
+            {
+              record_id: "s",
+              cells: { "document.document_type": cell("document.document_type", "Document Type", "Certificate", "Verified") },
+              record_status: "Verified",
+              links_to_dataset: null,
+            },
+          ],
         }),
         dataset({
           dataset_id: "key_fields",
@@ -397,14 +424,13 @@ describe("StagingWorkbook presentation", () => {
     };
   }
 
-  it("shows Overview / Tables labels and hides empty Contacts and Line Items for the generic profile", async () => {
+  it("shows business groups only and hides empty and technical datasets", async () => {
     getWorkbook.mockResolvedValue(genericWorkbook());
     render(<StagingWorkbook documentId="doc-1" />);
     const tabs = await screen.findByRole("tablist", { name: "Document sections" });
     const labels = Array.from(tabs.querySelectorAll("button")).map((b) => b.getAttribute("aria-label"));
-    expect(labels).toContain("Document Summary");
-    expect(labels).toContain("Other Information");
-    expect(labels?.join(" ")).not.toMatch(/Key Fields|All Fields|Source Documents|QA Review/);
+    expect(labels).toEqual(["Document Details"]);
+    expect(screen.getByText("Certificate")).toBeInTheDocument();
   });
 
   it("names the source view Source", async () => {
@@ -454,6 +480,8 @@ describe("Academic transcript presentation", () => {
 
   function transcriptWorkbook(): Workbook {
     const base = contractWorkbook();
+    // Field-style columns whose display labels are canonical ids, as the
+    // profile emits them — they must never reach the screen.
     const fieldColumns = [F.name, F.value, F.category, F.sourceLabel, F.fieldId].map((id) => ({
       canonical_field: id,
       key: id,
@@ -473,7 +501,24 @@ describe("Academic transcript presentation", () => {
       ),
     ];
     const gpa = fieldRow("s1", "Cumulative GPA", "3.72", "Academic Summary", "transcript.summary.cumulative_gpa", "CGPA");
-    const courseProv = provenance({ source_page: 1, evidence_text: "I   ENG101   English Composition   3   A-", extraction_method: "ocr:course_table" });
+    const other = [
+      fieldRow("o1", "Institution Phone", "+1 555 0100", "Institution Information", "transcript.institution.phone", "Tel"),
+      fieldRow("o2", "Total Marks", "326", "Other Information", "transcript.other.field", "Total Marks"),
+      fieldRow("o3", "Signatory", "Registrar", "Certification", "transcript.certification.entry", "Registrar"),
+    ];
+    const accreditation = fieldRow(
+      "x1",
+      "Accrediting Body",
+      "Commission for University Education",
+      "Accreditation",
+      "transcript.other.field",
+      "Accredited by",
+    );
+    const courseProv = provenance({
+      source_page: 1,
+      evidence_text: "I   ENG101   English Composition   3   A-",
+      extraction_method: "ocr:course_table",
+    });
     const course = {
       record_id: "c1",
       cells: {
@@ -489,6 +534,11 @@ describe("Academic transcript presentation", () => {
       ...base,
       document_filename: "transcript.png",
       profile: { ...base.profile, profile_id: "academic_transcript", profile_version: 1, display_name: "Academic Transcript" },
+      processing_metadata: {
+        ...base.processing_metadata,
+        document_family: "academic_transcript",
+        document_family_label: "Academic Transcript",
+      },
       datasets: [
         dataset({ dataset_id: "student_program", display_name: "Student & Program", columns: fieldColumns, records: student }),
         dataset({
@@ -497,65 +547,75 @@ describe("Academic transcript presentation", () => {
           columns: ["code", "title", "grade", "extra_1"].map((slot) => ({
             canonical_field: `transcript.course.${slot}`,
             key: slot,
-            display_label: slot === "code" ? "Course Code" : slot === "title" ? "Course Title" : slot === "grade" ? "Grade" : "Additional Value",
+            display_label:
+              slot === "code" ? "Course Code" : slot === "title" ? "Course Title" : slot === "grade" ? "Grade" : "Additional Value",
             value_type: "text",
             expected: false,
           })),
           records: [course],
         }),
         dataset({ dataset_id: "academic_summary", display_name: "Academic Summary", columns: fieldColumns, records: [gpa] }),
-        dataset({ dataset_id: "other_information", display_name: "Other Information", columns: fieldColumns }),
+        dataset({ dataset_id: "other_information", display_name: "Other Information", columns: fieldColumns, records: other }),
         dataset({
           dataset_id: "all_fields",
           display_name: "All Fields",
           columns: fieldColumns,
-          records: [...student, gpa].map((r) => ({ ...r, record_id: `all:${r.record_id}` })),
+          records: [...student, gpa, ...other, accreditation].map((r) => ({ ...r, record_id: `all:${r.record_id}` })),
         }),
         dataset({ dataset_id: "qa_review", display_name: "Review", role: "qa" }),
       ],
     };
   }
 
-  it("uses content-derived sections and a Source view", async () => {
+  it("uses the document identity as heading, never a course title", async () => {
+    getWorkbook.mockResolvedValue(transcriptWorkbook());
+    render(<StagingWorkbook documentId="doc-1" />);
+    expect(await screen.findByRole("heading", { name: "Academic Transcript" })).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "English Composition" })).toBeNull();
+  });
+
+  it("shows exactly one Other Information tab among the transcript groups", async () => {
     getWorkbook.mockResolvedValue(transcriptWorkbook());
     render(<StagingWorkbook documentId="doc-1" />);
     const sections = await screen.findByRole("tablist", { name: "Document sections" });
     const labels = Array.from(sections.querySelectorAll("button")).map((b) => b.getAttribute("aria-label"));
-    expect(labels).toContain("Student & Program");
-    expect(labels).toContain("Academic Record");
-    expect(labels).toContain("Other Information");
-    expect(labels).not.toContain("All Fields");
+    expect(labels).toEqual(["Student & Program", "Academic Record", "Academic Summary", "Other Information"]);
     expect(screen.getByRole("tab", { name: "Staging Workbook" })).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "Source" })).toBeInTheDocument();
-    for (const generic of ["Key Fields", "Tables", "Source Documents", "QA Review"]) {
-      expect(screen.queryByRole("tab", { name: new RegExp(`^${generic}$`) })).toBeNull();
-    }
-    expect(screen.getByText("Jordan Example")).toBeInTheDocument();
-    expect(screen.getByText("Bachelor of Science in Computer Science")).toBeInTheDocument();
-    expect(screen.queryByText(/academic_transcript@1/)).toBeNull();
   });
 
-  it("shows All Fields as FIELD | VALUE | CATEGORY, category last", async () => {
+  it("groups Other Information into semantic subsections without Category or ID columns", async () => {
     getWorkbook.mockResolvedValue(transcriptWorkbook());
     render(<StagingWorkbook documentId="doc-1" />);
     fireEvent.click(await screen.findByRole("tab", { name: "Other Information" }));
-    const headers = Array.from(document.querySelectorAll("th")).map((th) => th.textContent);
-    expect(headers).toEqual(["Field", "Value", "Category"]);
-    for (const hidden of ["Type", "Status", "Source", "Evidence", "Found By", "Extraction Method", "Location"]) {
-      expect(headers).not.toContain(hidden);
+    for (const title of ["Institution", "Certification", "Accreditation"]) {
+      expect(screen.getByRole("heading", { name: title })).toBeInTheDocument();
     }
+    expect(screen.getByText("Commission for University Education")).toBeInTheDocument();
+    // Total Marks belongs to Academic Summary, not Other Information.
+    expect(screen.queryByText("Total Marks")).toBeNull();
+    expect(document.querySelectorAll("th")).toHaveLength(0);
+    expect(document.body).not.toHaveTextContent(/transcript\.(field|student|other)\./);
+  });
+
+  it("collects summary values, including those routed from other information", async () => {
+    getWorkbook.mockResolvedValue(transcriptWorkbook());
+    render(<StagingWorkbook documentId="doc-1" />);
+    fireEvent.click(await screen.findByRole("tab", { name: "Academic Summary" }));
+    expect(screen.getByText("Cumulative GPA")).toBeInTheDocument();
+    expect(screen.getByText("Total Marks")).toBeInTheDocument();
   });
 
   it("opens a value's evidence with humanized technical details", async () => {
     getWorkbook.mockResolvedValue(transcriptWorkbook());
     render(<StagingWorkbook documentId="doc-1" />);
-    fireEvent.click(await screen.findByRole("tab", { name: /Student & Program/ }));
-    fireEvent.click(screen.getByRole("button", { name: "Jordan Example" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Jordan Example" }));
     const dialog = screen.getByRole("dialog", { name: "Evidence" });
     expect(dialog).toHaveTextContent("Source Evidence");
     expect(dialog).toHaveTextContent("Page 1");
     expect(dialog).toHaveTextContent("Name : Jordan Example");
     expect(dialog).toHaveTextContent("OCR · Label / value pair");
+    expect(dialog).toHaveTextContent("Source label");
     expect(dialog).toHaveTextContent("transcript.student.name");
     expect(dialog).not.toHaveTextContent("label_value");
     expect(screen.getByRole("button", { name: "View in Document" })).toBeInTheDocument();
@@ -567,82 +627,165 @@ describe("Academic transcript presentation", () => {
     fireEvent.click(await screen.findByRole("tab", { name: /Academic Record/ }));
     const headers = Array.from(document.querySelectorAll("thead th")).map((th) => th.textContent);
     expect(headers).toEqual(["Course Code", "Course Title", "Grade"]);
-    expect(screen.getByRole("textbox", { name: "Search academic record" })).toBeInTheDocument();
   });
 });
 
 describe("Invoice presentation", () => {
   beforeEach(() => getWorkbook.mockReset());
 
+  function col(canonical_field: string, display_label: string, expected = false) {
+    const key = canonical_field.split(".").pop() as string;
+    return { canonical_field, key, display_label, value_type: "text", expected };
+  }
+
   function invoiceWorkbook(): Workbook {
     const base = contractWorkbook();
-    const lineCells = {
-      "invoice.line.description": cell("invoice.line.description", "Description", "Premium copy paper", "Verified"),
-      "invoice.line.amount": cell("invoice.line.amount", "Line Amount", 212.5, "Verified"),
-      "invoice.line.source_table": cell("invoice.line.source_table", "Table", "Table 1 (page 1)", "Verified"),
-    };
-    const field = {
-      record_id: "field:1",
-      cells: {
-        "invoice.field.name": cell("invoice.field.name", "Field", "Invoice Number", "Verified"),
-        "invoice.field.value": cell("invoice.field.value", "Value", "NS-2026-1048", "Verified"),
-        "invoice.field.category": cell("invoice.field.category", "Category", "Invoice Summary", "Verified"),
-        "invoice.field.found_by": cell("invoice.field.found_by", "Found By", "invoice field", "Verified"),
-        "invoice.field.value_type": cell("invoice.field.value_type", "Type", "code", "Verified"),
-      },
-      record_status: "Verified" as const,
+    const ocr = provenance({ source_type: "image", source_page: 1, ocr_confidence: null });
+    const line = (id: string, values: Record<string, string>, status: "Verified" | "Needs Review" = "Verified") => ({
+      record_id: id,
+      cells: Object.fromEntries(
+        Object.entries(values).map(([field, value]) => [`invoice.line.${field}`, cell(`invoice.line.${field}`, field, value, status, ocr)]),
+      ),
+      record_status: status,
       links_to_dataset: null,
-    };
+    });
+    const dueDate = cell("invoice.header.due_date", "Due Date", "October 12, 2024", "Needs Review", ocr);
+    dueDate.review_reasons = ["OCR confidence for this value is unavailable — confirm against the source image."];
     return {
       ...base,
       profile: { ...base.profile, profile_id: "invoice", profile_version: 1, display_name: "Invoice" },
+      processing_metadata: { ...base.processing_metadata, document_family: "invoice", document_family_label: "Invoice" },
       datasets: [
+        dataset({
+          dataset_id: "invoice_summary",
+          display_name: "Invoice Summary",
+          cardinality: "single",
+          columns: [
+            col("invoice.header.invoice_number", "Invoice Number", true),
+            col("invoice.header.due_date", "Due Date", true),
+            col("invoice.header.payment_terms", "Payment Terms", true),
+          ],
+          records: [
+            {
+              record_id: "summary",
+              cells: {
+                "invoice.header.invoice_number": cell("invoice.header.invoice_number", "Invoice Number", "INV-1042", "Verified", ocr),
+                "invoice.header.due_date": dueDate,
+                "invoice.header.payment_terms": cell("invoice.header.payment_terms", "Payment Terms", null, "Missing"),
+              },
+              record_status: "Needs Review",
+              links_to_dataset: null,
+            },
+          ],
+        }),
+        dataset({
+          dataset_id: "supplier",
+          display_name: "Supplier",
+          cardinality: "single",
+          columns: [col("invoice.supplier.name", "Supplier Name"), col("invoice.supplier.tax_id", "Tax ID"), col("invoice.supplier.email", "Email")],
+          records: [
+            {
+              record_id: "supplier",
+              cells: {
+                "invoice.supplier.name": cell("invoice.supplier.name", "Supplier Name", "Green Leaf Landscaping", "Verified", ocr),
+                "invoice.supplier.tax_id": cell("invoice.supplier.tax_id", "Tax ID", null, null),
+                "invoice.supplier.email": cell("invoice.supplier.email", "Email", "  ", null),
+              },
+              record_status: "Verified",
+              links_to_dataset: null,
+            },
+          ],
+        }),
         dataset({
           dataset_id: "invoice_lines",
           display_name: "Invoice Lines",
           columns: [
-            { canonical_field: "invoice.line.description", key: "description", display_label: "Description", value_type: "text", expected: false },
-            { canonical_field: "invoice.line.amount", key: "amount", display_label: "Line Amount", value_type: "money", expected: true },
-            { canonical_field: "invoice.line.source_table", key: "source_table", display_label: "Table", value_type: "text", expected: false },
+            col("invoice.line.line_number", "Line"),
+            col("invoice.line.description", "Description"),
+            col("invoice.line.quantity", "Quantity"),
+            col("invoice.line.uom", "UOM"),
+            col("invoice.line.unit_price", "Unit Price"),
+            col("invoice.line.amount", "Line Amount", true),
+            col("invoice.line.source_table", "Table"),
           ],
-          records: [{ record_id: "line:1", cells: lineCells, record_status: "Verified", links_to_dataset: null }],
+          records: [
+            line("l1", { description: "Lawn mowing", quantity: "4", unit_price: "$50.00", amount: "$200.00", source_table: "Table 1 (page 1)" }),
+            line("l2", { description: "Hedge trimming", quantity: "2", unit_price: "$75.00", amount: "$150.00", source_table: "Table 1 (page 1)" }),
+            line("l3", { unit_price: "Tax (10%)", amount: "$35.00", source_table: "Table 1 (page 1)" }, "Needs Review"),
+          ],
         }),
         dataset({
-          dataset_id: "all_fields",
-          display_name: "All Fields",
-          columns: [
-            { canonical_field: "invoice.field.category", key: "category", display_label: "Category", value_type: "text", expected: false },
-            { canonical_field: "invoice.field.name", key: "name", display_label: "Field", value_type: "text", expected: false },
-            { canonical_field: "invoice.field.value", key: "value", display_label: "Value", value_type: "text", expected: true },
-            { canonical_field: "invoice.field.found_by", key: "found_by", display_label: "Found By", value_type: "text", expected: false },
+          dataset_id: "totals",
+          display_name: "Totals",
+          cardinality: "single",
+          columns: [col("invoice.total.subtotal", "Subtotal"), col("invoice.total.tax", "Tax"), col("invoice.total.invoice_amount", "Invoice Total")],
+          records: [
+            {
+              record_id: "totals",
+              cells: {
+                "invoice.total.subtotal": cell("invoice.total.subtotal", "Subtotal", "$350.00", "Verified", ocr),
+                "invoice.total.tax": cell("invoice.total.tax", "Tax", "$35.00", "Verified", ocr),
+                "invoice.total.invoice_amount": cell("invoice.total.invoice_amount", "Invoice Total", "$385.00", "Verified", ocr),
+              },
+              record_status: "Verified",
+              links_to_dataset: null,
+            },
           ],
-          records: [field],
         }),
+        dataset({ dataset_id: "taxes_charges", display_name: "Taxes / Charges" }),
+        dataset({ dataset_id: "source_documents", display_name: "Source Documents", role: "source" }),
       ],
     };
   }
 
-  it("opens on Line Items and hides Table / Found By from the primary surfaces", async () => {
+  it("shows invoice groups in business order", async () => {
     getWorkbook.mockResolvedValue(invoiceWorkbook());
     render(<StagingWorkbook documentId="doc-1" />);
-    expect(await screen.findByRole("tab", { name: "Line Items", selected: true })).toBeInTheDocument();
-    expect(screen.queryByRole("tab", { name: "Invoice Summary" })).toBeNull();
-    expect(screen.queryByRole("tab", { name: "Source Documents" })).toBeNull();
-    expect(screen.queryByRole("columnheader", { name: "Table" })).toBeNull();
-    fireEvent.click(screen.getByRole("tab", { name: "Other Information" }));
-    const headers = Array.from(document.querySelectorAll("th")).map((header) => header.textContent);
-    expect(headers).toContain("Field");
-    expect(headers).toContain("Value");
-    expect(headers.indexOf("Category")).toBe(headers.length - 1);
-    expect(headers).not.toContain("Found By");
-    expect(screen.queryByText("Found By")).toBeNull();
+    const nav = await screen.findByRole("tablist", { name: "Document sections" });
+    const labels = Array.from(nav.querySelectorAll("[role='tab']")).map((tab) => tab.getAttribute("aria-label"));
+    expect(labels).toEqual(["Invoice Summary", "Parties", "Line Items", "Charges & Totals"]);
+  });
+
+  it("omits blank fields and replaces per-row OCR warnings with a review indicator", async () => {
+    getWorkbook.mockResolvedValue(invoiceWorkbook());
+    render(<StagingWorkbook documentId="doc-1" />);
+    expect(await screen.findByText("INV-1042")).toBeInTheDocument();
+    expect(screen.queryByText("Payment Terms")).toBeNull();
+    expect(screen.queryByText(/OCR confidence/)).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: /Needs Review/ }));
+    expect(screen.getByRole("dialog", { name: "Evidence" })).toHaveTextContent("OCR confidence for this value is unavailable");
+
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
+    fireEvent.click(screen.getByRole("tab", { name: "Parties" }));
+    expect(within(screen.getByRole("region", { name: "Supplier" })).getByText("Green Leaf Landscaping")).toBeInTheDocument();
+    expect(screen.queryByText("Tax ID")).toBeNull();
+    expect(screen.queryByText("Email")).toBeNull();
+  });
+
+  it("shows only populated line columns, never the table origin", async () => {
+    getWorkbook.mockResolvedValue(invoiceWorkbook());
+    render(<StagingWorkbook documentId="doc-1" />);
+    fireEvent.click(await screen.findByRole("tab", { name: "Line Items" }));
+    const headers = Array.from(document.querySelectorAll("thead th")).map((th) => th.textContent);
+    expect(headers).toEqual(["Description", "Qty", "Unit Price", "Amount"]);
+    expect(screen.queryByText("Table 1 (page 1)")).toBeNull();
+    expect(screen.queryByText("Tax (10%)")).toBeNull();
+  });
+
+  it("reads charges and totals as an invoice summary, each concept once", async () => {
+    getWorkbook.mockResolvedValue(invoiceWorkbook());
+    render(<StagingWorkbook documentId="doc-1" />);
+    fireEvent.click(await screen.findByRole("tab", { name: "Charges & Totals" }));
+    const rows = Array.from(document.querySelectorAll("dl > div")).map((row) => row.querySelector("dt")?.textContent);
+    expect(rows).toEqual(["Subtotal", "Tax (10%)", "Total"]);
+    expect(screen.getByText("$385.00")).toBeInTheDocument();
   });
 });
 
 describe("FAR staging navigation", () => {
   beforeEach(() => getWorkbook.mockReset());
 
-  it("shows five primary tabs with Overview last and Transform opening on Final Output", async () => {
+  it("never shows technical FAR datasets as business tabs", async () => {
     const base = contractWorkbook();
     getWorkbook.mockResolvedValue({
       ...base,
@@ -650,35 +793,18 @@ describe("FAR staging navigation", () => {
       datasets: [
         dataset({ dataset_id: "far_sections", display_name: "FAR Sections", records: [] }),
         dataset({ dataset_id: "far_clauses", display_name: "Clauses & Provisions", records: [] }),
-        dataset({ dataset_id: "far_alternates", display_name: "Alternates", records: [] }),
-        dataset({ dataset_id: "far_references", display_name: "FAR References", records: [] }),
         dataset({ dataset_id: "far_canonical", display_name: "Canonical Model", records: [] }),
         dataset({ dataset_id: "far_oracle_output_map", display_name: "Oracle Output Map", records: [] }),
-        dataset({ dataset_id: "far_business", display_name: "Business Export", records: [] }),
         dataset({ dataset_id: "all_fields", display_name: "All Fields", records: [] }),
         dataset({ dataset_id: "source_documents", display_name: "Source Documents", role: "source", records: [] }),
         dataset({ dataset_id: "qa_review", display_name: "QA Review", role: "qa", records: [] }),
-        dataset({
-          dataset_id: "far_overview",
-          display_name: "Overview",
-          cardinality: "single",
-          records: [],
-        }),
       ],
     });
     render(<StagingWorkbook documentId="doc-1" />);
-    const nav = await screen.findByRole("tablist", { name: "Document sections" });
-    const labels = Array.from(nav.querySelectorAll("[role='tab']")).map((tab) => tab.getAttribute("aria-label"));
-    expect(labels?.[0]).toBe("Other Information");
-    expect(labels).not.toContain("FAR Sections");
-    expect(labels).not.toContain("Source Documents");
-    expect(labels).not.toContain("QA Review");
-    expect(screen.queryByRole("tab", { name: "FAR Sections" })).toBeNull();
-    expect(screen.queryByRole("tab", { name: "Canonical Model" })).toBeNull();
-    expect(screen.queryByRole("tab", { name: "Oracle Output Map" })).toBeNull();
-    expect(screen.queryByRole("tab", { name: "Source Documents" })).toBeNull();
-    expect(screen.queryByRole("tab", { name: "QA Review" })).toBeNull();
-    expect(screen.getByRole("tab", { name: "Source" })).toBeInTheDocument();
+    expect(await screen.findByText(/No business information was found/)).toBeInTheDocument();
+    for (const label of ["FAR Sections", "Canonical Model", "Oracle Output Map", "Source Documents", "QA Review", "All Fields"]) {
+      expect(screen.queryByRole("tab", { name: label })).toBeNull();
+    }
     expect(screen.getByRole("tab", { name: "Source" })).toBeInTheDocument();
   });
 });

@@ -5,13 +5,7 @@ import Link from "next/link";
 import { Plus, Sparkles, X } from "lucide-react";
 
 import MegaMenu from "@/components/navigation/MegaMenu";
-import {
-  GOVERNANCE_SECTIONS,
-  INTELLIGENCE_SECTIONS,
-  OVERVIEW_LINKS,
-  PLATFORM_SECTIONS,
-  REVIEW_SECTIONS,
-} from "@/components/navigation/nav-config";
+import { TOP_MENUS } from "@/components/navigation/nav-config";
 
 interface MobileNavigationProps {
   open: boolean;
@@ -81,38 +75,19 @@ export default function MobileNavigation({
             </Link>
           </div>
 
-          <div className="space-y-4 border-t border-black/5 pt-4">
-            <p className="px-1 text-xs font-semibold uppercase tracking-wider text-text-teal">
-              Platform
-            </p>
-            <MegaMenu
-              overviewTitle="Platform Overview"
-              overviewLinks={OVERVIEW_LINKS}
-              sections={PLATFORM_SECTIONS}
-              onNavigate={onClose}
-            />
-          </div>
-
-          <div className="space-y-4">
-            <p className="px-1 text-xs font-semibold uppercase tracking-wider text-text-teal">
-              Intelligence
-            </p>
-            <MegaMenu sections={INTELLIGENCE_SECTIONS} onNavigate={onClose} />
-          </div>
-
-          <div className="space-y-4">
-            <p className="px-1 text-xs font-semibold uppercase tracking-wider text-text-teal">
-              Review
-            </p>
-            <MegaMenu sections={REVIEW_SECTIONS} onNavigate={onClose} />
-          </div>
-
-          <div className="space-y-4">
-            <p className="px-1 text-xs font-semibold uppercase tracking-wider text-text-teal">
-              Governance
-            </p>
-            <MegaMenu sections={GOVERNANCE_SECTIONS} onNavigate={onClose} />
-          </div>
+          {TOP_MENUS.map((menu, index) => (
+            <div key={menu.id} className={["space-y-4", index === 0 ? "border-t border-black/5 pt-4" : ""].join(" ")}>
+              <Link
+                href={menu.href}
+                onClick={onClose}
+                className="flex items-center justify-between px-1 text-xs font-semibold uppercase tracking-wider text-text-teal hover:text-primary"
+              >
+                {menu.label}
+                <span className="text-[11px] font-medium normal-case tracking-normal">Overview →</span>
+              </Link>
+              <MegaMenu sections={menu.sections} onNavigate={onClose} />
+            </div>
+          ))}
         </div>
       </aside>
     </div>

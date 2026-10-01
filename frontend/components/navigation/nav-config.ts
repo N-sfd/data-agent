@@ -3,6 +3,13 @@ import {
   Activity,
   AlertTriangle,
   Archive,
+  CircleAlert,
+  FileText,
+  GraduationCap,
+  LayoutGrid,
+  Mail,
+  Receipt,
+  Upload,
   BarChart3,
   ClipboardList,
   Compass,
@@ -31,6 +38,48 @@ export interface MegaMenuSection {
   title: string;
   tiles: NavTile[];
 }
+
+export const DOCUMENTS_SECTIONS: MegaMenuSection[] = [
+  {
+    title: "Documents",
+    tiles: [
+      {
+        label: "All documents",
+        description: "Every document in your workspace",
+        href: "/documents",
+        icon: Archive,
+      },
+      {
+        label: "Needs review",
+        description: "Documents with values to confirm",
+        href: "/documents?filter=review",
+        icon: ListChecks,
+      },
+      {
+        label: "Failed",
+        description: "Documents whose processing did not complete",
+        href: "/documents?filter=failed",
+        icon: CircleAlert,
+      },
+      {
+        label: "Upload document",
+        description: "Add a document and let Data Agent detect its type",
+        href: "/extraction/new",
+        icon: Upload,
+      },
+    ],
+  },
+  {
+    title: "By type",
+    tiles: [
+      { label: "Invoices", href: "/documents?family=invoice", icon: Receipt },
+      { label: "Transcripts & certificates", href: "/documents?family=academic_transcript", icon: GraduationCap },
+      { label: "Contracts", href: "/documents?family=government_contract", icon: FileText },
+      { label: "FAR regulations", href: "/documents?family=far_regulation", icon: ScrollText },
+      { label: "Correspondence", href: "/documents?family=correspondence", icon: Mail },
+    ],
+  },
+];
 
 export const PLATFORM_SECTIONS: MegaMenuSection[] = [
   {
@@ -227,3 +276,56 @@ export const GOVERNANCE_SECTIONS: MegaMenuSection[] = [
 export const OVERVIEW_LINKS = [
   { label: "Data Agent", href: "/", icon: Sparkles },
 ];
+
+export interface TopMenu {
+  id: "documents" | "platform" | "intelligence" | "review" | "governance";
+  label: string;
+  /** The hub the label itself opens. */
+  href: string;
+  description: string;
+  sections: MegaMenuSection[];
+}
+
+export const TOP_MENUS: TopMenu[] = [
+  {
+    id: "documents",
+    label: "Documents",
+    href: "/documents",
+    description: "Every document, by status and type.",
+    sections: DOCUMENTS_SECTIONS,
+  },
+  {
+    id: "platform",
+    label: "Platform",
+    href: "/platform",
+    description: "Upload, extract, explore and analyze documents.",
+    sections: PLATFORM_SECTIONS,
+  },
+  {
+    id: "intelligence",
+    label: "Intelligence",
+    href: "/intelligence",
+    description: "Cross-document answers, clause intelligence and contract insights.",
+    sections: INTELLIGENCE_SECTIONS,
+  },
+  {
+    id: "review",
+    label: "Review",
+    href: "/review",
+    description: "Human review of extracted values and the record of every decision.",
+    sections: REVIEW_SECTIONS,
+  },
+  {
+    id: "governance",
+    label: "Governance",
+    href: "/governance",
+    description: "Risk, audit, integrations, architecture and settings.",
+    sections: GOVERNANCE_SECTIONS,
+  },
+];
+
+export function topMenu(id: TopMenu["id"]): TopMenu {
+  return TOP_MENUS.find((menu) => menu.id === id) as TopMenu;
+}
+
+export const HUB_ICON = LayoutGrid;

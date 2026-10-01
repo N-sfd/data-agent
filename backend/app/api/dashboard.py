@@ -23,6 +23,7 @@ from app.services.dashboard_stats import (
     compute_document_status,
     compute_review_queue_bucket,
 )
+from app.services.portfolio_insights import build_portfolio
 from app.services.review_routing import human_reason_labels
 
 router = APIRouter()
@@ -169,6 +170,16 @@ async def get_dashboard_stats(
         fields_extracted_today=fields_extracted_today,
         documents_requiring_manual_review=documents_requiring_manual_review,
     )
+
+
+@router.get("/portfolio")
+async def get_portfolio(
+    database: Session = Depends(get_database),
+    actor: ActorContext = Depends(get_current_actor),
+) -> dict:
+    """Portfolio aggregates for Analytics, Insights and Risk."""
+
+    return build_portfolio(database, scope_documents(select(Document.id), actor))
 
 
 @router.get(

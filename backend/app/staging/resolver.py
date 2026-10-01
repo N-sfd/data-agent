@@ -13,6 +13,10 @@ Signals, in order:
      already found: an incorporated-clause listing plus a contract number
      is a government contract.
 
+A short letter *about* a contract (subject line, salutation, closing; no
+contract structure) is correspondence, not a contract: the contract
+profile finds nothing in it, so it resolves to the generic profile.
+
 The profile is whichever registered profile claims the family; otherwise
 the generic profile. A document is never forced into a profile whose
 family it wasn't detected as (an invoice never becomes contract_v3).
@@ -20,6 +24,7 @@ family it wasn't detected as (an invoice never becomes contract_v3).
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
@@ -43,6 +48,20 @@ from app.staging.profile import StagingProfile
 _CLASSIFY_PAGE_LIMIT = 10
 _MIN_CLAUSE_LISTINGS = 5
 _INCONCLUSIVE = {"unknown", "generic_business"}
+
+CORRESPONDENCE_FAMILY = "correspondence"
+CORRESPONDENCE_LABEL = "Correspondence"
+_LETTER_MAX_PAGES = 5
+# Only families a letter about a contract is mistaken for; an invoice or
+# transcript with a cover note keeps its own profile.
+_LETTER_OVERRIDABLE = _INCONCLUSIVE | {"government_contract", "contract", "procurement", "amendment", "sow"}
+_SUBJECT_LINE = re.compile(r"^\s*(subject|re|ref(erence)?)\s*:", re.IGNORECASE | re.MULTILINE)
+_SALUTATION = re.compile(r"^\s*dear\s+\S", re.IGNORECASE | re.MULTILINE)
+_CLOSING = re.compile(
+    r"^\s*(respectfully(\s+(submitted|yours))?|sincerely(\s+yours)?|(best\s+|kind\s+|warm\s+)?regards"
+    r"|very\s+truly\s+yours|yours\s+(truly|faithfully|sincerely)|cordially)\s*[,.]?\s*$",
+    re.IGNORECASE | re.MULTILINE,
+)
 
 
 @dataclass
@@ -82,6 +101,23 @@ def _has_contract_structure(database: Session, document_id: str) -> bool:
         )
     )
     return (listings or 0) >= _MIN_CLAUSE_LISTINGS and bool(contract_number)
+
+
+def _letter_signals(database: Session, document: Document, text: str) -> list[str]:
+    """Why a short document reads as a letter; empty when it does not."""
+
+    if (document.page_count or 0) > _LETTER_MAX_PAGES:
+        return []
+    signals = []
+    if _SUBJECT_LINE.search(text[:2000]):
+        signals.append("subject line")
+    if _SALUTATION.search(text):
+        signals.append("salutation")
+    if _CLOSING.search(text):
+        signals.append("closing")
+    if len(signals) < 2 or _has_contract_structure(database, document.id):
+        return []
+    return signals
 
 
 # A document recognizer must be this sure (strong structural evidence)
@@ -125,8 +161,25 @@ def resolve_profile(database: Session, document: Document) -> ProfileResolution:
     if recognized is not None:
         return recognized
     reasons: list[str] = []
-    family, label, confidence = classify_document_family(_page_text(database, document.id))
+    text = _page_text(database, document.id)
+    family, label, confidence = classify_document_family(text)
     reasons.append(f"Keyword classification: {label} (confidence {confidence:.2f}).")
+
+    if family in _LETTER_OVERRIDABLE:
+        signals = _letter_signals(database, document, text)
+        if signals:
+            profile = registry.generic_profile()
+            reasons.append(
+                f"Letter structure ({', '.join(signals)}) and no contract structure: "
+                f"correspondence, using the {profile.display_name} profile."
+            )
+            return ProfileResolution(
+                profile=profile,
+                family=CORRESPONDENCE_FAMILY,
+                family_label=CORRESPONDENCE_LABEL,
+                reasons=reasons,
+                confident=True,
+            )
 
     if family in _INCONCLUSIVE and document.document_type:
         mapped, mapped_label = family_for_document_type(

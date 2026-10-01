@@ -55,7 +55,8 @@ const SAMPLE_ORACLE_PAYLOAD: DryRunPayload = {
   source_document_id: "doc-w912hq-verified",
   source_document: "W912HQ24C0001_Award_Executed.pdf",
   erp_target: "Oracle Fusion Cloud Procurement (PO-REST-v11.13.18.05)",
-  generated_at: new Date().toISOString(),
+  // Fixed: a timestamp computed at load differs between server and client render.
+  generated_at: "2026-09-30T12:00:00.000Z",
   contract_header: {
     contract_number: "W912HQ-24-C-0001",
     solicitation_number: "W912HQ-24-R-0001",

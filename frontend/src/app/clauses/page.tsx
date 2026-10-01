@@ -1,20 +1,44 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { ChevronDown, ChevronRight, Loader2, Search } from "lucide-react";
 
 import ContentSection from "@/components/layout/ContentSection";
 import PageHero from "@/components/layout/PageHero";
 import { searchDocuments } from "@/lib/documents";
+import { getPortfolio, type Portfolio } from "@/lib/portfolio";
 import type { DocumentSummary } from "@/types/document";
 
 const CLAUSE_FILTERS = ["All", "FAR", "DFARS", "Commercial"] as const;
 type ClauseFilter = (typeof CLAUSE_FILTERS)[number];
 
 export default function ClausesPage() {
-  const [query, setQuery] = useState("");
-  const [submittedQuery, setSubmittedQuery] = useState("");
+  return (
+    <Suspense>
+      <ClausesContent />
+    </Suspense>
+  );
+}
+
+function ClausesContent() {
+  const initial = useSearchParams().get("q")?.trim() ?? "";
+  const [query, setQuery] = useState(initial);
+  const [submittedQuery, setSubmittedQuery] = useState(initial);
+  const [topClauses, setTopClauses] = useState<Portfolio["clauses"]["top"]>([]);
+
+  useEffect(() => {
+    let active = true;
+    getPortfolio()
+      .then((data) => active && setTopClauses(data.clauses.top))
+      .catch(() => {
+        /* Suggestions are optional. */
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
   const [activeFilter, setActiveFilter] = useState<ClauseFilter>("All");
   const [documents, setDocuments] = useState<DocumentSummary[]>([]);
   const [loading, setLoading] = useState(false);
@@ -117,6 +141,33 @@ export default function ClausesPage() {
           <Loader2 className="h-4 w-4 animate-spin" />
           Searching clauses...
         </div>
+      )}
+
+      {!submittedQuery && topClauses.length > 0 && (
+        <section className="mb-6" aria-label="Most cited clauses">
+          <p className="mb-2 text-xs font-semibold uppercase tracking-[0.12em] text-text-teal">Most cited in your documents</p>
+          <div className="grid gap-2 sm:grid-cols-2">
+            {topClauses.map((clause) => (
+              <button
+                key={clause.clause_number}
+                type="button"
+                onClick={() => {
+                  setQuery(clause.clause_number);
+                  setSubmittedQuery(clause.clause_number);
+                }}
+                className="flex items-baseline justify-between gap-3 rounded-xl border border-border bg-surface px-4 py-3 text-left transition-colors hover:border-primary/40"
+              >
+                <span className="min-w-0">
+                  <span className="block font-mono text-sm text-foreground">{clause.clause_number}</span>
+                  <span className="block truncate text-xs text-text-secondary">{clause.title}</span>
+                </span>
+                <span className="shrink-0 text-xs tabular-nums text-text-muted">
+                  {clause.documents} doc{clause.documents === 1 ? "" : "s"}
+                </span>
+              </button>
+            ))}
+          </div>
+        </section>
       )}
 
       {!loading && submittedQuery && documents.length === 0 && (

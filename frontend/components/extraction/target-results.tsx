@@ -636,19 +636,23 @@ export default function TargetResults({
         />
       )}
 
-      <div className="pt-2">
+      <div className="border-t border-dashed border-border pt-3">
         <button
           type="button"
           onClick={() => setShowLegacyAudit((open) => !open)}
-          className="text-xs font-medium text-text-secondary underline decoration-dotted hover:text-foreground"
+          aria-expanded={showLegacyAudit}
+          className="text-[11px] text-text-muted underline decoration-dotted underline-offset-4 hover:text-text-secondary"
         >
-          {showLegacyAudit ? "Hide" : "Show"} Processing Details / Legacy
-          Extraction Diagnostics
+          {showLegacyAudit ? "Hide" : "Show"} processing details / legacy
+          extraction diagnostics (admin)
         </button>
       </div>
 
       {showLegacyAudit && (
-      <>
+      <div className="space-y-4 rounded-xl border border-dashed border-border bg-surface-soft/60 p-4">
+      <p className="text-[11px] uppercase tracking-[0.12em] text-text-muted">
+        Development &amp; admin diagnostics — not part of the document results
+      </p>
       <ProcessingDiagnostics summary={result.ai_enrichment ?? null} warnings={result.warnings} />
       <div>
         <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-text-teal">
@@ -915,7 +919,7 @@ export default function TargetResults({
           />
         </div>
       )}
-      </>
+      </div>
       )}
 
 

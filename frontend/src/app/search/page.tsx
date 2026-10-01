@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { Loader2, Search as SearchIcon } from "lucide-react";
 
 import DocumentResultsTable from "@/components/document-results-table";
@@ -9,16 +10,23 @@ import { searchDocuments } from "@/lib/documents";
 import type { DocumentSummary } from "@/types/document";
 
 export default function SearchPage() {
-  const [query, setQuery] = useState("");
-  const [submittedQuery, setSubmittedQuery] = useState("");
+  return (
+    <Suspense>
+      <SearchContent />
+    </Suspense>
+  );
+}
+
+function SearchContent() {
+  const initial = useSearchParams().get("q")?.trim() ?? "";
+  const [query, setQuery] = useState(initial);
+  const [submittedQuery, setSubmittedQuery] = useState(initial);
   const [documents, setDocuments] = useState<DocumentSummary[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
   useEffect(() => {
-    if (!submittedQuery) return;
-
     let active = true;
 
     async function run() {
@@ -27,8 +35,8 @@ export default function SearchPage() {
 
       try {
         const result = await searchDocuments({
-          q: submittedQuery,
-          limit: 50,
+          q: submittedQuery || undefined,
+          limit: submittedQuery ? 50 : 10,
         });
 
         if (!active) return;
@@ -51,13 +59,7 @@ export default function SearchPage() {
 
   function handleSubmit(event: React.FormEvent) {
     event.preventDefault();
-    const trimmed = query.trim();
-    setSubmittedQuery(trimmed);
-
-    if (!trimmed) {
-      setDocuments([]);
-      setTotal(0);
-    }
+    setSubmittedQuery(query.trim());
   }
 
   return (
@@ -112,13 +114,21 @@ export default function SearchPage() {
       )}
 
       {!submittedQuery && !loading && (
-        <p className="text-sm text-text-secondary">
-          Use global search with{" "}
-          <kbd className="rounded border border-border px-1.5 py-0.5 text-xs">
-            Ctrl K
-          </kbd>{" "}
-          from anywhere in the app.
-        </p>
+        <>
+          <p className="mb-3 text-xs text-text-secondary">
+            Recently added · search from anywhere with{" "}
+            <kbd className="rounded border border-border px-1.5 py-0.5 text-xs">
+              Ctrl K
+            </kbd>
+          </p>
+          <div className="overflow-hidden rounded-xl border border-border bg-surface">
+            <DocumentResultsTable
+              documents={documents}
+              emptyMessage="No documents yet. Upload one to get started."
+              showExtendedColumns
+            />
+          </div>
+        </>
       )}
     </div>
   );

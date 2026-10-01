@@ -8,13 +8,19 @@ import { useState } from "react";
 import BackendStatusPill from "@/components/navigation/BackendStatusPill";
 import MobileNavigation from "@/components/navigation/MobileNavigation";
 import NavDropdown from "@/components/navigation/NavDropdown";
-import {
-  GOVERNANCE_SECTIONS,
-  INTELLIGENCE_SECTIONS,
-  OVERVIEW_LINKS,
-  PLATFORM_SECTIONS,
-  REVIEW_SECTIONS,
-} from "@/components/navigation/nav-config";
+import { HUB_ICON, TOP_MENUS, type TopMenu } from "@/components/navigation/nav-config";
+
+function MenuItem({ menu }: { menu: TopMenu }) {
+  return (
+    <NavDropdown
+      label={menu.label}
+      href={menu.href}
+      overviewTitle={menu.label}
+      overviewLinks={[{ label: `${menu.label} overview`, href: menu.href, icon: HUB_ICON }]}
+      sections={menu.sections}
+    />
+  );
+}
 
 interface GlobalHeaderProps {
   onOpenSearch: () => void;
@@ -50,37 +56,18 @@ export default function GlobalHeader({ onOpenSearch }: GlobalHeaderProps) {
 
         {/* Primary nav — Platform, Intelligence, Review stay visible */}
         <nav className="header-nav" aria-label="Main navigation">
-          <Link href="/documents" className="nav-menu-button whitespace-nowrap">
-            Documents
-          </Link>
-          <NavDropdown
-            label="Platform"
-            overviewTitle="Platform Overview"
-            overviewLinks={OVERVIEW_LINKS}
-            sections={PLATFORM_SECTIONS}
-          />
-          <NavDropdown
-            label="Intelligence"
-            overviewTitle="Intelligence Overview"
-            sections={INTELLIGENCE_SECTIONS}
-          />
-          <NavDropdown
-            label="Review"
-            overviewTitle="Review Overview"
-            sections={REVIEW_SECTIONS}
-          />
+          {TOP_MENUS.filter((menu) => menu.id !== "governance").map((menu) => (
+            <MenuItem key={menu.id} menu={menu} />
+          ))}
           <div className="header-nav-governance">
-            <NavDropdown
-              label="Governance"
-              overviewTitle="Governance Overview"
-              sections={GOVERNANCE_SECTIONS}
-            />
+            <MenuItem menu={TOP_MENUS.find((menu) => menu.id === "governance")!} />
           </div>
           <div className="header-nav-more">
             <NavDropdown
               label="More"
-              overviewTitle="More"
-              sections={GOVERNANCE_SECTIONS}
+              overviewTitle="Governance"
+              overviewLinks={[{ label: "Governance overview", href: "/governance", icon: HUB_ICON }]}
+              sections={TOP_MENUS.find((menu) => menu.id === "governance")!.sections}
             />
           </div>
         </nav>

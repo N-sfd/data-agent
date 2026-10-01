@@ -1,7 +1,13 @@
 "use client";
 
+import { Suspense } from "react";
+
 import DocumentsHome from "@/components/documents/documents-home";
 
 export default function DocumentsPage() {
-  return <DocumentsHome />;
+  return (
+    <Suspense>
+      <DocumentsHome />
+    </Suspense>
+  );
 }
