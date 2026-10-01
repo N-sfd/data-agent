@@ -12,7 +12,7 @@ import SourceTranscription from "@/components/staging/source-transcription";
 import StagingDatasetTable from "@/components/staging/staging-dataset-table";
 import StagingFieldList from "@/components/staging/staging-field-list";
 import TranscriptPanes from "@/components/staging/transcript-workbook";
-import PresentationWorkspace from "@/components/staging/presentation-workspace";
+import PresentationWorkspace, { type MoreAction } from "@/components/staging/presentation-workspace";
 import { ApiError, COLD_START_RETRY_DELAYS_MS } from "@/lib/api";
 import { storeAccessToken } from "@/lib/entra-auth";
 import {
@@ -35,6 +35,8 @@ interface StagingWorkbookProps {
   /** Changes whenever a new extraction job completes for this document in
    * the same page session, so a workbook fetched mid-job is refetched. */
   refreshKey?: string | number;
+  /** Reviewer/developer views the host page offers under "More". */
+  moreActions?: MoreAction[];
 }
 
 type View = "workbook" | "source" | "qa";
@@ -99,6 +101,7 @@ export default function StagingWorkbook({
   onOpenSource,
   selectedSourceId,
   refreshKey,
+  moreActions = [],
 }: StagingWorkbookProps) {
   const [workbook, setWorkbook] = useState<Workbook | null>(null);
   const [loading, setLoading] = useState(true);
@@ -318,6 +321,7 @@ export default function StagingWorkbook({
           documentId={documentId}
           onOpenSource={onOpenSource}
           onViewInDocument={viewInDocument}
+          moreActions={[...moreActions, { label: "Source structure", onSelect: () => setView("source") }]}
         />
       )}
     </div>

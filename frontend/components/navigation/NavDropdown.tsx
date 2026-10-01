@@ -1,169 +1,128 @@
 "use client";
 
-import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { ChevronDown } from "lucide-react";
 
-import MegaMenu from "@/components/navigation/MegaMenu";
+import CompactMenu from "@/components/navigation/CompactMenu";
 import type { MegaMenuSection } from "@/components/navigation/nav-config";
 
-const CLOSE_DELAY_MS = 200;
+/** Only one header menu is open at a time: opening one tells the others. */
+const OPEN_EVENT = "data-agent:nav-menu-open";
+const PANEL_WIDTH = 680;
 
 interface NavDropdownProps {
   label: string;
-  /** Hub page the label itself opens; the chevron opens the menu. */
+  /** The menu's hub page (linked inside the popover). */
   href?: string;
   sections: MegaMenuSection[];
-  overviewTitle?: string;
-  overviewLinks?: { label: string; href: string; icon: import("lucide-react").LucideIcon }[];
+  /** This menu owns the current page (one filled button at a time). */
+  current?: boolean;
 }
 
-export default function NavDropdown({
-  label,
-  href,
-  sections,
-  overviewTitle,
-  overviewLinks,
-}: NavDropdownProps) {
+export default function NavDropdown({ label, href, sections, current = false }: NavDropdownProps) {
   const [open, setOpen] = useState(false);
-  // The header nav clips overflow (so items never collide with the action
-  // buttons); the panel is therefore fixed-positioned under its button.
+  // The header nav clips overflow, so the popover is fixed-positioned under
+  // its button and kept inside the viewport.
   const [anchor, setAnchor] = useState<{ top: number; left: number } | null>(null);
-  const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
+  const menuId = useId();
   const pathname = usePathname();
-  const current = Boolean(
-    href && (pathname === href.split("?")[0] || sections.some((section) => section.tiles.some((tile) => tile.href.split(/[?#]/)[0] === pathname && pathname !== "/"))),
-  );
 
-  const clearCloseTimer = useCallback(() => {
-    if (closeTimer.current) {
-      clearTimeout(closeTimer.current);
-      closeTimer.current = null;
-    }
+  const close = useCallback((restoreFocus = false) => {
+    setOpen(false);
+    if (restoreFocus) buttonRef.current?.focus();
   }, []);
 
-  const scheduleClose = useCallback(() => {
-    clearCloseTimer();
-    closeTimer.current = setTimeout(() => setOpen(false), CLOSE_DELAY_MS);
-  }, [clearCloseTimer]);
-
-  const place = useCallback(() => {
+  const toggle = useCallback(() => {
     const box = containerRef.current?.getBoundingClientRect();
-    if (!box) return;
-    const width = Math.min(720, window.innerWidth - 32);
-    setAnchor({ top: box.bottom + 10, left: Math.max(16, Math.min(box.left, window.innerWidth - width - 16)) });
-  }, []);
-
-  const handleOpen = useCallback(() => {
-    clearCloseTimer();
-    place();
-    setOpen(true);
-  }, [clearCloseTimer, place]);
-
-  // A mouse reaching the button has already opened the menu on hover, so
-  // a mouse click keeps it open; keyboard activation (detail 0) toggles.
-  const handleToggle = useCallback(
-    (event: React.MouseEvent) => {
-      clearCloseTimer();
-      place();
-      if (event.detail === 0) setOpen((current) => !current);
-      else setOpen(true);
-    },
-    [clearCloseTimer, place],
-  );
-
-  useEffect(() => {
-    function onKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape") setOpen(false);
+    if (box) {
+      const width = Math.min(PANEL_WIDTH, window.innerWidth - 32);
+      setAnchor({ top: box.bottom + 8, left: Math.max(16, Math.min(box.left, window.innerWidth - width - 16)) });
     }
-    document.addEventListener("keydown", onKeyDown);
-    return () => document.removeEventListener("keydown", onKeyDown);
-  }, []);
+    setOpen((value) => {
+      if (!value) window.dispatchEvent(new CustomEvent(OPEN_EVENT, { detail: menuId }));
+      return !value;
+    });
+  }, [menuId]);
 
+  // Close when another menu opens, on navigation, outside click, Esc, resize.
   useEffect(() => {
-    return () => clearCloseTimer();
-  }, [clearCloseTimer]);
+    function onOtherOpen(event: Event) {
+      if ((event as CustomEvent<string>).detail !== menuId) setOpen(false);
+    }
+    window.addEventListener(OPEN_EVENT, onOtherOpen);
+    return () => window.removeEventListener(OPEN_EVENT, onOtherOpen);
+  }, [menuId]);
+
+  // Navigation closes the menu (adjusting state during render, not in an effect).
+  const [openedOn, setOpenedOn] = useState(pathname);
+  if (openedOn !== pathname) {
+    setOpenedOn(pathname);
+    setOpen(false);
+  }
 
   useEffect(() => {
     if (!open) return;
-    const close = () => setOpen(false);
-    window.addEventListener("resize", close);
-    return () => window.removeEventListener("resize", close);
-  }, [open]);
+    function onPointer(event: MouseEvent) {
+      const target = event.target as Node;
+      if (!containerRef.current?.contains(target) && !panelRef.current?.contains(target)) setOpen(false);
+    }
+    function onKey(event: KeyboardEvent) {
+      if (event.key === "Escape") close(true);
+    }
+    const onResize = () => setOpen(false);
+    document.addEventListener("mousedown", onPointer);
+    document.addEventListener("keydown", onKey);
+    window.addEventListener("resize", onResize);
+    return () => {
+      document.removeEventListener("mousedown", onPointer);
+      document.removeEventListener("keydown", onKey);
+      window.removeEventListener("resize", onResize);
+    };
+  }, [open, close]);
+
+  function onButtonKeyDown(event: React.KeyboardEvent) {
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      if (!open) toggle();
+      requestAnimationFrame(() => panelRef.current?.querySelector<HTMLElement>("[role=menuitem]")?.focus());
+    }
+  }
 
   return (
-    <div
-      ref={containerRef}
-      className="relative"
-      onMouseEnter={handleOpen}
-      onMouseLeave={scheduleClose}
-    >
-      {href ? (
-        <div
-          className={[
-            "nav-menu-button nav-menu-split",
-            open || current ? "nav-menu-button-active" : "",
-          ].join(" ")}
-        >
-          <Link
-            href={href}
-            onClick={() => setOpen(false)}
-            aria-current={current ? "page" : undefined}
-            className="nav-menu-split-link"
-          >
-            {label}
-          </Link>
-          <button
-            type="button"
-            aria-expanded={open}
-            aria-haspopup="true"
-            aria-label={`${label} menu`}
-            onClick={handleToggle}
-            className="nav-menu-split-toggle"
-          >
-            <ChevronDown
-              className={["h-3.5 w-3.5 transition duration-200", open ? "rotate-180" : ""].join(" ")}
-              strokeWidth={2}
-            />
-          </button>
-        </div>
-      ) : (
-        <button
-          type="button"
-          aria-expanded={open}
-          aria-haspopup="true"
-          onClick={handleToggle}
-          className={[
-            "nav-menu-button",
-            open ? "nav-menu-button-active" : "",
-          ].join(" ")}
-        >
-          {label}
-          <ChevronDown
-            className={[
-              "h-3.5 w-3.5 transition duration-200",
-              open ? "rotate-180" : "",
-            ].join(" ")}
-            strokeWidth={2}
-          />
-        </button>
-      )}
+    <div ref={containerRef} className="relative">
+      <button
+        ref={buttonRef}
+        type="button"
+        aria-expanded={open}
+        aria-haspopup="menu"
+        aria-controls={open ? menuId : undefined}
+        onClick={toggle}
+        onKeyDown={onButtonKeyDown}
+        className={[
+          "nav-menu-button",
+          current ? "nav-menu-button-current" : "",
+          open ? "nav-menu-button-open" : "",
+        ].join(" ")}
+      >
+        {label}
+        <ChevronDown
+          aria-hidden="true"
+          className={["h-3.5 w-3.5 transition-transform duration-200", open ? "rotate-180" : ""].join(" ")}
+          strokeWidth={2}
+        />
+      </button>
 
       {open && anchor && (
         <div
-          className="fixed z-50 w-[min(720px,calc(100vw-2rem))]"
-          style={{ top: anchor.top, left: anchor.left }}
-          onMouseEnter={handleOpen}
-          onMouseLeave={scheduleClose}
+          ref={panelRef}
+          className="fixed z-50"
+          style={{ top: anchor.top, left: anchor.left, width: `min(${PANEL_WIDTH}px, calc(100vw - 2rem))` }}
         >
-          <MegaMenu
-            overviewTitle={overviewTitle}
-            overviewLinks={overviewLinks}
-            sections={sections}
-            onNavigate={() => setOpen(false)}
-          />
+          <CompactMenu id={menuId} label={label} sections={sections} overviewHref={href} onNavigate={() => close()} />
         </div>
       )}
     </div>

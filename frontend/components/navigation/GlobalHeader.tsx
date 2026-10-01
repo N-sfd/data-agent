@@ -4,22 +4,15 @@ import Image from "next/image";
 import Link from "next/link";
 import { Bell, Menu, Plus, Search, Sparkles } from "lucide-react";
 import { useState } from "react";
+import { usePathname } from "next/navigation";
 
 import BackendStatusPill from "@/components/navigation/BackendStatusPill";
 import MobileNavigation from "@/components/navigation/MobileNavigation";
 import NavDropdown from "@/components/navigation/NavDropdown";
-import { HUB_ICON, TOP_MENUS, type TopMenu } from "@/components/navigation/nav-config";
+import { TOP_MENUS, menuForPath, type TopMenu } from "@/components/navigation/nav-config";
 
-function MenuItem({ menu }: { menu: TopMenu }) {
-  return (
-    <NavDropdown
-      label={menu.label}
-      href={menu.href}
-      overviewTitle={menu.label}
-      overviewLinks={[{ label: `${menu.label} overview`, href: menu.href, icon: HUB_ICON }]}
-      sections={menu.sections}
-    />
-  );
+function MenuItem({ menu, active }: { menu: TopMenu; active: TopMenu["id"] | null }) {
+  return <NavDropdown label={menu.label} href={menu.href} sections={menu.sections} current={active === menu.id} />;
 }
 
 interface GlobalHeaderProps {
@@ -27,6 +20,7 @@ interface GlobalHeaderProps {
 }
 
 export default function GlobalHeader({ onOpenSearch }: GlobalHeaderProps) {
+  const active = menuForPath(usePathname());
   const [mobileOpen, setMobileOpen] = useState(false);
 
   return (
@@ -57,16 +51,15 @@ export default function GlobalHeader({ onOpenSearch }: GlobalHeaderProps) {
         {/* Primary nav — Platform, Intelligence, Review stay visible */}
         <nav className="header-nav" aria-label="Main navigation">
           {TOP_MENUS.filter((menu) => menu.id !== "governance").map((menu) => (
-            <MenuItem key={menu.id} menu={menu} />
+            <MenuItem key={menu.id} menu={menu} active={active} />
           ))}
           <div className="header-nav-governance">
-            <MenuItem menu={TOP_MENUS.find((menu) => menu.id === "governance")!} />
+            <MenuItem menu={TOP_MENUS.find((menu) => menu.id === "governance")!} active={active} />
           </div>
           <div className="header-nav-more">
             <NavDropdown
               label="More"
-              overviewTitle="Governance"
-              overviewLinks={[{ label: "Governance overview", href: "/governance", icon: HUB_ICON }]}
+              href="/governance"
               sections={TOP_MENUS.find((menu) => menu.id === "governance")!.sections}
             />
           </div>

@@ -12,7 +12,8 @@ import type {
  * exports stay exactly as extracted; this decides what is shown where, and
  * leaves every technical detail to the evidence / technical views. */
 
-export type SectionPattern = "detail" | "grid" | "summary";
+/** "card": a compact document-summary card (label over value, in a grid). */
+export type SectionPattern = "detail" | "grid" | "summary" | "card";
 
 /** One displayed value: a business label and the cell behind it. */
 export interface FieldItem {
@@ -797,7 +798,7 @@ function composeContract(workbook: StagingWorkbook): PresentationManifest {
   if (detailSections.length > 0) groups.push({ id: "contract_details", label: "Contract Details", sections: detailSections });
 
   const lineItems = find("line_items");
-  const dataSections = [
+  const lineSections = [
     sourceGrid(
       lineItems && lineItems.records.length > 0 ? lineItems : find("clins"),
       "Line Items",
@@ -805,11 +806,14 @@ function composeContract(workbook: StagingWorkbook): PresentationManifest {
       { inlineReview: true },
     ),
     sourceGrid(find("delivery_information"), "Delivery Information", ["delivery", "deliveries"], { inlineReview: true }),
+  ].filter((section): section is PresentationSection => section !== null);
+  const dataSections = [
     sourceGrid(find("funding"), "Funding", ["funding line", "funding lines"], { inlineReview: true }),
     ...attachmentSections(find("contract_attachments"), find("attachments")),
     ...contractBodySections(find("contract_sections"), find("section_tables")),
   ].filter((section): section is PresentationSection => section !== null);
   if (dataSections.length > 0) groups.push({ id: "contract_data", label: "Contract Data", sections: dataSections });
+  if (lineSections.length > 0) groups.push({ id: "line_items", label: "Line Items", sections: lineSections });
 
   const clauses = find("contract_clauses");
   const clauseSections = [
@@ -826,11 +830,12 @@ function composeContract(workbook: StagingWorkbook): PresentationManifest {
   for (const dataset of workbook.datasets) reasons.push(`contract:${dataset.dataset_id}:${dataset.records.length}`);
   const drafts = groups.map((group, rank) => ({ ...group, rank }));
   const heading = headingFrom(workbook, drafts);
+  const refined = refineGroups(groups, heading);
   return {
     heading,
     subtitle: subtitleFrom(drafts, heading),
     family: workbook.processing_metadata.document_family,
-    groups,
+    groups: refined,
     technical: workbook.datasets,
     reasons,
   };
@@ -1004,10 +1009,98 @@ export function composePresentation(workbook: StagingWorkbook): PresentationMani
     heading,
     subtitle: subtitleFrom([...drafts.values()], heading),
     family: workbook.processing_metadata.document_family,
-    groups,
+    groups: refineGroups(groups, heading),
     technical: workbook.datasets,
     reasons,
   };
+}
+
+// --- one adaptive presentation rule for every profile ---------------------------
+
+const SUMMARY_IDS = new Set(["summary", "contract_details"]);
+const DOCUMENT_LEVEL_TITLES = /^(institution|certification|accreditation|issuer|document)/i;
+const OTHER_INLINE_LIMIT = 3;
+const REFERENCE_INLINE_LIMIT = 2;
+
+function itemCount(sections: PresentationSection[]): number {
+  return sections.reduce((total, section) => total + (section.pattern === "grid" ? section.dataset?.records.length ?? 0 : section.items.length), 0);
+}
+
+/** "Invoice Details"; a long document title reads "Document Details". */
+function detailsTitle(heading: string): string {
+  const base = heading.replace(/\s+details$/i, "");
+  return base.length <= 32 ? `${base} Details` : "Document Details";
+}
+
+/** Tabs come from meaningful content, not datasets:
+ * - the summary tab is always "Summary" and comes first; a document with
+ *   no summary dataset gets one from its document-level details
+ *   (institution, certification);
+ * - Summary reads as cards: the first, untitled one is "<Document> Details";
+ *   one or two references join it, a References block only when there
+ *   are more;
+ * - Other Information is a tab only when it holds more than a handful of
+ *   values — otherwise those values close the Summary;
+ * - graduation requirements read with the Academic Summary. */
+export function refineGroups(input: PresentationGroup[], heading: string): PresentationGroup[] {
+  let groups = input.map((group) => ({ ...group, sections: [...group.sections] }));
+  const other = groups.find((group) => group.id === "other");
+  let summary = groups.find((group) => SUMMARY_IDS.has(group.id));
+
+  if (other) {
+    const academic = groups.find((group) => group.id === "academic_summary");
+    if (academic) {
+      const requirements = other.sections.filter((section) => /graduation|requirement/i.test(section.title ?? ""));
+      academic.sections.push(...requirements);
+      other.sections = other.sections.filter((section) => !requirements.includes(section));
+    }
+    if (!summary) {
+      const documentLevel = other.sections.filter((section) => DOCUMENT_LEVEL_TITLES.test(section.title ?? ""));
+      if (documentLevel.length > 0) {
+        summary = { id: "summary", label: "Summary", sections: documentLevel };
+        other.sections = other.sections.filter((section) => !documentLevel.includes(section));
+        groups.unshift(summary);
+      }
+    }
+  }
+
+  if (summary) {
+    summary.label = "Summary";
+    const references = summary.sections.find((section) => /^references$/i.test(section.title ?? ""));
+    const first = summary.sections.find((section) => section.pattern === "detail" && section !== references);
+    if (references && first && references.items.length <= REFERENCE_INLINE_LIMIT) {
+      first.items = [...first.items, ...references.items];
+      summary.sections = summary.sections.filter((section) => section !== references);
+    }
+    summary.sections = summary.sections.map((section, index) =>
+      section.pattern === "detail"
+        ? {
+            ...section,
+            pattern: "card" as const,
+            title: section.title ?? (index === 0 ? detailsTitle(heading) : null),
+          }
+        : section,
+    );
+    groups = [summary, ...groups.filter((group) => group !== summary)];
+  }
+
+  if (other) {
+    const count = itemCount(other.sections);
+    if (count === 0) {
+      groups = groups.filter((group) => group !== other);
+    } else if (count <= OTHER_INLINE_LIMIT) {
+      const items = other.sections.flatMap((section) => section.items);
+      const target = summary ?? { id: "summary", label: "Summary", sections: [] };
+      target.sections.push({ id: "additional_information", title: "Additional Information", pattern: "card", items });
+      groups = groups.filter((group) => group !== other);
+      if (!summary) groups.unshift(target);
+    } else if (other.sections.length === 1 && other.sections[0].title) {
+      // One coherent subject (e.g. Shipping & Commercial) names its own tab.
+      other.label = other.sections[0].title;
+      other.sections = [{ ...other.sections[0], title: null }];
+    }
+  }
+  return groups.filter((group) => group.sections.length > 0);
 }
 
 /** Detail sections with the same heading become one. */

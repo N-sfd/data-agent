@@ -231,8 +231,8 @@ describe("StagingWorkbook rendering", () => {
     getWorkbook.mockResolvedValue(contractWorkbook());
     render(<StagingWorkbook documentId="doc-1" />);
 
-    expect(await screen.findByRole("tab", { name: "Contract Details" })).toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: "Contract Data" })).toBeInTheDocument();
+    expect(await screen.findByRole("tab", { name: "Summary" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Line Items" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Government Contract" })).toBeInTheDocument();
     expect(screen.getByText("47QRCA25DSF07")).toBeInTheDocument();
     // NAICS has no value: not rendered as a "—" row.
@@ -357,7 +357,7 @@ describe("StagingWorkbook rendering", () => {
     render(<StagingWorkbook documentId="doc-1" />);
 
     const tabs = (await screen.findAllByRole("tab")).map((tab) => tab.getAttribute("aria-label"));
-    expect(tabs).toEqual(expect.arrayContaining(["Contract Details", "Contract Data", "Clauses"]));
+    expect(tabs).toEqual(expect.arrayContaining(["Summary", "Line Items", "Clauses"]));
     expect(tabs).not.toContain("Contract Summary");
     // Sections follow the professional order; labels are the source's own.
     const headings = screen.getAllByRole("heading", { level: 4 }).map((heading) => heading.textContent);
@@ -365,7 +365,7 @@ describe("StagingWorkbook rendering", () => {
     expect(screen.getByText("1. SOLICITATION NO.")).toBeInTheDocument();
     expect(screen.getByText("7. ISSUED BY — CODE")).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("tab", { name: "Contract Data" }));
+    fireEvent.click(screen.getByRole("tab", { name: "Line Items" }));
     const headers = screen.getAllByRole("columnheader").map((th) => th.textContent?.trim());
     expect(headers).toEqual(["ITEM NO", "MAX QUANTITY", "MAX AMOUNT"]);
 
@@ -418,7 +418,7 @@ describe("StagingWorkbook rendering", () => {
     );
     render(<StagingWorkbook documentId="doc-1" />);
 
-    expect(await screen.findByRole("tab", { name: "Document Details" })).toBeInTheDocument();
+    expect(await screen.findByRole("tab", { name: "Summary" })).toBeInTheDocument();
     expect(screen.queryByRole("tab", { name: /Key Fields|CLINs/ })).toBeNull();
     expect(screen.getByText("Email")).toBeInTheDocument();
     expect(screen.getByText("billing@example.com")).toBeInTheDocument();
@@ -429,7 +429,7 @@ describe("StagingWorkbook rendering", () => {
     const onOpenSource = vi.fn();
     render(<StagingWorkbook documentId="doc-1" onOpenSource={onOpenSource} />);
 
-    fireEvent.click(await screen.findByRole("tab", { name: /Contract Data/ }));
+    fireEvent.click(await screen.findByRole("tab", { name: "Line Items" }));
     fireEvent.click(screen.getByRole("button", { name: "0.00" }));
     expect(screen.getByRole("dialog", { name: "Evidence" })).toHaveTextContent("Max Amount");
     fireEvent.click(screen.getByRole("button", { name: "View in Document" }));
@@ -486,7 +486,8 @@ describe("StagingWorkbook rendering", () => {
   it("keeps every staged dataset in a collapsed technical view", async () => {
     getWorkbook.mockResolvedValue(contractWorkbook());
     render(<StagingWorkbook documentId="doc-1" />);
-    fireEvent.click(await screen.findByRole("button", { name: /Show technical view/ }));
+    fireEvent.click(await screen.findByRole("button", { name: "More" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Raw staging data" }));
     for (const id of ["contract_summary", "clins", "source_documents"]) {
       expect(screen.getByRole("button", { name: id })).toBeInTheDocument();
     }
@@ -566,7 +567,7 @@ describe("Generic presentation", () => {
     render(<StagingWorkbook documentId="doc-1" />);
     const tabs = await screen.findByRole("tablist", { name: "Document sections" });
     const labels = Array.from(tabs.querySelectorAll("button")).map((b) => b.getAttribute("aria-label"));
-    expect(labels).toEqual(["Document Details"]);
+    expect(labels).toEqual(["Summary"]);
     expect(screen.getByText("Certificate")).toBeInTheDocument();
   });
 
@@ -711,20 +712,20 @@ describe("Academic transcript presentation", () => {
     expect(screen.queryByRole("heading", { name: "English Composition" })).toBeNull();
   });
 
-  it("shows exactly one Other Information tab among the transcript groups", async () => {
+  it("leads with a Summary of document-level details and no Other Information tab", async () => {
     getWorkbook.mockResolvedValue(transcriptWorkbook());
     render(<StagingWorkbook documentId="doc-1" />);
     const sections = await screen.findByRole("tablist", { name: "Document sections" });
     const labels = Array.from(sections.querySelectorAll("button")).map((b) => b.getAttribute("aria-label"));
-    expect(labels).toEqual(["Student & Program", "Academic Record", "Academic Summary", "Other Information"]);
+    expect(labels).toEqual(["Summary", "Student & Program", "Academic Record", "Academic Summary"]);
     expect(screen.getByRole("tab", { name: "Staging Workbook" })).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "Source" })).toBeInTheDocument();
   });
 
-  it("groups Other Information into semantic subsections without Category or ID columns", async () => {
+  it("shows institution, certification and accreditation as Summary cards without Category or ID columns", async () => {
     getWorkbook.mockResolvedValue(transcriptWorkbook());
     render(<StagingWorkbook documentId="doc-1" />);
-    fireEvent.click(await screen.findByRole("tab", { name: "Other Information" }));
+    fireEvent.click(await screen.findByRole("tab", { name: "Summary" }));
     for (const title of ["Institution", "Certification", "Accreditation"]) {
       expect(screen.getByRole("heading", { name: title })).toBeInTheDocument();
     }
@@ -746,7 +747,8 @@ describe("Academic transcript presentation", () => {
   it("opens a value's evidence with humanized technical details", async () => {
     getWorkbook.mockResolvedValue(transcriptWorkbook());
     render(<StagingWorkbook documentId="doc-1" />);
-    fireEvent.click(await screen.findByRole("button", { name: "Jordan Example" }));
+    fireEvent.click(await screen.findByRole("tab", { name: "Student & Program" }));
+    fireEvent.click(screen.getByRole("button", { name: "Jordan Example" }));
     const dialog = screen.getByRole("dialog", { name: "Evidence" });
     expect(dialog).toHaveTextContent("Source Evidence");
     expect(dialog).toHaveTextContent("Page 1");
@@ -880,7 +882,7 @@ describe("Invoice presentation", () => {
     render(<StagingWorkbook documentId="doc-1" />);
     const nav = await screen.findByRole("tablist", { name: "Document sections" });
     const labels = Array.from(nav.querySelectorAll("[role='tab']")).map((tab) => tab.getAttribute("aria-label"));
-    expect(labels).toEqual(["Invoice Summary", "Parties", "Line Items", "Charges & Totals"]);
+    expect(labels).toEqual(["Summary", "Parties", "Line Items", "Charges & Totals"]);
   });
 
   it("omits blank fields and replaces per-row OCR warnings with a review indicator", async () => {

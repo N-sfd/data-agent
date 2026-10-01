@@ -1,7 +1,7 @@
 "use client";
 
-import { FileSearch, Search } from "lucide-react";
-import { useMemo, useState } from "react";
+import { FileSearch, MoreHorizontal, Search } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import type { SourceViewRequest } from "@/components/source-verification-panel";
 import EvidenceDrawer, { type EvidenceTarget } from "@/components/staging/evidence-drawer";
@@ -18,21 +18,43 @@ import {
 } from "@/lib/presentation-manifest";
 import type { StagingCell, StagingColumn, StagingRecord, StagingWorkbook } from "@/lib/staging-workbook";
 
+export interface MoreAction {
+  label: string;
+  onSelect: () => void;
+}
+
 interface WorkspaceProps {
   workbook: StagingWorkbook;
   documentId: string;
   onOpenSource?: (request: SourceViewRequest) => void;
   /** Fallback when there is no source panel: show the value in the Source view. */
   onViewInDocument?: (target: EvidenceTarget) => void;
+  /** Reviewer/developer views offered under "More" (extraction details,
+   * source structure, diagnostics); raw staging data is always offered. */
+  moreActions?: MoreAction[];
+}
+
+const ISO_DATE = /^(\d{4})-(\d{2})-(\d{2})$/;
+
+/** Business display only: "2026-09-23" reads "Sep 23, 2026". The stored
+ * and exported value stays ISO. */
+export function displayText(text: string): string {
+  const match = ISO_DATE.exec(text.trim());
+  if (!match) return text;
+  const date = new Date(Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3])));
+  if (Number.isNaN(date.getTime()) || date.getUTCDate() !== Number(match[3])) return text;
+  return date.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" });
 }
 
 /** The business-facing workspace: what information is in this document.
  * How it was extracted lives behind Details (the evidence drawer) and the
  * collapsed technical view. */
-export default function PresentationWorkspace({ workbook, documentId, onOpenSource, onViewInDocument }: WorkspaceProps) {
+export default function PresentationWorkspace({ workbook, documentId, onOpenSource, onViewInDocument, moreActions = [] }: WorkspaceProps) {
   const manifest = useMemo(() => composePresentation(workbook), [workbook]);
   const [active, setActive] = useState(manifest.groups[0]?.id ?? "");
   const [target, setTarget] = useState<EvidenceTarget | null>(null);
+  const [showTechnical, setShowTechnical] = useState(false);
+  const technicalRef = useRef<HTMLDivElement>(null);
   const current = manifest.groups.find((group) => group.id === active) ?? manifest.groups[0];
 
   const viewInDocument = (evidence: EvidenceTarget) => {
@@ -44,9 +66,23 @@ export default function PresentationWorkspace({ workbook, documentId, onOpenSour
 
   return (
     <div className="space-y-5">
-      <div>
-        <h3 className="text-lg font-semibold tracking-tight text-foreground">{manifest.heading}</h3>
-        {manifest.subtitle && <p className="mt-0.5 text-sm text-text-secondary">{manifest.subtitle}</p>}
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <h3 className="text-lg font-semibold tracking-tight text-foreground">{manifest.heading}</h3>
+          {manifest.subtitle && <p className="mt-0.5 text-sm text-text-secondary">{manifest.subtitle}</p>}
+        </div>
+        <MoreMenu
+          actions={[
+            ...moreActions,
+            {
+              label: "Raw staging data",
+              onSelect: () => {
+                setShowTechnical(true);
+                requestAnimationFrame(() => technicalRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }));
+              },
+            },
+          ]}
+        />
       </div>
 
       {manifest.groups.length > 0 && (
@@ -83,7 +119,11 @@ export default function PresentationWorkspace({ workbook, documentId, onOpenSour
         </p>
       )}
 
-      <TechnicalView workbook={workbook} documentId={documentId} onOpenSource={onOpenSource} />
+      {showTechnical && (
+        <div ref={technicalRef}>
+          <TechnicalView workbook={workbook} documentId={documentId} onOpenSource={onOpenSource} onClose={() => setShowTechnical(false)} />
+        </div>
+      )}
 
       {target && (
         <EvidenceDrawer
@@ -138,14 +178,19 @@ function GroupBody({
           {section.supertitle && (
             <h3 className="border-b border-border pb-1 pt-2 text-sm font-semibold text-foreground">{section.supertitle}</h3>
           )}
-          {section.title && (
+          {section.title && section.pattern !== "card" && (
             <h4 className="text-xs font-semibold uppercase tracking-[0.08em] text-text-secondary">{section.title}</h4>
+          )}
+          {section.title && section.pattern === "card" && (
+            <h4 className="text-sm font-semibold text-foreground">{section.title}</h4>
           )}
           {section.note && <p className="text-xs text-text-muted">{section.note}</p>}
           {section.pattern === "grid" ? (
             <RecordGrid section={section} groupLabel={group.label} documentId={documentId} onSelect={onSelect} onOpenSource={onOpenSource} />
           ) : section.pattern === "summary" ? (
             <SummaryBlock items={section.items} onSelect={onSelect} />
+          ) : section.pattern === "card" ? (
+            <SummaryCard items={section.items} onSelect={onSelect} />
           ) : (
             <DetailList items={section.items} onSelect={onSelect} />
           )}
@@ -210,6 +255,30 @@ function ValueButton({
   );
 }
 
+// --- A0. Summary card --------------------------------------------------------------
+
+/** A document-summary card: label over value, two or three per row. Each
+ * value still opens its source evidence. */
+function SummaryCard({ items, onSelect }: { items: FieldItem[]; onSelect: (target: EvidenceTarget) => void }) {
+  return (
+    <dl className="grid gap-x-8 gap-y-4 rounded-xl border border-border bg-surface px-5 py-4 sm:grid-cols-2 lg:grid-cols-3">
+      {items.map((item) => {
+        const open = () => onSelect(itemTarget(item));
+        const text = formatCellValue(item.cell);
+        return (
+          <div key={item.id} className={`min-w-0 ${text.length > 80 ? "sm:col-span-2 lg:col-span-3" : ""}`}>
+            <dt className="text-xs text-text-secondary">{item.label}</dt>
+            <dd className="mt-0.5 flex min-w-0 flex-wrap items-center gap-2 text-sm">
+              <ValueButton text={displayText(text)} onOpen={open} className="font-medium" wrap />
+              <ReviewMark cell={item.cell} onOpen={open} />
+            </dd>
+          </div>
+        );
+      })}
+    </dl>
+  );
+}
+
 // --- A. Detail group ------------------------------------------------------------
 
 function DetailList({ items, onSelect }: { items: FieldItem[]; onSelect: (target: EvidenceTarget) => void }) {
@@ -221,7 +290,7 @@ function DetailList({ items, onSelect }: { items: FieldItem[]; onSelect: (target
           <div key={item.id} className="grid gap-x-6 gap-y-0.5 px-4 py-2.5 sm:grid-cols-[minmax(10rem,32%)_1fr]">
             <dt className="text-sm text-text-secondary">{item.label}</dt>
             <dd className="flex min-w-0 flex-wrap items-center justify-between gap-2 text-sm">
-              <ValueButton text={formatCellValue(item.cell)} onOpen={open} className="font-medium" wrap />
+              <ValueButton text={displayText(formatCellValue(item.cell))} onOpen={open} className="font-medium" wrap />
               <ReviewMark cell={item.cell} onOpen={open} />
             </dd>
           </div>
@@ -397,7 +466,7 @@ function RecordGrid({
               <tr key={record.record_id} className="hover:bg-surface-soft/60">
                 {columns.map((column, index) => {
                   const cell = record.cells[column.canonical_field];
-                  const text = cell && !isBlank(cell.value) ? formatCellValue(cell) : "";
+                  const text = cell && !isBlank(cell.value) ? displayText(formatCellValue(cell)) : "";
                   // Inline review: the record's identity (clause number,
                   // title) opens its details; review state is a small mark.
                   const opensRecord = section.inlineReview && (index === 0 || column.canonical_field.endsWith(".title"));
@@ -490,25 +559,29 @@ function TechnicalView({
   workbook,
   documentId,
   onOpenSource,
+  onClose,
 }: {
   workbook: StagingWorkbook;
   documentId: string;
   onOpenSource?: (request: SourceViewRequest) => void;
+  onClose: () => void;
 }) {
-  const [open, setOpen] = useState(false);
+  const open = true;
   const [datasetId, setDatasetId] = useState(workbook.datasets[0]?.dataset_id ?? "");
   const dataset = workbook.datasets.find((item) => item.dataset_id === datasetId) ?? workbook.datasets[0];
   if (workbook.datasets.length === 0) return null;
   return (
     <div className="border-t border-dashed border-border pt-3">
-      <button
-        type="button"
-        onClick={() => setOpen((value) => !value)}
-        aria-expanded={open}
-        className="text-xs text-text-muted underline decoration-dotted underline-offset-4 hover:text-text-secondary"
-      >
-        {open ? "Hide" : "Show"} technical view (all staged datasets)
-      </button>
+      <div className="flex items-center justify-between gap-3">
+        <p className="text-xs font-semibold uppercase tracking-[0.1em] text-text-muted">Raw staging data</p>
+        <button
+          type="button"
+          onClick={onClose}
+          className="text-xs text-text-muted underline decoration-dotted underline-offset-4 hover:text-text-secondary"
+        >
+          Hide
+        </button>
+      </div>
       {open && dataset && (
         <div className="mt-3 space-y-3 rounded-xl border border-dashed border-border bg-surface-soft/60 p-3">
           <div className="flex flex-wrap gap-1">
@@ -532,6 +605,62 @@ function TechnicalView({
           ) : (
             <StagingDatasetTable dataset={dataset} documentId={documentId} onOpenSource={onOpenSource} />
           )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// --- More menu -------------------------------------------------------------------------
+
+/** Reviewer/developer views, kept out of the normal document navigation. */
+function MoreMenu({ actions }: { actions: MoreAction[] }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const onPointer = (event: MouseEvent) => {
+      if (!ref.current?.contains(event.target as Node)) setOpen(false);
+    };
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setOpen(false);
+    };
+    document.addEventListener("mousedown", onPointer);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onPointer);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+  if (actions.length === 0) return null;
+  return (
+    <div ref={ref} className="relative shrink-0">
+      <button
+        type="button"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        onClick={() => setOpen((value) => !value)}
+        className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface px-2.5 py-1.5 text-xs font-medium text-text-secondary hover:text-foreground"
+      >
+        <MoreHorizontal className="h-4 w-4" aria-hidden="true" />
+        More
+      </button>
+      {open && (
+        <div role="menu" aria-label="More" className="absolute right-0 top-full z-20 mt-1 w-56 rounded-lg border border-border bg-surface p-1 shadow-lg">
+          {actions.map((action) => (
+            <button
+              key={action.label}
+              type="button"
+              role="menuitem"
+              onClick={() => {
+                setOpen(false);
+                action.onSelect();
+              }}
+              className="block w-full rounded-md px-3 py-2 text-left text-xs text-foreground hover:bg-surface-soft"
+            >
+              {action.label}
+            </button>
+          ))}
         </div>
       )}
     </div>

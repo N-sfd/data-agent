@@ -549,49 +549,84 @@ body {
   display: inline-flex;
   align-items: center;
   gap: 0.375rem;
-  border-radius: 9px;
-  background: rgba(0, 20, 28, 0.55);
-  padding: 0.5rem 0.875rem;
+  height: 2.5rem;
+  border-radius: 8px;
+  background: transparent;
+  padding: 0 0.875rem;
   font-size: 0.8125rem;
   font-weight: 500;
   color: var(--text-on-dark);
-  transition: background 180ms ease;
+  transition: background 160ms ease, color 160ms ease;
   flex-shrink: 0;
   white-space: nowrap;
 }
 
 .nav-menu-button:hover,
-.nav-menu-button-active {
-  background: rgba(0, 20, 28, 0.82);
-}
-
-/* Label opens the hub page; the chevron opens the dropdown. */
-.nav-menu-button.nav-menu-split {
-  padding: 0;
-  gap: 0;
-}
-
-.nav-menu-split-link {
-  padding: 0.5rem 0.25rem 0.5rem 0.875rem;
-  border-radius: 9px 0 0 9px;
-}
-
-.nav-menu-split-toggle {
-  display: inline-flex;
-  align-items: center;
-  padding: 0.5rem 0.625rem 0.5rem 0.375rem;
-  border-radius: 0 9px 9px 0;
-  color: inherit;
-}
-
-.nav-menu-split-toggle:hover {
+.nav-menu-button-open {
   background: rgba(255, 255, 255, 0.08);
 }
 
-.nav-menu-button-active .nav-menu-split-link[aria-current="page"] {
-  text-decoration: underline;
-  text-decoration-color: var(--sirion-teal-soft);
-  text-underline-offset: 6px;
+/* Only the section you are in is filled. */
+.nav-menu-button-current {
+  background: rgba(255, 255, 255, 0.16);
+  color: #ffffff;
+}
+
+.nav-menu-button:focus-visible {
+  outline: 2px solid var(--sirion-teal-soft);
+  outline-offset: 2px;
+}
+
+.compact-menu-panel {
+  max-height: 360px;
+  overflow-y: auto;
+  border-radius: 12px;
+  border: 1px solid rgba(0, 0, 0, 0.06);
+  background: var(--surface, #ffffff);
+  padding: 0.75rem;
+  box-shadow: var(--shadow-elevated);
+}
+
+.compact-menu-title {
+  padding: 0 0.5rem;
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-teal);
+  min-height: 1rem;
+}
+
+.compact-menu-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.625rem;
+  border-radius: 8px;
+  padding: 0.4375rem 0.5rem;
+  transition: background 140ms ease;
+}
+
+.compact-menu-row:hover,
+.compact-menu-row:focus-visible {
+  background: var(--menu-tile-hover);
+  outline: none;
+}
+
+.compact-menu-overview {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  border-radius: 6px;
+  padding: 0.25rem 0.5rem;
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: var(--text-teal);
+}
+
+.compact-menu-overview:hover,
+.compact-menu-overview:focus-visible {
+  background: var(--menu-tile-hover);
+  outline: none;
 }
 
 .nav-icon-button {

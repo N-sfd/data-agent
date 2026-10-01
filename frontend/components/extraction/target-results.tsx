@@ -273,6 +273,14 @@ export default function TargetResults({
   const [onlyMissing, setOnlyMissing] = useState(false);
   const [workbookTab, setWorkbookTab] = useState<WorkbookTab>("all");
   const [showLegacyAudit, setShowLegacyAudit] = useState(false);
+  // Diagnostics are reviewer/developer views, opened from the workbook's
+  // "More" menu rather than shown in the document navigation.
+  const diagnosticsRef = useRef<HTMLDivElement>(null);
+  const extractionDetailsRef = useRef<HTMLDivElement>(null);
+  function openDiagnostics(target: React.RefObject<HTMLDivElement | null>) {
+    setShowLegacyAudit(true);
+    requestAnimationFrame(() => target.current?.scrollIntoView({ behavior: "smooth", block: "start" }));
+  }
   const [exportMenuOpen, setExportMenuOpen] = useState(false);
   const exportMenuRef = useRef<HTMLDivElement | null>(null);
   const [corrections, setCorrections] = useState<Map<string, TargetCorrection>>(
@@ -633,23 +641,25 @@ export default function TargetResults({
           onOpenSource={(request) => handleOpenSource(request)}
           selectedSourceId={sourceRequest?.id ?? null}
           refreshKey={`${result.scalars.length}-${result.tables.length}-${result.warnings.length}`}
+          moreActions={[
+            { label: "Extraction details", onSelect: () => openDiagnostics(extractionDetailsRef) },
+            { label: "Processing diagnostics", onSelect: () => openDiagnostics(diagnosticsRef) },
+          ]}
         />
       )}
 
-      <div className="border-t border-dashed border-border pt-3">
+      {showLegacyAudit && (
+      <div ref={diagnosticsRef} className="space-y-4 rounded-xl border border-dashed border-border bg-surface-soft/60 p-4">
+      <div className="flex items-center justify-between gap-3">
+        <p className="text-[11px] uppercase tracking-[0.12em] text-text-muted">Opened from More</p>
         <button
           type="button"
-          onClick={() => setShowLegacyAudit((open) => !open)}
-          aria-expanded={showLegacyAudit}
+          onClick={() => setShowLegacyAudit(false)}
           className="text-[11px] text-text-muted underline decoration-dotted underline-offset-4 hover:text-text-secondary"
         >
-          {showLegacyAudit ? "Hide" : "Show"} processing details / legacy
-          extraction diagnostics (admin)
+          Hide
         </button>
       </div>
-
-      {showLegacyAudit && (
-      <div className="space-y-4 rounded-xl border border-dashed border-border bg-surface-soft/60 p-4">
       <p className="text-[11px] uppercase tracking-[0.12em] text-text-muted">
         Development &amp; admin diagnostics — not part of the document results
       </p>
@@ -668,7 +678,7 @@ export default function TargetResults({
         </p>
       </div>
 
-      <div className="mt-4">
+      <div ref={extractionDetailsRef} className="mt-4">
         <ExtractionSummaryBar result={result} />
       </div>
 

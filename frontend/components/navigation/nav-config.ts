@@ -51,19 +51,19 @@ export const DOCUMENTS_SECTIONS: MegaMenuSection[] = [
       },
       {
         label: "Needs review",
-        description: "Documents with values to confirm",
+        description: "Values to confirm",
         href: "/documents?filter=review",
         icon: ListChecks,
       },
       {
         label: "Failed",
-        description: "Documents whose processing did not complete",
+        description: "Processing did not complete",
         href: "/documents?filter=failed",
         icon: CircleAlert,
       },
       {
         label: "Upload document",
-        description: "Add a document and let Data Agent detect its type",
+        description: "Add a document",
         href: "/extraction/new",
         icon: Upload,
       },
@@ -83,67 +83,21 @@ export const DOCUMENTS_SECTIONS: MegaMenuSection[] = [
 
 export const PLATFORM_SECTIONS: MegaMenuSection[] = [
   {
-    title: "Document Intelligence",
+    title: "Workspace",
     tiles: [
-      {
-        label: "Documents",
-        description: "Open any document workspace",
-        href: "/documents",
-        icon: Archive,
-      },
-      {
-        label: "New Document",
-        description: "Upload and let Data Agent detect the profile",
-        href: "/extraction/new",
-        icon: FileSearch,
-      },
-      {
-        label: "Field Explorer",
-        description: "Compare fields across documents",
-        href: "/explorer",
-        icon: Compass,
-      },
-      {
-        label: "Ask Data Agent",
-        description: "Source-grounded questions across the repository",
-        href: "/ask",
-        icon: Sparkles,
-      },
-      {
-        label: "Review",
-        description: "Fields that need a human decision",
-        href: "/review-queue",
-        icon: ListChecks,
-      },
-      {
-        label: "Search",
-        description: "Search documents, fields, and evidence",
-        href: "/search",
-        icon: Search,
-      },
-      {
-        label: "Analytics",
-        description: "Portfolio analytics, extraction quality, and review performance",
-        href: "/analytics",
-        icon: BarChart3,
-      },
+      { label: "Documents", description: "Browse documents", href: "/documents", icon: Archive },
+      { label: "New Document", description: "Upload & extract", href: "/extraction/new", icon: FileSearch },
+      { label: "Field Explorer", description: "Compare extracted fields", href: "/explorer", icon: Compass },
+      { label: "Review", description: "Resolve items needing attention", href: "/review-queue", icon: ListChecks },
     ],
   },
   {
-    title: "Contract Intelligence",
+    title: "Intelligence",
     tiles: [
-      {
-        label: "FAR / DFARS",
-        description: "Federal acquisition clause intelligence",
-        href: "/clauses",
-        icon: ScrollText,
-      },
-      {
-        label: "Relationships",
-        description: "Parent, child, and amendment hierarchy",
-        href: "/relationships",
-        icon: GitBranch,
-      },
+      { label: "Ask Data Agent", description: "Query document data", href: "/ask", icon: Sparkles },
+      { label: "Search", description: "Search documents and fields", href: "/search", icon: Search },
+      { label: "Analytics", description: "Portfolio insights", href: "/analytics", icon: BarChart3 },
+      { label: "FAR / DFARS", description: "Contract intelligence", href: "/clauses", icon: ScrollText },
     ],
   },
 ];
@@ -154,13 +108,13 @@ export const INTELLIGENCE_SECTIONS: MegaMenuSection[] = [
     tiles: [
       {
         label: "Field Explorer",
-        description: "Cross-document field comparison",
+        description: "Compare fields across documents",
         href: "/explorer",
         icon: Compass,
       },
       {
         label: "Ask Data Agent",
-        description: "Source-grounded answers across documents",
+        description: "Query document data",
         href: "/ask",
         icon: Sparkles,
       },
@@ -171,19 +125,19 @@ export const INTELLIGENCE_SECTIONS: MegaMenuSection[] = [
     tiles: [
       {
         label: "FAR / DFARS Clauses",
-        description: "Federal acquisition clause intelligence",
+        description: "Clause intelligence",
         href: "/clauses",
         icon: ScrollText,
       },
       {
         label: "Clause Search",
-        description: "Search FAR/DFARS provisions across contracts",
+        description: "Find provisions across contracts",
         href: "/clauses",
         icon: Search,
       },
       {
         label: "Clause Comparison",
-        description: "Compare clauses side by side",
+        description: "Side-by-side comparison",
         href: "/clauses/compare",
         icon: GitCompare,
       },
@@ -195,7 +149,7 @@ export const INTELLIGENCE_SECTIONS: MegaMenuSection[] = [
       },
       {
         label: "Contract Insights",
-        description: "Executive summaries and portfolio intelligence",
+        description: "Executive summaries",
         href: "/insights",
         icon: Lightbulb,
       },
@@ -209,13 +163,13 @@ export const REVIEW_SECTIONS: MegaMenuSection[] = [
     tiles: [
       {
         label: "Review",
-        description: "Extraction, validation, missing values, and conflicts",
+        description: "Items needing a decision",
         href: "/review-queue",
         icon: ListChecks,
       },
       {
         label: "Recent Extractions",
-        description: "Latest uploaded and processed documents",
+        description: "Latest processed documents",
         href: "/#recent-extractions",
         icon: Archive,
       },
@@ -227,7 +181,7 @@ export const REVIEW_SECTIONS: MegaMenuSection[] = [
       },
       {
         label: "Activity Feed",
-        description: "Live feed of recent review and edit actions",
+        description: "Recent review and edit actions",
         href: "/activity",
         icon: Activity,
       },
@@ -241,31 +195,31 @@ export const GOVERNANCE_SECTIONS: MegaMenuSection[] = [
     tiles: [
       {
         label: "Architecture",
-        description: "Platform lifecycle, trust loop, and deploy topology",
+        description: "Platform lifecycle and topology",
         href: "/architecture",
         icon: Layers,
       },
       {
         label: "Integration Center",
-        description: "Oracle ERP, n8n workflows & approved data",
+        description: "Workflows and approved data",
         href: "/integrations",
         icon: Workflow,
       },
       {
         label: "Audit Log",
-        description: "Track all review and edit actions",
+        description: "Every review and edit action",
         href: "/audit-log",
         icon: ClipboardList,
       },
       {
         label: "Settings",
-        description: "Application and extraction settings",
+        description: "Application settings",
         href: "/settings",
         icon: Settings,
       },
       {
         label: "Risk",
-        description: "Contract risk patterns, obligations, and compliance gaps",
+        description: "Obligations and compliance gaps",
         href: "/risk",
         icon: AlertTriangle,
       },
@@ -329,3 +283,15 @@ export function topMenu(id: TopMenu["id"]): TopMenu {
 }
 
 export const HUB_ICON = LayoutGrid;
+
+/** The one top menu a page belongs to (so a single button is filled): its
+ * own hub page first, else the first menu, left to right, linking to it. */
+export function menuForPath(pathname: string): TopMenu["id"] | null {
+  if (!pathname || pathname === "/") return null;
+  const hub = TOP_MENUS.find((menu) => menu.href === pathname);
+  if (hub) return hub.id;
+  const owner = TOP_MENUS.find((menu) =>
+    menu.sections.some((section) => section.tiles.some((tile) => tile.href.split(/[?#]/)[0] === pathname)),
+  );
+  return owner?.id ?? null;
+}
