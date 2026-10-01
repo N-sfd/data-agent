@@ -152,6 +152,7 @@ def _build_dataset(
         records=records,
         identity_fields=list(definition.identity_fields),
         grid_fields=list(definition.grid_fields),
+        source_columns=list(labels) if definition.source_adaptive_columns else [],
     )
 
 

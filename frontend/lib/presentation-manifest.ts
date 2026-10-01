@@ -599,6 +599,8 @@ function sourceGrid(
     id?: string;
     supertitle?: string;
     hide?: string[];
+    /** Explicit columns (relabelled per table), in order. */
+    columns?: StagingColumn[];
   } = {},
 ): PresentationSection | null {
   if (!dataset || dataset.records.length === 0) return null;
@@ -606,9 +608,17 @@ function sourceGrid(
   const byField = new Map(dataset.columns.map((column) => [column.canonical_field, column]));
   // A target template (Transformation View) shows every target column,
   // filled or not; business grids only populated source columns.
-  const shown = (
-    options.allColumns ? dataset.columns : columns.map((column) => byField.get(column.canonical_field) ?? column)
-  ).filter((column) => !options.hide?.includes(column.canonical_field));
+  // Columns the source prints stay even when empty ("QUANTITY", "UNIT").
+  const printed = new Set(dataset.source_columns ?? []);
+  const populated = new Set(columns.map((column) => column.canonical_field));
+  const base = options.columns
+    ? options.columns
+    : options.allColumns
+      ? dataset.columns
+      : dataset.columns.filter((column) => populated.has(column.canonical_field) || printed.has(column.canonical_field));
+  const shown = base
+    .map((column) => (options.columns || options.allColumns ? column : (byField.get(column.canonical_field) ?? column)))
+    .filter((column) => !options.hide?.includes(column.canonical_field));
   if (shown.length === 0) return null;
   return {
     id: options.id ?? (options.view ? `${dataset.dataset_id}:${options.view}` : dataset.dataset_id),
@@ -654,6 +664,87 @@ function contractDetailSections(dataset: StagingDataset): PresentationSection[] 
   return [...buckets.entries()]
     .sort(([a], [b]) => rank(a) - rank(b))
     .map(([title, items]) => ({ id: `contract_details:${title}`, title, pattern: "detail" as const, items }));
+}
+
+function groupRecords(dataset: StagingDataset, field: string): Map<string, StagingRecord[]> {
+  const groups = new Map<string, StagingRecord[]>();
+  for (const record of dataset.records) {
+    const key = valueText(record.cells[field]);
+    groups.set(key, [...(groups.get(key) ?? []), record]);
+  }
+  return groups;
+}
+
+/** Section J's list (grouped "J.1 MASTER CONTRACT ATTACHMENTS" / "J.2 …"),
+ * else the V3 attachment references. */
+function attachmentSections(list: StagingDataset | undefined, fallback: StagingDataset | undefined): (PresentationSection | null)[] {
+  if (!list || list.records.length === 0) {
+    return [sourceGrid(fallback, "Attachments / References", ["attachment", "attachments"], { inlineReview: true })];
+  }
+  const groups = [...groupRecords(list, "contract.attachment_item.group")];
+  return groups.map(([group, records], index) =>
+    sourceGrid({ ...list, records }, group || "Attachments / References", ["attachment", "attachments"], {
+      inlineReview: true,
+      id: `contract_attachments:${index}`,
+      supertitle: index === 0 ? "Attachments / References" : undefined,
+      hide: ["contract.attachment_item.group", "contract.attachment_item.section"],
+    }),
+  );
+}
+
+/** The contract body: each UCF section with its numbered subsections
+ * (text in the record details) and the tables printed inside it, under
+ * their own column headings. */
+function contractBodySections(outline: StagingDataset | undefined, tables: StagingDataset | undefined): (PresentationSection | null)[] {
+  const bySection = new Map<string, { subsections: StagingRecord[]; tables: Map<string, StagingRecord[]> }>();
+  const entry = (section: string) => {
+    const found = bySection.get(section) ?? { subsections: [], tables: new Map<string, StagingRecord[]>() };
+    bySection.set(section, found);
+    return found;
+  };
+  for (const record of outline?.records ?? []) entry(valueText(record.cells["contract.body.section"])).subsections.push(record);
+  for (const record of tables?.records ?? []) {
+    const group = entry(valueText(record.cells["contract.body_table.section"]));
+    const id = valueText(record.cells["contract.body_table.table_id"]);
+    group.tables.set(id, [...(group.tables.get(id) ?? []), record]);
+  }
+  const sections: (PresentationSection | null)[] = [];
+  let first = true;
+  for (const [heading, content] of bySection) {
+    let supertitle: string | undefined = heading || "Contract Sections";
+    if (outline && content.subsections.length > 0) {
+      sections.push(
+        sourceGrid({ ...outline, records: content.subsections }, "Subsections", ["subsection", "subsections"], {
+          inlineReview: true,
+          id: `contract_sections:${heading}`,
+          supertitle,
+          hide: ["contract.body.section"],
+          note: first ? "Open a subsection for its full text." : undefined,
+        }),
+      );
+      supertitle = undefined;
+      first = false;
+    }
+    for (const [id, records] of content.tables) {
+      if (!tables) continue;
+      const headings = valueText(records[0].cells["contract.body_table.headers"]).split(" | ");
+      const columns = headings.map((label, index) => {
+        const column = tables.columns.find((c) => c.canonical_field === `contract.body_table.c${index + 1}`)!;
+        return { ...column, display_label: label };
+      });
+      const subsection = valueText(records[0].cells["contract.body_table.subsection"]);
+      sections.push(
+        sourceGrid({ ...tables, records }, subsection ? `Table — ${subsection}` : "Table", ["row", "rows"], {
+          inlineReview: true,
+          id: `section_tables:${id}`,
+          supertitle,
+          columns,
+        }),
+      );
+      supertitle = undefined;
+    }
+  }
+  return sections;
 }
 
 const CLAUSE_SECTION = "contract.contract_clause.contract_section";
@@ -715,7 +806,8 @@ function composeContract(workbook: StagingWorkbook): PresentationManifest {
     ),
     sourceGrid(find("delivery_information"), "Delivery Information", ["delivery", "deliveries"], { inlineReview: true }),
     sourceGrid(find("funding"), "Funding", ["funding line", "funding lines"], { inlineReview: true }),
-    sourceGrid(find("attachments"), "Attachments / References", ["attachment", "attachments"], { inlineReview: true }),
+    ...attachmentSections(find("contract_attachments"), find("attachments")),
+    ...contractBodySections(find("contract_sections"), find("section_tables")),
   ].filter((section): section is PresentationSection => section !== null);
   if (dataSections.length > 0) groups.push({ id: "contract_data", label: "Contract Data", sections: dataSections });
 

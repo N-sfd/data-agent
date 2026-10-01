@@ -148,6 +148,7 @@ LINE_ITEMS = DatasetDefinition(
     dataset_id="line_items",
     display_name="Line Items",
     cardinality="repeating",
+    source_adaptive_columns=True,
     description="Schedule line items (CLINs) under the source's column headings, merged across continuation pages.",
     identity_fields=("contract.line.item_number",),
     fields=(
@@ -164,6 +165,7 @@ DELIVERY_INFORMATION = DatasetDefinition(
     dataset_id="delivery_information",
     display_name="Delivery Information",
     cardinality="repeating",
+    source_adaptive_columns=True,
     description="Delivery schedule rows under the source's column headings.",
     identity_fields=("contract.delivery.clin",),
     fields=(
@@ -172,6 +174,51 @@ DELIVERY_INFORMATION = DatasetDefinition(
         F("contract.delivery.quantity", "quantity", "Quantity"),
         F("contract.delivery.ship_to", "ship_to", "Ship To Address"),
         F("contract.delivery.dodaac_cage", "dodaac_cage", "DODAAC / CAGE"),
+    ),
+)
+
+CONTRACT_SECTIONS = DatasetDefinition(
+    dataset_id="contract_sections",
+    display_name="Contract Sections",
+    cardinality="repeating",
+    description="Uniform Contract Format sections and their numbered subsections, with full text.",
+    identity_fields=("contract.body.number", "contract.body.title"),
+    grid_fields=("contract.body.number", "contract.body.title", "contract.body.section"),
+    fields=(
+        F("contract.body.number", "number", "Number", "code", expected=True),
+        F("contract.body.title", "title", "Title", expected=True),
+        F("contract.body.section", "section", "Section"),
+        F("contract.body.text", "text", "Text"),
+    ),
+)
+
+_BODY_TABLE_WIDTH = 8
+SECTION_TABLES = DatasetDefinition(
+    dataset_id="section_tables",
+    display_name="Section Tables",
+    cardinality="repeating",
+    description="Tables printed inside the contract sections, one row per record, under their own headings.",
+    identity_fields=("contract.body_table.c1",),
+    fields=(
+        F("contract.body_table.table_id", "table_id", "Table", grounding="none"),
+        F("contract.body_table.section", "section", "Section", grounding="none"),
+        F("contract.body_table.subsection", "subsection", "Subsection", grounding="none"),
+        F("contract.body_table.headers", "headers", "Headings", grounding="none"),
+        *(F(f"contract.body_table.c{i}", f"c{i}", f"Column {i}") for i in range(1, _BODY_TABLE_WIDTH + 1)),
+    ),
+)
+
+CONTRACT_ATTACHMENTS = DatasetDefinition(
+    dataset_id="contract_attachments",
+    display_name="Attachments",
+    cardinality="repeating",
+    description="The contract's list of attachments (Section J).",
+    identity_fields=("contract.attachment_item.reference",),
+    fields=(
+        F("contract.attachment_item.reference", "reference", "Reference", "code", expected=True),
+        F("contract.attachment_item.title", "title", "Title", expected=True),
+        F("contract.attachment_item.group", "group", "List", grounding="none"),
+        F("contract.attachment_item.section", "section", "Section", grounding="none"),
     ),
 )
 
@@ -696,6 +743,64 @@ def _clause_column_labels(structure: dict) -> dict[str, str]:
     return labels
 
 
+def _body_records(document: Document, structure: dict) -> tuple[list[RawRecord], list[RawRecord], list[RawRecord]]:
+    body = structure.get("body") or {}
+    sections: list[RawRecord] = []
+    for index, item in enumerate(body.get("subsections", [])):
+        heading = make_provenance(
+            document, page=item["page"], evidence=f"{item['number']} {item['title']}", bbox=item["bbox"],
+            extraction_method="contract_section_outline", region_id=f"section:{index}", anchor=item["number"],
+        )
+        cell_provenance = {"number": heading, "title": heading}
+        if item.get("text"):
+            cell_provenance["text"] = make_provenance(
+                document, page=item["page"], evidence=item["text"],
+                extraction_method="contract_section_outline", region_id=f"section:{index}:text",
+            )
+        cell_provenance["section"] = make_provenance(
+            document, page=item["page"], evidence=item["section"],
+            extraction_method="contract_section_outline", region_id=f"section:{index}:section",
+        )
+        sections.append(
+            RawRecord(
+                record_id=f"section:{index}:{item['number']}",
+                values={"number": item["number"], "title": item["title"], "section": item["section"], "text": item.get("text") or None},
+                cell_provenance=cell_provenance,
+            )
+        )
+    tables: list[RawRecord] = []
+    for table in body.get("tables", []):
+        headers = table["headers"][:_BODY_TABLE_WIDTH]
+        for row_index, row in enumerate(table["rows"]):
+            cells = row[: _BODY_TABLE_WIDTH - 1] + ([" ".join(row[_BODY_TABLE_WIDTH - 1:])] if len(row) >= _BODY_TABLE_WIDTH else [])
+            page, bbox = table["row_boxes"][row_index] if row_index < len(table["row_boxes"]) else (table["pages"][0], None)
+            values = {"table_id": table["table_id"], "section": table["section"], "subsection": table.get("subsection"),
+                      "headers": " | ".join(headers)}
+            provenance = {}
+            for i, cell in enumerate(cells, start=1):
+                if cell:
+                    values[f"c{i}"] = cell
+                    provenance[f"c{i}"] = make_provenance(
+                        document, page=page, evidence=cell, bbox=bbox,
+                        extraction_method="section_table_layout", region_id=f"{table['table_id']}:{row_index}:{i}",
+                    )
+            tables.append(RawRecord(record_id=f"table:{table['table_id']}:{row_index}", values=values, cell_provenance=provenance))
+    attachments: list[RawRecord] = []
+    for index, item in enumerate(body.get("attachments", [])):
+        provenance = make_provenance(
+            document, page=item["page"], evidence=f"{item['reference']} {item['title']}", bbox=item["bbox"],
+            extraction_method="attachment_list", region_id=f"attachment:{index}", anchor=item["reference"],
+        )
+        attachments.append(
+            RawRecord(
+                record_id=f"attachment:{index}:{item['reference']}",
+                values={"reference": item["reference"], "title": item["title"], "group": item.get("group"), "section": item["section"]},
+                provenance=provenance,
+            )
+        )
+    return sections, tables, attachments
+
+
 def _clause_records(document: Document, structure: dict) -> tuple[list[RawRecord], list[RawRecord]]:
     clauses: list[RawRecord] = []
     transforms: list[RawRecord] = []
@@ -793,11 +898,15 @@ def adapt_contract_v3(database: Session, document: Document) -> AdapterResult:
     deliveries, delivery_labels = _table_records(document, structure, "delivery_information")
     clauses, transforms = _clause_records(document, structure)
     clause_labels = _clause_column_labels(structure)
+    body_sections, body_tables, body_attachments = _body_records(document, structure)
 
     records: dict[str, list[RawRecord]] = {
         "contract_details": _details_records(document, structure, doc, geometry),
         "line_items": line_items,
         "delivery_information": deliveries,
+        "contract_sections": body_sections,
+        "section_tables": body_tables,
+        "contract_attachments": body_attachments,
         "contract_clauses": clauses,
         "clause_transformation": transforms,
         "contract_summary": _summary_record(document, geometry, doc),
@@ -868,6 +977,9 @@ CONTRACT_V3_PROFILE = StagingProfile(
         CONTRACT_DETAILS,
         LINE_ITEMS,
         DELIVERY_INFORMATION,
+        CONTRACT_ATTACHMENTS,
+        CONTRACT_SECTIONS,
+        SECTION_TABLES,
         CONTRACT_CLAUSES,
         CLAUSE_TRANSFORMATION,
         CONTRACT_SUMMARY,

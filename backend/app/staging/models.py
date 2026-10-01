@@ -187,6 +187,9 @@ class StagingDataset(BaseModel):
     # True when records carry only their grid (and identity) cells; the
     # full record is served by the dataset record endpoint.
     compact: bool = False
+    # Canonical fields whose column the source itself prints (only for
+    # datasets declaring source-adaptive columns).
+    source_columns: list[str] = Field(default_factory=list)
 
     @model_serializer(mode="wrap")
     def _omit_default_grid_keys(self, handler):
@@ -198,6 +201,8 @@ class StagingDataset(BaseModel):
                 data.pop("grid_fields", None)
             if data.get("compact") is False:
                 data.pop("compact", None)
+            if not data.get("source_columns"):
+                data.pop("source_columns", None)
         return data
 
 

@@ -90,6 +90,10 @@ class DatasetDefinition:
     # Canonical fields a compact grid shows; the rest open in a record
     # detail view. Empty = every column in the grid.
     grid_fields: tuple[str, ...] = ()
+    # Columns captioned by the document's own headings (AdapterResult.
+    # column_labels) are listed in the served dataset, so a view can keep
+    # every column the source prints even when it is empty.
+    source_adaptive_columns: bool = False
 
 
 @dataclass

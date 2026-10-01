@@ -301,6 +301,11 @@ function RecordGrid({
   const needsDetails =
     !section.inlineReview && (flagged > 0 || (section.detailColumns?.length ?? 0) > 0 || Boolean(dataset.compact));
   const [singular, plural] = section.noun ?? ["record", "records"];
+  // Identifiers and other short values are never clipped: in wide target
+  // templates, and in contract grids (inline review) where an ID column
+  // would otherwise be squeezed ("G.3.1.9…").
+  const keepWhole = (text: string) =>
+    (columns.length > 8 && text.length <= 32) || (Boolean(section.inlineReview) && text.length <= 16);
   const identity = columns.find((column) => /description|title|name|clause|far_number|clin/i.test(column.canonical_field)) ?? columns[0];
 
   function openCell(record: StagingRecord, column: StagingColumn) {
@@ -401,7 +406,7 @@ function RecordGrid({
                       key={column.canonical_field}
                       // Content-sized (wide) tables: short values (numbers, codes) are
                       // never truncated; long text keeps its ellipsis.
-                      className={`max-w-[24rem] px-3 py-2 align-top ${columns.length > 8 && text.length <= 32 ? "pr-6" : ""}`}
+                      className={`max-w-[24rem] px-3 py-2 align-top ${keepWhole(text) ? "whitespace-nowrap pr-6" : ""}`}
                       title={text}
                     >
                       {text && section.inlineReview && index === 0 && record.record_status === "Needs Review" ? (
@@ -415,7 +420,7 @@ function RecordGrid({
                         <ValueButton
                           text={text}
                           onOpen={() => (opensRecord ? setOpenRecord(record) : openCell(record, column))}
-                          className={columns.length > 8 && text.length <= 32 ? "max-w-none" : ""}
+                          className={keepWhole(text) ? "max-w-none" : ""}
                         />
                       ) : null}
                     </td>

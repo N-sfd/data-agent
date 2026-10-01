@@ -13,11 +13,12 @@ from app.contract_structure.clauses import read_clauses
 from app.contract_structure.forms import read_cover_forms
 from app.contract_structure.lines import PageLines, load_page_lines, strip_running_lines
 from app.contract_structure.schedule import read_schedule_tables
+from app.contract_structure.sections import read_contract_body
 from app.models.document import Document
 from app.models.document_contract_structure import DocumentContractStructure
 
 # Bump when extraction changes so stored structures are rebuilt.
-EXTRACTOR_VERSION = 5
+EXTRACTOR_VERSION = 6
 
 
 def build_contract_structure(database: Session, document: Document) -> dict:
@@ -26,13 +27,15 @@ def build_contract_structure(database: Session, document: Document) -> dict:
 
 def structure_from_pages(pages: list[PageLines]) -> dict:
     if not pages:
-        return {"version": EXTRACTOR_VERSION, "fields": [], "tables": {}, "clauses": []}
+        return {"version": EXTRACTOR_VERSION, "fields": [], "tables": {}, "clauses": [], "body": {}}
     # Form pages are read before running headers are stripped: a cover
     # form's contract number repeats as the continuation pages' header.
     fields = read_cover_forms(pages)
     body = strip_running_lines(pages)
     tables = read_schedule_tables(body)
     clauses = read_clauses(body)
+    schedule_pages = {record.page for table in tables if table.kind == "line_items" for record in table.records}
+    contract_body = read_contract_body(body, schedule_pages)
     return {
         "version": EXTRACTOR_VERSION,
         "fields": [asdict(field) for field in fields],
@@ -44,6 +47,12 @@ def structure_from_pages(pages: list[PageLines]) -> dict:
             for table in tables
         },
         "clauses": [asdict(clause) for clause in clauses],
+        "body": {
+            "sections": contract_body.sections,
+            "subsections": [asdict(item) for item in contract_body.subsections],
+            "tables": [asdict(item) for item in contract_body.tables],
+            "attachments": [asdict(item) for item in contract_body.attachments],
+        },
     }
 
 

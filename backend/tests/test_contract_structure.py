@@ -465,3 +465,67 @@ def test_navy_contract_staging_workbook():
 
     # V3 is untouched: its summary keeps exactly its 14 columns.
     assert len(datasets["contract_summary"]["columns"]) == 14
+
+
+# --- contract body (47QRCA25DSF07) --------------------------------------------------
+
+
+@_requires(GSA)
+def test_gsa_contract_body_sections_tables_and_attachments(gsa):
+    body = gsa["body"]
+    assert [s["heading"].split(" - ")[0] for s in body["sections"]] == [
+        "SECTION B", "SECTION C", "SECTION D", "SECTION E", "SECTION F",
+        "SECTION G", "SECTION H", "SECTION I", "SECTION J",
+    ]
+    numbers = [s["number"] for s in body["subsections"]]
+    assert [n for n in numbers if n.startswith("B.") and n.count(".") == 1] == [f"B.{i}" for i in range(1, 13)]
+    general = next(s for s in body["subsections"] if s["number"] == "B.1")
+    assert general["title"] == "GENERAL" and general["text"].startswith("The One Acquisition Solution for Integrated Services")
+    assert next(s for s in body["subsections"] if s["number"] == "G.1")["title"] == "BACKGROUND"
+    # Deliverables-table rows citing G.3.1.1 inside Section F are not headings.
+    assert not any(s["number"].startswith("G.") and s["section"].startswith("SECTION F") for s in body["subsections"])
+
+    naics = [t for t in body["tables"] if t["headers"] == ["NAICS Code & Title", "CLIN", "Size Standard"]]
+    assert len(naics) == 7
+    assert naics[0]["subsection"] == "C.2.1.1 Management and Advisory Domain NAICS Codes"
+    assert naics[0]["rows"][0] == [
+        "541611 Administrative Management and General Management\nConsulting Services", "10101", "$24.5 Million",
+    ]
+    deliverables = next(t for t in body["tables"] if (t["subsection"] or "").startswith("F.4.1"))
+    assert deliverables["headers"][1:] == ["REFERENCE", "DESCRIPTION", "FREQUENCY", "LOCATION"]
+    first = deliverables["rows"][0]
+    assert first[0] == "G.3.1.1" and first[1].startswith("Contractor Key Points") and first[4].startswith("OASIS+ CO")
+
+    attachments = body["attachments"]
+    assert len(attachments) == 19
+    assert (attachments[0]["reference"], attachments[0]["title"], attachments[0]["group"]) == (
+        "J-1",
+        "OASIS+ Labor Categories and Bureau of Labor Statistics Standard Occupational Classifications",
+        "J.1 MASTER CONTRACT ATTACHMENTS",
+    )
+    assert attachments[-1]["reference"] == "J.P-11"
+
+
+@_requires(GSA)
+def test_gsa_workbook_keeps_printed_line_item_columns():
+    pdf = fitz.open(GSA)
+    pdf.set_metadata({"subject": str(uuid4())})
+    upload = client.post("/api/documents/upload", files={"file": (GSA.name, pdf.tobytes(), "application/pdf")})
+    assert upload.status_code == 201, upload.text
+    document_id = upload.json()["document_id"]
+    assert client.post(f"/api/documents/{document_id}/extract-pages", json={"run_ocr": False}).status_code == 200
+    database = SessionLocal()
+    try:
+        document = database.get(Document, document_id)
+        rows = list(database.scalars(select(DocumentPage).where(DocumentPage.document_id == document_id)))
+        run_and_persist_v3_extraction(database=database, document=document, pages=rows)
+        resolve_and_persist_profile(database, document)
+    finally:
+        database.close()
+    datasets = {d["dataset_id"]: d for d in client.get(f"/api/documents/{document_id}/staging-workbook").json()["datasets"]}
+    lines = datasets["line_items"]
+    # QUANTITY / UNIT / UNIT PRICE are printed (and empty): still listed as source columns.
+    assert set(lines["source_columns"]) >= {"contract.line.quantity", "contract.line.unit", "contract.line.unit_price"}
+    assert len(datasets["contract_attachments"]["records"]) == 19
+    assert len(datasets["contract_sections"]["records"]) > 100
+    assert len({r["cells"]["contract.body_table.table_id"]["value"] for r in datasets["section_tables"]["records"]}) == 9

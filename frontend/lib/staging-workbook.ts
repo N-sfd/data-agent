@@ -99,6 +99,8 @@ export interface StagingDataset {
   /** Records carry only their grid cells (no provenance); the full record
    * is fetched with getStagingRecord. */
   compact?: boolean;
+  /** Columns the source itself prints (kept even when empty). */
+  source_columns?: string[];
 }
 
 export interface ExportCapability {
