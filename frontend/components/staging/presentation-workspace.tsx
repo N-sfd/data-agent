@@ -341,6 +341,8 @@ function GroupBody({
             <SummaryBlock items={section.items} onSelect={onSelect} picked={picked} onPick={onPick} />
           ) : section.pattern === "card" ? (
             <SummaryCard items={section.items} onSelect={onSelect} picked={picked} onPick={onPick} />
+          ) : section.pattern === "text" ? (
+            <TextBlock items={section.items} onSelect={onSelect} picked={picked} />
           ) : (
             <DetailList items={section.items} onSelect={onSelect} picked={picked} onPick={onPick} />
           )}
@@ -432,6 +434,54 @@ function SummaryCard({ items, onSelect, picked, onPick }: { items: FieldItem[]; 
         );
       })}
     </dl>
+  );
+}
+
+// --- A1. Document text ----------------------------------------------------------
+
+/** A section of the document's own text: each printed line as a line
+ * (bullets and wrapped lines already resolved), with its evidence. */
+function TextBlock({
+  items,
+  onSelect,
+  picked,
+}: {
+  items: FieldItem[];
+  onSelect: (target: EvidenceTarget) => void;
+  picked: ReadonlySet<string>;
+}) {
+  return (
+    <div className="space-y-2">
+      {items.map((item) => {
+        const open = () => onSelect(itemTarget(item));
+        const lines = formatCellValue(item.cell).split("\n").filter((line) => line.trim());
+        return (
+          <div
+            key={item.id}
+            className={`rounded-xl border border-border bg-surface px-5 py-4 ${picked.has(item.id) ? "cell-selected" : ""}`}
+          >
+            <div className="space-y-1.5 text-sm leading-relaxed text-foreground">
+              {lines.map((line, index) => (
+                <p key={index} className="break-words">
+                  {line}
+                </p>
+              ))}
+            </div>
+            <div className="mt-3 flex items-center gap-3">
+              <ReviewMark cell={item.cell} onOpen={open} />
+              <button
+                type="button"
+                onClick={open}
+                className="inline-flex items-center gap-1 text-xs text-text-secondary hover:text-primary"
+              >
+                <FileSearch className="h-3.5 w-3.5" aria-hidden="true" />
+                View source
+              </button>
+            </div>
+          </div>
+        );
+      })}
+    </div>
   );
 }
 

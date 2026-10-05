@@ -181,5 +181,5 @@ describe("compact grid (grid_fields)", () => {
     fireEvent.click(screen.getAllByRole("button", { name: "Details" })[0]);
     const drawer = screen.getByRole("dialog", { name: "Record details" });
     expect(within(drawer).getByText(/\(End of provision\)/)).toBeTruthy();
-  });
+  }, 15_000); // a full-text grid: slow when the whole suite runs in parallel
 });

@@ -32,6 +32,10 @@ from app.source_structure.text_shapes import (
 )
 from app.staging.models import SourceLocator
 
+# A narrative block keeps its whole text (read as document sections);
+# the cap only bounds a pathological block.
+_NARRATIVE_LIMIT = 20_000
+
 _DROP = {"script", "style", "noscript", "template", "svg", "iframe", "object", "embed", "head"}
 _BLOCK = {
     "address", "article", "aside", "blockquote", "dd", "div", "dl", "dt", "fieldset",
@@ -161,7 +165,7 @@ class HtmlStructureExtractor:
         region = StructuredRegion(
             region_id=self._id(kind.lower()),
             region_type=kind,  # type: ignore[arg-type]
-            text=text if kind != "NARRATIVE" else text[:600],
+            text=text if kind != "NARRATIVE" else text[:_NARRATIVE_LIMIT],
             normalized_text=normalize_space(text).lower()[:600],
             source_locator=self._locator(el),
             extraction_method="dom",

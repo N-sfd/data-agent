@@ -13,7 +13,8 @@ import type {
  * leaves every technical detail to the evidence / technical views. */
 
 /** "card": a compact document-summary card (label over value, in a grid). */
-export type SectionPattern = "detail" | "grid" | "summary" | "card";
+/** text: a heading over the document's own paragraphs (one item). */
+export type SectionPattern = "detail" | "grid" | "summary" | "card" | "text";
 
 /** One displayed value: a business label and the cell behind it. */
 export interface FieldItem {
@@ -210,6 +211,41 @@ function dedupeItems(items: FieldItem[]): FieldItem[] {
     if (seen.has(key)) return false;
     seen.add(key);
     return true;
+  });
+}
+
+// --- document text ------------------------------------------------------------
+
+/** Heading | Content records as text sections: the heading titles the
+ * section, its content reads as the document printed it. */
+function textSections(dataset: StagingDataset): PresentationSection[] {
+  const heading = columnBySuffix(dataset, "heading");
+  const content = columnBySuffix(dataset, "content");
+  if (!heading || !content) return [];
+  return dataset.records.flatMap((record) => {
+    const cell = record.cells[content.canonical_field];
+    const title = valueText(record.cells[heading.canonical_field]);
+    if (!cell || isBlank(cell.value) || !title) return [];
+    return [
+      {
+        id: `${dataset.dataset_id}:${record.record_id}`,
+        title,
+        pattern: "text" as const,
+        items: [
+          {
+            id: `${dataset.dataset_id}:${record.record_id}`,
+            label: title,
+            cell,
+            context: title,
+            sourceLabel: title,
+            fieldId: content.canonical_field,
+            category: null,
+            fragments: record.source_columns,
+            source: { datasetId: dataset.dataset_id, recordId: record.record_id, field: content.canonical_field },
+          },
+        ],
+      },
+    ];
   });
 }
 
@@ -954,6 +990,9 @@ export function composePresentation(workbook: StagingWorkbook): PresentationMani
       }
     } else if (id === "contacts") {
       add("contacts", "Contacts", 1, { id, title: null, pattern: "detail", items: fieldItems(dataset, "Contacts") });
+    } else if (id === "document_sections") {
+      // The document's own text reads right after its summary.
+      add("content", "Content", 0.5, ...textSections(dataset));
     } else if (id === "taxes_charges" || id === "totals") {
       chargesPlaced = true;
     } else if (id === "invoice_lines" || id === "line_items") {
@@ -1013,8 +1052,13 @@ export function composePresentation(workbook: StagingWorkbook): PresentationMani
   if (inventory) {
     const shown = shownValues([...drafts.values()]);
     for (const item of other) shown.add(norm(valueText(item.cell)));
+    // With the document's sections shown, its headings are not values.
+    const hasSections = Boolean(find("document_sections")?.records.length);
     const leftovers = fieldItems(inventory, "Other Information").filter(
-      (item) => !shown.has(norm(valueText(item.cell))) && !/^(line|course|clin|clause)\s*\d+\s*\//i.test(item.label),
+      (item) =>
+        !shown.has(norm(valueText(item.cell))) &&
+        !/^(line|course|clin|clause)\s*\d+\s*\//i.test(item.label) &&
+        !(hasSections && item.category === "Heading"),
     );
     const { sections: tables, rest } = pivotTables(leftovers);
     add("tables", "Table Data", 4, ...tables);

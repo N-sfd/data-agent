@@ -39,6 +39,10 @@ from app.source_structure.text_shapes import (
     value_rejection,
 )
 
+# A narrative block keeps its whole text (read as document sections);
+# the cap only bounds a pathological block.
+_NARRATIVE_LIMIT = 20_000
+
 
 @dataclass
 class Word:
@@ -1414,7 +1418,7 @@ def _text_regions(ids: _Ids, page_number: int, lines: list[Line], extraction_met
             StructuredRegion(
                 region_id=ids.next(kind.lower()),
                 region_type=kind,  # type: ignore[arg-type]
-                text=text if kind != "NARRATIVE" else text[:600],
+                text=text if kind != "NARRATIVE" else text[:_NARRATIVE_LIMIT],
                 normalized_text=normalize_space(text).lower()[:600],
                 page=page_number,
                 bbox=bbox,

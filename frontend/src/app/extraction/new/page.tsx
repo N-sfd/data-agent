@@ -1056,6 +1056,7 @@ function NewExtractionPageContent() {
                 <section className="min-w-0 space-y-5">
                   {!presentedProfile && (
                     <AnalysisRequest
+                      documentHref={document ? `/documents/${document.document_id}?view=data` : undefined}
                       disabled={!extraction || extracting}
                       onAnalyze={handleAnalyze}
                       onExtractTargets={handleExtractTargets}

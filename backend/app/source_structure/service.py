@@ -36,7 +36,7 @@ from app.source_structure.reading_order import reconstruct_page
 
 # Bump whenever extraction rules change; stored structures from an older
 # version are rebuilt on next use.
-EXTRACTOR_VERSION = 7  # 7: raster tables split rows at printed row rules; 6: OCR-pass disagreement (ocr_contested) on fields/cells/regions; 5: OCR word confidence on fields/cells/regions, background-suppressed OCR fusion; 2: continuation metadata, quality flags; 3: typography block breaks, address blocks with Attn lines; 4: invoice-fixture fixes (abbreviation labels, skew-aware OCR rows, fused/above headers, multi-pair runs), whitespace/filler label pairing, identifier typing, OCR caps headings
+EXTRACTOR_VERSION = 9  # 9: flowing documents (DOCX) read every laid-out page; 8: narrative regions keep their full text (up to 20,000 characters), read as document sections; 7: raster tables split rows at printed row rules; 6: OCR-pass disagreement (ocr_contested) on fields/cells/regions; 5: OCR word confidence on fields/cells/regions, background-suppressed OCR fusion; 2: continuation metadata, quality flags; 3: typography block breaks, address blocks with Attn lines; 4: invoice-fixture fixes (abbreviation labels, skew-aware OCR rows, fused/above headers, multi-pair runs), whitespace/filler label pairing, identifier typing, OCR caps headings
 
 _HTML_SUFFIXES = {".html", ".htm"}
 _RASTER_SUFFIXES = {".png", ".jpg", ".jpeg", ".tif", ".tiff", ".bmp", ".webp"}
@@ -70,12 +70,24 @@ def _build_pdf(document: Document, pages: list[DocumentPage], file_path: Path | 
         except Exception as exc:  # noqa: BLE001
             result.warnings.append(f"Could not open source file for geometry ({exc}).")
 
+    # A flowing document (DOCX, ODT …) is stored as fewer pages than MuPDF
+    # lays it out in: the pages past the stored ones flow on below the last
+    # stored page, so none of its text is lost.
+    flowing = (
+        fitz_doc is not None
+        and not fitz_doc.is_pdf
+        and result.source_type != "image"
+        and bool(pages)
+        and fitz_doc.page_count > len(pages)
+    )
     try:
-        for page in pages:
+        for index, page in enumerate(pages):
             fitz_page = None
             if fitz_doc is not None and 0 <= page.page_number - 1 < fitz_doc.page_count:
                 fitz_page = fitz_doc[page.page_number - 1]
             words, method = page_words(page, fitz_page, settings.ocr_dpi)
+            if flowing and index == len(pages) - 1 and method == "native" and fitz_page is not None:
+                words = words + _flowed_words(fitz_doc, first=len(pages), offset=fitz_page.rect.height)
             if not words:
                 continue
             grids = []
@@ -100,6 +112,20 @@ def _build_pdf(document: Document, pages: list[DocumentPage], file_path: Path | 
     finally:
         if fitz_doc is not None:
             fitz_doc.close()
+
+
+def _flowed_words(fitz_doc, *, first: int, offset: float) -> list[Word]:
+    """Words of laid-out pages `first`… stacked below `offset` points, in
+    one coordinate space (each page continues below the one before)."""
+
+    from dataclasses import replace
+
+    words: list[Word] = []
+    for number in range(first, fitz_doc.page_count):
+        page = fitz_doc[number]
+        words.extend(replace(word, y0=word.y0 + offset, y1=word.y1 + offset) for word in native_words(page))
+        offset += page.rect.height
+    return words
 
 
 def page_words(page: DocumentPage, fitz_page, ocr_dpi: float) -> tuple[list[Word], str]:

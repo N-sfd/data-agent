@@ -103,6 +103,22 @@ CONTACTS = DatasetDefinition(
     ),
 )
 
+SECTIONS = DatasetDefinition(
+    dataset_id="document_sections",
+    display_name="Sections",
+    cardinality="repeating",
+    description=(
+        "The document's own text, section by section: each heading with the "
+        "paragraphs, bullets and lines printed under it, in reading order."
+    ),
+    identity_fields=("document.section.heading",),
+    fields=(
+        F("document.section.heading", "heading", "Section", grounding="derived", expected=True),
+        F("document.section.content", "content", "Content", expected=True),
+        F("document.section.page", "page", "Page", "integer", grounding="none"),
+    ),
+)
+
 LINE_ITEMS = DatasetDefinition(
     dataset_id="line_items",
     display_name="Line Items",
@@ -437,6 +453,207 @@ def _all_fields(
     return records + headings
 
 
+# Text a reader reads; containers (key/value groups, tables) and their parts
+# are covered by their own records.
+_SECTION_TEXT_REGIONS = {"HEADING", "PARAGRAPH", "NARRATIVE", "LIST_ITEM", "LABEL_VALUE", "CONTACT_BLOCK"}
+# "Education______" — a heading ruled to the margin.
+_RULED_HEADING = re.compile(r"^(?P<title>[^\n_]{2,80}?)\s*_{4,}\s*$")
+_BULLET_ONLY = re.compile(r"^[\s•●▪■◦·∙‣*\-–]+$")
+_LEADING_BULLET = re.compile(r"^[•●▪■◦·∙‣]\s*")
+_MAX_SECTIONS = 80
+
+
+def _reading_order(structure) -> list[tuple]:
+    """(region, line) for every line of the top-level text regions, in
+    reading order: page, then top to bottom, then left to right. A line's
+    height is estimated within its region, so a right-aligned date printed
+    beside a block's second line reads with that line, not after the block.
+    Sources without geometry keep document order."""
+
+    by_id = {region.region_id: region for region in structure.regions}
+    chosen = {r.region_id for r in structure.regions if r.region_type in _SECTION_TEXT_REGIONS}
+
+    def nested(region) -> bool:
+        parent = region.parent_region_id
+        while parent:
+            if parent in chosen:
+                return True
+            parent = by_id[parent].parent_region_id if parent in by_id else None
+        return False
+
+    lines: list[tuple] = []
+    for index, region in enumerate(structure.regions):
+        if region.region_id not in chosen or nested(region) or not normalize_space(region.text):
+            continue
+        texts = region.text.splitlines()
+        for number, text in enumerate(texts):
+            if region.bbox:
+                top, bottom = region.bbox[1], region.bbox[3]
+                y = top + (number + 0.5) * max(bottom - top, 0) / len(texts)
+                key = (region.page or 0, round(y), region.bbox[0], index, number)
+            else:
+                key = (region.page or 0, 0, 0, index, number)
+            lines.append((key, region, text))
+    if any(region.bbox for _, region, _ in lines):
+        lines.sort(key=lambda item: item[0])
+    return [(region, text) for _, region, text in lines]
+
+
+def _caps_heading(line: str) -> bool:
+    """"EXPERIENCE", "AWARDS & ACHIEVEMENTS": a short line set in capitals,
+    the way documents without ruled headings mark their sections."""
+
+    words = line.split()
+    letters = [ch for ch in line if ch.isalpha()]
+    return (
+        1 <= len(words) <= 6
+        and len(letters) >= 3
+        and all(ch.isupper() for ch in letters)
+        and not any(ch.isdigit() for ch in line)
+        and not line.endswith((".", ",", ";", ":"))
+    )
+
+
+def _title_like(line: str) -> bool:
+    """A name or title opening a document ("Anila Masood")."""
+
+    return (
+        1 <= len(line.split()) <= 6
+        and not line.endswith((".", ",", ";", ":"))
+        and not any(ch.isdigit() or ch == "@" for ch in line)
+    )
+
+
+# A line that stops mid-sentence: its sentence continues on the next line.
+_MID_SENTENCE = re.compile(
+    r"(?:[-–]|\b(?:and|or|nor|but|the|a|an|of|to|with|for|in|on|at|by|from|into|onto|my|your|our|their|"
+    r"its|this|that|these|which|who|as|is|are|was|were|be|been|while|including|such|using|via|than|both))$",
+    re.I,
+)
+_SENTENCE_END = (".", "!", "?", ":", ";")
+# Characters in a block's widest line for it to read as running prose.
+_PROSE_WIDTH = 60
+
+
+def _document_sections(document: Document, structure) -> list[RawRecord]:
+    """The document's narrative as Heading | Content records, in reading
+    order. A section starts at a heading: headings ruled to the margin
+    ("Education____") when the document uses them, else headings set in
+    capitals ("EXPERIENCE"), else its HEADING regions. With ruled or capital
+    headings, other HEADING regions (a degree, a job title) are text of
+    their section. Text before the first heading is a lead section named by
+    its title (a résumé's name); contact lines join that title block rather
+    than the text printed beside them. Bullet-only lines are dropped and a
+    wrapped line rejoins the line it continues."""
+
+    ordered = [(region, raw.strip()) for region, raw in _reading_order(structure) if raw.strip()]
+    ruled = sum(1 for _, line in ordered if _RULED_HEADING.match(line))
+    capitals = sum(1 for _, line in ordered if _caps_heading(line))
+    mode = "ruled" if ruled >= 2 else "capitals" if capitals >= 2 else "regions"
+    # Pages with bullet glyphs: there a full-width line may end a bullet,
+    # so wrapped lines rejoin only on clear evidence.
+    bulleted = {region.page for region, line in ordered if _BULLET_ONLY.match(line)}
+    widest: dict[str, int] = {}
+    for region, line in ordered:
+        widest[region.region_id] = max(widest.get(region.region_id, 0), len(line))
+
+    sections: list[dict] = []
+    current: dict | None = None
+    previous_region = None
+
+    def start(title: str, region, *, lead: bool = False) -> dict:
+        section = {"heading": title, "lines": [], "evidence": [], "region": region, "lead": lead}
+        sections.append(section)
+        return section
+
+    def heading_of(region, line: str) -> str | None:
+        ruled_match = _RULED_HEADING.match(line)
+        if mode == "ruled":
+            return normalize_space(ruled_match.group("title")) if ruled_match else None
+        if mode == "capitals":
+            if ruled_match:
+                return normalize_space(ruled_match.group("title"))
+            return normalize_space(line) if _caps_heading(line) else None
+        return normalize_space(line) if region.region_type == "HEADING" else None
+
+    def continues(previous: str, line: str, region) -> bool:
+        if previous.endswith(_SENTENCE_END):
+            return False
+        if line[:1].islower() or line.startswith("&"):
+            return True
+        if region is not previous_region:
+            return False
+        if _MID_SENTENCE.search(previous) or (previous.endswith(",") and len(previous) >= 40):
+            return True
+        # Running text (prose-width lines, no bullets on the page): a line
+        # reaching the block's width wrapped at the margin. Lists and narrow
+        # columns (skills, dates) never join this way.
+        width = widest.get(region.region_id, 0)
+        return region.page not in bulleted and width >= _PROSE_WIDTH and len(previous) >= 0.85 * width
+
+    for region, line in ordered:
+        if _BULLET_ONLY.match(line):
+            continue
+        title = heading_of(region, line)
+        if title:
+            current = start(title, region)
+            previous_region = None
+            continue
+        if current is None and mode != "regions" and (region.region_type == "HEADING" or _title_like(line)):
+            # The title block that opens the document (a name, a form title).
+            current = start(normalize_space(line), region, lead=True)
+            previous_region = None
+            continue
+        if current is None and region.region_type == "HEADING":
+            current = start(normalize_space(line), region, lead=True)
+            previous_region = None
+            continue
+        line = _LEADING_BULLET.sub("", line)
+        target = current
+        if region.region_type == "CONTACT_BLOCK" and sections and sections[0]["lead"]:
+            target = sections[0]
+        if target is None:
+            current = target = start("Introduction", region)
+        target["evidence"].append(line)
+        lines = target["lines"]
+        if target is current and lines and continues(lines[-1], line, region):
+            lines[-1] = f"{lines[-1]} {line}"
+        else:
+            lines.append(line)
+        if target is current:
+            previous_region = region
+
+    # A document with no headings at all is one block of text.
+    if len(sections) == 1 and sections[0]["heading"] == "Introduction":
+        sections[0]["heading"] = "Text"
+
+    records: list[RawRecord] = []
+    for index, section in enumerate(sections[:_MAX_SECTIONS]):
+        if not section["lines"]:
+            continue
+        region = section["region"]
+        provenance = make_provenance(
+            document,
+            page=region.page,
+            evidence="\n".join([section["heading"], *section["evidence"]]),
+            bbox=region.bbox,
+            extraction_method=f"{region.extraction_method}:section",
+            region_id=region.region_id,
+            anchor=section["heading"],
+            locator=region.source_locator,
+            source_type="html" if region.extraction_method == "dom" else None,
+        )
+        provenance.highlight_text = section["heading"]
+        records.append(
+            RawRecord(
+                record_id=f"section:{index}",
+                values={"heading": section["heading"], "content": "\n".join(section["lines"]), "page": region.page},
+                provenance=provenance,
+            )
+        )
+    return records
+
+
 def adapt_generic(database: Session, document: Document) -> AdapterResult:
     structure = get_or_build_source_structure(database, document)
     staging_record = database.scalars(
@@ -586,6 +803,7 @@ def adapt_generic(database: Session, document: Document) -> AdapterResult:
             )
 
     all_fields = _all_fields(document, structure, key_fields + contacts, accepted_tables)
+    sections = _document_sections(document, structure)
     stats = structure.stats
     regions = stats.regions_by_type
     summary_parts = [
@@ -632,8 +850,11 @@ def adapt_generic(database: Session, document: Document) -> AdapterResult:
             values={
                 "qa_check": "Structure: narrative",
                 "result": "INFO",
-                "details": f"{narrative} paragraph/narrative regions were read but not turned into fields.",
-                "action": "Available in Source / Transcription.",
+                "details": (
+                    f"{narrative} paragraph/narrative regions were read; their text is under "
+                    f"{len(sections)} section{'s' if len(sections) != 1 else ''}, not turned into fields."
+                ),
+                "action": "See Sections; the full text is also in Source / Transcription.",
             },
         ),
     ]
@@ -671,6 +892,7 @@ def adapt_generic(database: Session, document: Document) -> AdapterResult:
             "document_summary": [summary],
             "key_fields": key_fields,
             "contacts": contacts,
+            "document_sections": sections,
             "line_items": line_items,
             "other_tables": other_tables,
             "all_fields": all_fields,
@@ -698,6 +920,7 @@ GENERIC_PROFILE = StagingProfile(
         DOCUMENT_SUMMARY,
         KEY_FIELDS,
         CONTACTS,
+        SECTIONS,
         LINE_ITEMS,
         OTHER_TABLES,
         ALL_FIELDS,
@@ -709,6 +932,7 @@ GENERIC_PROFILE = StagingProfile(
         ExportSheet("Document Summary", ("document_summary",)),
         ExportSheet("Key Fields", ("key_fields",)),
         ExportSheet("Contacts", ("contacts",)),
+        ExportSheet("Sections", ("document_sections",)),
         ExportSheet("Line Items", ("line_items",)),
         ExportSheet("Other Tables", ("other_tables",)),
         ExportSheet(SOURCE_SHEET, ()),
@@ -728,7 +952,7 @@ GENERIC_PROFILE = StagingProfile(
                 href=f"/api/documents/{{document_id}}/staging-workbook/datasets/{definition.dataset_id}.csv",
                 dataset_id=definition.dataset_id,
             )
-            for definition in (DOCUMENT_SUMMARY, KEY_FIELDS, CONTACTS, LINE_ITEMS, OTHER_TABLES, ALL_FIELDS)
+            for definition in (DOCUMENT_SUMMARY, KEY_FIELDS, CONTACTS, SECTIONS, LINE_ITEMS, OTHER_TABLES, ALL_FIELDS)
         ),
     ),
     oracle_mapping_capability="none",

@@ -283,7 +283,7 @@ def _record_label(dataset: StagingDataset, record, column: StagingColumn) -> str
     record (a field list's Field, a charge's label), else the column's."""
 
     if dataset.cardinality != "single":
-        for suffix in (".name", ".label"):
+        for suffix in (".name", ".label", ".heading"):
             for key, cell in record.cells.items():
                 if key.endswith(suffix) and key != column.canonical_field and cell.value not in (None, ""):
                     return str(cell.value)

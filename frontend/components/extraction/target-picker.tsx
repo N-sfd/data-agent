@@ -1,6 +1,7 @@
 "use client";
 
-import { Check, Pencil, Search, Trash2, X } from "lucide-react";
+import { ArrowRight, Check, Pencil, Search, Trash2, X } from "lucide-react";
+import Link from "next/link";
 import { useMemo, useState } from "react";
 
 import {
@@ -31,6 +32,9 @@ interface TargetPickerProps {
   onAddCustomField?: (label: string) => Promise<DocumentTarget | undefined>;
   onRenameCustomField?: (targetKey: string, label: string) => Promise<void>;
   onDeleteCustomField?: (targetKey: string) => Promise<void>;
+  /** The document's page: its text, section by section, when nothing here
+   * is pickable (a letter, a résumé without fields or tables). */
+  documentHref?: string;
 }
 
 function confidenceLabel(target: DocumentTarget): string {
@@ -55,6 +59,7 @@ export default function TargetPicker({
   onAddCustomField,
   onRenameCustomField,
   onDeleteCustomField,
+  documentHref,
 }: TargetPickerProps) {
   const [query, setQuery] = useState("");
   const [newFieldLabel, setNewFieldLabel] = useState("");
@@ -279,11 +284,22 @@ export default function TargetPicker({
           })}
 
         {!hasAnyDetected && (
-          <p className="px-2 py-6 text-center text-sm text-text-secondary">
-            Processing completed, but no extractable structures were detected.
-            Use a custom instruction below, or wait for schema discovery to
-            finish.
-          </p>
+          <div className="px-2 py-6 text-center text-sm text-text-secondary">
+            <p>
+              No fields or tables were found to pick — this document is mostly running text.
+              {documentHref ? " Its text is ready to read and export, section by section." : ""} You can also
+              describe what you need as a custom instruction below.
+            </p>
+            {documentHref && (
+              <Link
+                href={documentHref}
+                className="mt-3 inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface px-3 py-1.5 text-sm font-medium text-foreground hover:border-primary/40 hover:text-primary"
+              >
+                Open document text
+                <ArrowRight className="h-3.5 w-3.5" aria-hidden="true" />
+              </Link>
+            )}
+          </div>
         )}
 
         {hasAnyDetected && filtered.length === 0 && (

@@ -63,6 +63,8 @@ interface AnalysisRequestProps {
   onAddCustomField?: (label: string) => Promise<DocumentTarget | undefined>;
   onRenameCustomField?: (targetKey: string, label: string) => Promise<void>;
   onDeleteCustomField?: (targetKey: string) => Promise<void>;
+  /** The document's page, offered when nothing is pickable. */
+  documentHref?: string;
 }
 
 const CUSTOM_QUICK_PICKS: CustomQuickPick[] = [
@@ -91,6 +93,7 @@ export default function AnalysisRequest({
   onAddCustomField,
   onRenameCustomField,
   onDeleteCustomField,
+  documentHref,
 }: AnalysisRequestProps) {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [extracting, setExtracting] = useState(false);
@@ -483,6 +486,7 @@ export default function AnalysisRequest({
               onAddCustomField={onAddCustomField}
               onRenameCustomField={onRenameCustomField}
               onDeleteCustomField={onDeleteCustomField}
+              documentHref={documentHref}
             />
           </>
         )}
