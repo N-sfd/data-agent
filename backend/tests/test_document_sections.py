@@ -184,3 +184,45 @@ def test_flowing_documents_stack_laid_out_pages():
     finally:
         service.native_words = original
     assert [(w.text, w.y0) for w in words] == [("second", 850), ("third", 1620)]
+
+
+def sized(region_obj, size: float):
+    region_obj.structural_metadata = {"font_size": size, "line_sizes": [size] * len(region_obj.text.splitlines())}
+    return region_obj
+
+
+def test_large_capital_headings_win_over_capitalised_entries():
+    """A template with 23pt headings also capitalises entries at body size:
+    the entries stay text, the name's subtitle stays with the name, and a
+    heading broken over two stacked lines is one heading."""
+
+    result = sections(
+        sized(region("n", "HEADING", "AMMARA FAZAL", 40), 30),
+        sized(region("t", "HEADING", "EVENT ORGANIZER", 76), 15),
+        sized(region("h1", "HEADING", "EXPERIENCE", 150), 23),
+        sized(region("b1", "NARRATIVE", "Online teaching during Covid\nPAF MONTESOORI SCHOOL\nPrepared homework", 180, height=36), 11),
+        sized(region("h2", "HEADING", "ADDITIONAL", 300), 23.6),
+        sized(region("h3", "HEADING", "SKILLS", 324), 23.6),
+        sized(region("b2", "PARAGRAPH", "Microsoft Office Tools", 360), 11),
+    )
+    assert result == [
+        ("AMMARA FAZAL", "EVENT ORGANIZER"),
+        ("EXPERIENCE", "Online teaching during Covid\nPAF MONTESOORI SCHOOL\nPrepared homework"),
+        ("ADDITIONAL SKILLS", "Microsoft Office Tools"),
+    ]
+
+
+def test_a_two_column_page_reads_its_main_column_first():
+    def column(region_obj, side):
+        region_obj.structural_metadata = {"column": side}
+        return region_obj
+
+    result = sections(
+        column(region("s1", "HEADING", "CONTACT", 100, x=20), "left"),
+        column(region("s2", "PARAGRAPH", "me@example.com", 120, x=20), "left"),
+        column(region("m1", "HEADING", "ABOUT ME", 90, x=260), "right"),
+        column(region("m2", "NARRATIVE", "A professional with eight years of experience teaching art.", 110, x=260), "right"),
+        column(region("m3", "HEADING", "EDUCATION", 160, x=260), "right"),
+        column(region("m4", "PARAGRAPH", "B.A Fine Arts", 180, x=260), "right"),
+    )
+    assert [heading for heading, _ in result] == ["ABOUT ME", "EDUCATION", "CONTACT"]

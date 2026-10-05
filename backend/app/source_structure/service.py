@@ -36,7 +36,7 @@ from app.source_structure.reading_order import reconstruct_page
 
 # Bump whenever extraction rules change; stored structures from an older
 # version are rebuilt on next use.
-EXTRACTOR_VERSION = 9  # 9: flowing documents (DOCX) read every laid-out page; 8: narrative regions keep their full text (up to 20,000 characters), read as document sections; 7: raster tables split rows at printed row rules; 6: OCR-pass disagreement (ocr_contested) on fields/cells/regions; 5: OCR word confidence on fields/cells/regions, background-suppressed OCR fusion; 2: continuation metadata, quality flags; 3: typography block breaks, address blocks with Attn lines; 4: invoice-fixture fixes (abbreviation labels, skew-aware OCR rows, fused/above headers, multi-pair runs), whitespace/filler label pairing, identifier typing, OCR caps headings
+EXTRACTOR_VERSION = 11  # 11: per-line font sizes on text regions; 10: two-column pages (sidebar + main column) read column by column; 9: flowing documents (DOCX) read every laid-out page; 8: narrative regions keep their full text (up to 20,000 characters), read as document sections; 7: raster tables split rows at printed row rules; 6: OCR-pass disagreement (ocr_contested) on fields/cells/regions; 5: OCR word confidence on fields/cells/regions, background-suppressed OCR fusion; 2: continuation metadata, quality flags; 3: typography block breaks, address blocks with Attn lines; 4: invoice-fixture fixes (abbreviation labels, skew-aware OCR rows, fused/above headers, multi-pair runs), whitespace/filler label pairing, identifier typing, OCR caps headings
 
 _HTML_SUFFIXES = {".html", ".htm"}
 _RASTER_SUFFIXES = {".png", ".jpg", ".jpeg", ".tif", ".tiff", ".bmp", ".webp"}

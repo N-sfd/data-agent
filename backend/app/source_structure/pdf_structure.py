@@ -1427,6 +1427,9 @@ def _text_regions(ids: _Ids, page_number: int, lines: list[Line], extraction_met
                     "lines": len(block),
                     "words": words,
                     "font_size": round(size, 1),
+                    # Each line's own size: a heading line inside a block of
+                    # body text ("EDUCATION" over its entries).
+                    "line_sizes": [round(s.size, 1) for s in block],
                     "bold": all(s.bold for s in block),
                 },
             )
@@ -1482,6 +1485,103 @@ def _assign_ocr_confidence(result: "PageStructure", words: list[Word]) -> None:
             region.structural_metadata["ocr_contested"] = True
 
 
+# A column gutter: an empty vertical band at least this wide (points).
+_MIN_GUTTER = 8.0
+
+
+def _wordy_rows(words: list[Word]) -> int:
+    """Rows (by height) holding three or more words: running text, not a
+    column of short labels or a list of dates."""
+
+    rows: dict[int, int] = {}
+    for word in words:
+        key = int(word.y0 // 4)
+        rows[key] = rows.get(key, 0) + 1
+    return sum(1 for count in rows.values() if count >= 3)
+
+
+def _row_alignment(left: list[Word], right: list[Word]) -> float:
+    """Share of the sparser side's text rows that have a row on the other
+    side at the same height. Table columns line up row by row (≈1); a
+    sidebar's lines and the main column's lines are independent."""
+
+    def rows(side: list[Word]) -> set[int]:
+        return {round(w.y1) for w in side}
+
+    a, b = rows(left), rows(right)
+    fewer, other = (a, b) if len(a) <= len(b) else (b, a)
+    if not fewer:
+        return 1.0
+    matched = sum(1 for row in fewer if {row - 1, row, row + 1} & other)
+    return matched / len(fewer)
+
+
+def _aligned_run(left: list[Word], right: list[Word]) -> int:
+    """The longest run of consecutive rows (in the sparser side's order)
+    that line up with the other side: a table crossing the band (an
+    invoice's line items) aligns several rows in a row; a sidebar meets the
+    main column's lines only by chance."""
+
+    rows_left = {round(w.y1) for w in left}
+    rows_right = {round(w.y1) for w in right}
+    fewer, other = (rows_left, rows_right) if len(rows_left) <= len(rows_right) else (rows_right, rows_left)
+    best = run = 0
+    for row in sorted(fewer):
+        run = run + 1 if {row - 1, row, row + 1} & other else 0
+        best = max(best, run)
+    return best
+
+
+def column_gutter(words: list[Word]) -> float | None:
+    """The x of the gutter between two page columns (a sidebar beside a main
+    column), or None for a single-column page. A gutter is an empty vertical
+    band no word crosses anywhere on the page, with substantial running text
+    on both sides over a good part of the page's height, whose lines do not
+    line up row by row (that is a table's columns). Full-width text (a
+    summary paragraph, a table spanning the page) rules a split out, so
+    side-by-side blocks within one column never trigger it."""
+
+    if len(words) < 40:
+        return None
+    left_edge = min(w.x0 for w in words)
+    right_edge = max(w.x1 for w in words)
+    width = right_edge - left_edge
+    if width <= 0:
+        return None
+    covered = [False] * (int(right_edge) + 2)
+    for word in words:
+        for x in range(max(0, int(word.x0)), min(len(covered), int(word.x1) + 1)):
+            covered[x] = True
+    top = min(w.y0 for w in words)
+    height = max(w.y1 for w in words) - top
+    best: tuple[float, float] | None = None
+    x = int(left_edge + 0.15 * width)
+    stop = int(left_edge + 0.85 * width)
+    while x < stop:
+        if covered[x]:
+            x += 1
+            continue
+        start = x
+        while x < len(covered) and not covered[x]:
+            x += 1
+        band = x - start
+        if band < _MIN_GUTTER:
+            continue
+        gutter = (start + x) / 2
+        left = [w for w in words if w.x1 <= gutter]
+        right = [w for w in words if w.x0 >= gutter]
+        if min(len(left), len(right)) < 0.08 * len(words):
+            continue
+        spans = [max(w.y1 for w in side) - min(w.y0 for w in side) for side in (left, right)]
+        if min(spans) < 0.2 * height or min(_wordy_rows(left), _wordy_rows(right)) < 2:
+            continue
+        if _row_alignment(left, right) >= 0.5 or _aligned_run(left, right) >= 3:
+            continue
+        if best is None or band > best[1]:
+            best = (gutter, band)
+    return best[0] if best else None
+
+
 def extract_page_structure(
     *,
     page_number: int,
@@ -1490,7 +1590,44 @@ def extract_page_structure(
     fitz_page=None,
     raster_grids: list | None = None,
 ) -> PageStructure:
+    """A page's structure. A two-column page (a sidebar beside the main
+    text) is read column by column, so lines, fields and tables never join
+    words across the gutter."""
+
     ids = _Ids(page_number)
+    # Native text only: OCR baselines drift with skew, so a scanned table's
+    # rows no longer line up and could pass for independent columns.
+    gutter = column_gutter(words) if words and extraction_method == "native" else None
+    if gutter is None:
+        return _extract_structure(
+            ids, page_number=page_number, words=words, extraction_method=extraction_method,
+            fitz_page=fitz_page, raster_grids=raster_grids,
+        )
+    result = PageStructure()
+    for column in ([w for w in words if w.x1 <= gutter], [w for w in words if w.x0 >= gutter]):
+        # Vector ruling and form widgets are page-wide; a column run would
+        # find them twice, so columns read from their words alone.
+        part = _extract_structure(
+            ids, page_number=page_number, words=column, extraction_method=extraction_method,
+            fitz_page=None, raster_grids=None,
+        )
+        for region in part.regions:
+            region.structural_metadata["column"] = "left" if column and column[0].x1 <= gutter else "right"
+        result.regions.extend(part.regions)
+        result.fields.extend(part.fields)
+        result.tables.extend(part.tables)
+    return result
+
+
+def _extract_structure(
+    ids: _Ids,
+    *,
+    page_number: int,
+    words: list[Word],
+    extraction_method: str,
+    fitz_page=None,
+    raster_grids: list | None = None,
+) -> PageStructure:
     result = PageStructure()
     if not words:
         return result

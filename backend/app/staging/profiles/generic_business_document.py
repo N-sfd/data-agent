@@ -464,7 +464,7 @@ _MAX_SECTIONS = 80
 
 
 def _reading_order(structure) -> list[tuple]:
-    """(region, line) for every line of the top-level text regions, in
+    """(region, line, line number) for every line of the top-level text regions, in
     reading order: page, then top to bottom, then left to right. A line's
     height is estimated within its region, so a right-aligned date printed
     beside a block's second line reads with that line, not after the block.
@@ -481,6 +481,23 @@ def _reading_order(structure) -> list[tuple]:
             parent = by_id[parent].parent_region_id if parent in by_id else None
         return False
 
+    # A page read in columns (source structure marks them): its main column
+    # (more words) first, then the other (a résumé's sidebar).
+    words_by_column: dict[tuple, int] = {}
+    for region in structure.regions:
+        column = region.structural_metadata.get("column")
+        if column:
+            key = (region.page, column)
+            words_by_column[key] = words_by_column.get(key, 0) + len(region.text.split())
+
+    def column_rank(region) -> int:
+        column = region.structural_metadata.get("column")
+        if not column:
+            return 0
+        other = "left" if column == "right" else "right"
+        mine, theirs = words_by_column.get((region.page, column), 0), words_by_column.get((region.page, other), 0)
+        return 0 if (mine, column == "left") >= (theirs, other == "left") else 1
+
     lines: list[tuple] = []
     for index, region in enumerate(structure.regions):
         if region.region_id not in chosen or nested(region) or not normalize_space(region.text):
@@ -490,13 +507,38 @@ def _reading_order(structure) -> list[tuple]:
             if region.bbox:
                 top, bottom = region.bbox[1], region.bbox[3]
                 y = top + (number + 0.5) * max(bottom - top, 0) / len(texts)
-                key = (region.page or 0, round(y), region.bbox[0], index, number)
+                key = (region.page or 0, column_rank(region), round(y), region.bbox[0], index, number)
             else:
-                key = (region.page or 0, 0, 0, index, number)
-            lines.append((key, region, text))
-    if any(region.bbox for _, region, _ in lines):
+                key = (region.page or 0, 0, 0, 0, index, number)
+            lines.append((key, region, text, number))
+    if any(item[1].bbox for item in lines):
         lines.sort(key=lambda item: item[0])
-    return [(region, text) for _, region, text in lines]
+    return [(region, text, number) for _, region, text, number in lines]
+
+
+# A heading in larger type than the body text: this much larger.
+_HEADING_SIZE_RATIO = 1.4
+
+
+def _font_size(region, line: int | None = None) -> float | None:
+    """A line's font size when recorded, else its region's."""
+
+    sizes = region.structural_metadata.get("line_sizes")
+    if line is not None and isinstance(sizes, list) and line < len(sizes):
+        return float(sizes[line])
+    size = region.structural_metadata.get("font_size")
+    return float(size) if isinstance(size, (int, float)) else None
+
+
+def _body_font_size(structure) -> float | None:
+    """The size most of the document's running text is set in (by words)."""
+
+    weights: dict[float, int] = {}
+    for region in structure.regions:
+        size = _font_size(region)
+        if size and region.region_type in ("PARAGRAPH", "NARRATIVE"):
+            weights[size] = weights.get(size, 0) + len(region.text.split())
+    return max(weights, key=weights.get) if weights else None
 
 
 def _caps_heading(line: str) -> bool:
@@ -546,34 +588,80 @@ def _document_sections(document: Document, structure) -> list[RawRecord]:
     than the text printed beside them. Bullet-only lines are dropped and a
     wrapped line rejoins the line it continues."""
 
-    ordered = [(region, raw.strip()) for region, raw in _reading_order(structure) if raw.strip()]
-    ruled = sum(1 for _, line in ordered if _RULED_HEADING.match(line))
-    capitals = sum(1 for _, line in ordered if _caps_heading(line))
+    ordered = [(region, raw.strip(), number) for region, raw, number in _reading_order(structure) if raw.strip()]
+    ruled = sum(1 for _, line, _ in ordered if _RULED_HEADING.match(line))
+    # Documents that set their headings in larger type ("EDUCATION" at 23pt)
+    # may capitalise entries too ("BEST EVENT ORGANIZER AWARD" at 12pt):
+    # then only capital lines in heading-sized type are headings.
+    body = _body_font_size(structure)
+    sizes = [_font_size(region, number) for region, line, number in ordered if _caps_heading(line)]
+    heading_size = (
+        _HEADING_SIZE_RATIO * body
+        if body and any(size and size >= _HEADING_SIZE_RATIO * body for size in sizes)
+        else None
+    )
+
+    def capital_heading(region, line: str, number: int) -> bool:
+        if not _caps_heading(line):
+            return False
+        size = _font_size(region, number)
+        if heading_size is None or (size is not None and size >= heading_size):
+            return True
+        # Smaller capitals are still a heading when set apart: a block of
+        # their own, or a heading line a contact block absorbed. Capitalised
+        # entries inside running text or label/value lines are not.
+        standalone = region.region_type in ("HEADING", "PARAGRAPH", "NARRATIVE") and len(region.text.splitlines()) == 1
+        return standalone or region.region_type == "CONTACT_BLOCK"
+
+    capitals = sum(1 for region, line, number in ordered if capital_heading(region, line, number))
     mode = "ruled" if ruled >= 2 else "capitals" if capitals >= 2 else "regions"
     # Pages with bullet glyphs: there a full-width line may end a bullet,
     # so wrapped lines rejoin only on clear evidence.
-    bulleted = {region.page for region, line in ordered if _BULLET_ONLY.match(line)}
+    bulleted = {region.page for region, line, _ in ordered if _BULLET_ONLY.match(line)}
     widest: dict[str, int] = {}
-    for region, line in ordered:
+    for region, line, _ in ordered:
         widest[region.region_id] = max(widest.get(region.region_id, 0), len(line))
 
     sections: list[dict] = []
     current: dict | None = None
     previous_region = None
 
+    def stacked(previous, region) -> bool:
+        """Two heading lines set directly one under the other in the same
+        type: one heading broken over two lines ("ADDITIONAL" / "SKILLS")."""
+
+        if not (previous.bbox and region.bbox) or previous.page != region.page:
+            return False
+        if previous.structural_metadata.get("column") != region.structural_metadata.get("column"):
+            return False
+        size, other = _font_size(previous), _font_size(region)
+        if not size or not other or abs(size - other) > 0.5:
+            return False
+        gap = region.bbox[1] - previous.bbox[3]
+        return -1 <= gap <= 0.6 * size
+
     def start(title: str, region, *, lead: bool = False) -> dict:
+        if (
+            sections
+            and current is sections[-1]
+            and not current["lines"]
+            and not current["lead"]
+            and stacked(current["region"], region)
+        ):
+            current["heading"] = f"{current['heading']} {title}"
+            return current
         section = {"heading": title, "lines": [], "evidence": [], "region": region, "lead": lead}
         sections.append(section)
         return section
 
-    def heading_of(region, line: str) -> str | None:
+    def heading_of(region, line: str, number: int) -> str | None:
         ruled_match = _RULED_HEADING.match(line)
         if mode == "ruled":
             return normalize_space(ruled_match.group("title")) if ruled_match else None
         if mode == "capitals":
             if ruled_match:
                 return normalize_space(ruled_match.group("title"))
-            return normalize_space(line) if _caps_heading(line) else None
+            return normalize_space(line) if capital_heading(region, line, number) else None
         return normalize_space(line) if region.region_type == "HEADING" else None
 
     def continues(previous: str, line: str, region) -> bool:
@@ -591,10 +679,21 @@ def _document_sections(document: Document, structure) -> list[RawRecord]:
         width = widest.get(region.region_id, 0)
         return region.page not in bulleted and width >= _PROSE_WIDTH and len(previous) >= 0.85 * width
 
-    for region, line in ordered:
+    for region, line, number in ordered:
         if _BULLET_ONLY.match(line):
             continue
-        title = heading_of(region, line)
+        title = heading_of(region, line, number)
+        # A smaller capital line right under a heading with no text yet is
+        # its subtitle ("AMMARA FAZAL" / "EVENT ORGANIZER"), not a section.
+        if (
+            title
+            and mode == "capitals"
+            and current is not None
+            and not current["lines"]
+            and heading_size is not None
+            and (_font_size(region, number) or 0) < heading_size
+        ):
+            title = None
         if title:
             current = start(title, region)
             previous_region = None
