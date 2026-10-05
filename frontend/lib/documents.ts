@@ -54,6 +54,23 @@ export async function deleteDocument(documentId: string): Promise<void> {
   });
 }
 
+export interface BulkDeleteResult {
+  deleted: string[];
+  not_found: string[];
+  forbidden: string[];
+  storage_errors: string[];
+}
+
+/** Deletes documents and everything that belongs to them, in one request
+ * (the server's single deletion service). */
+export async function deleteDocuments(documentIds: string[]): Promise<BulkDeleteResult> {
+  return apiFetch("/api/documents/bulk-delete", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ document_ids: documentIds }),
+  });
+}
+
 export async function getDashboardStats(): Promise<DashboardStats> {
   return apiFetch("/api/dashboard/stats");
 }

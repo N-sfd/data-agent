@@ -1,0 +1,307 @@
+import { fireEvent, render, screen, within } from "@testing-library/react";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+import DocumentWorkspace from "@/components/documents/document-workspace";
+import type { StagingCell, StagingDataset, StagingWorkbook } from "@/lib/staging-workbook";
+
+let search = new URLSearchParams();
+const replace = vi.fn();
+
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ replace }),
+  useSearchParams: () => search,
+}));
+vi.mock("@/lib/documents", () => ({
+  getDocument: vi.fn(() => Promise.resolve({ original_filename: "part_52.html" })),
+}));
+vi.mock("@/components/staging/source-transcription", () => ({
+  default: () => <p>Source transcription</p>,
+}));
+vi.mock("@/lib/staging-workbook", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/staging-workbook")>()),
+  getStagingWorkbook: vi.fn(() => Promise.resolve(workbook())),
+}));
+
+function cell(field: string, label: string, value: string | null): StagingCell {
+  return {
+    canonical_field: field,
+    display_label: label,
+    value,
+    raw_value: value,
+    value_type: "text",
+    provenance: null,
+    validation: { status: "passed", checks: [] },
+    review_status: value ? "Verified" : null,
+    review_reasons: [],
+    source_column: null,
+  };
+}
+
+function farRecord(number: string, title: string, type: string, alternate: string | null = null) {
+  return {
+    record_id: `far_records:${number}:${alternate ?? ""}`,
+    record_status: "Verified" as const,
+    links_to_dataset: null,
+    cells: {
+      "far.record.far_number": cell("far.record.far_number", "FAR Number", number),
+      "far.record.title": cell("far.record.title", "Title", title),
+      "far.record.record_type": cell("far.record.record_type", "Record Type", type),
+      "far.record.alternate": cell("far.record.alternate", "Alternate", alternate),
+    },
+  };
+}
+
+function dataset(id: string, name: string, role: StagingDataset["role"], records: StagingDataset["records"]): StagingDataset {
+  const columns = Object.values(records[0]?.cells ?? {}).map((c) => ({
+    canonical_field: c.canonical_field,
+    key: c.canonical_field,
+    display_label: c.display_label,
+    value_type: "text" as const,
+    expected: false,
+  }));
+  return { dataset_id: id, display_name: name, cardinality: "repeating", role, description: null, columns, records, identity_fields: [] };
+}
+
+function workbook(): StagingWorkbook {
+  return {
+    document_id: "d1",
+    document_filename: "part_52.html",
+    profile: {
+      profile_id: "far_part_52",
+      profile_version: 1,
+      display_name: "FAR Part 52",
+      description: "",
+      document_families: [],
+      export_capabilities: [],
+      oracle_mapping_capability: "planned",
+      views: [
+        { view_id: "far_records", label: "FAR Clauses & Provisions", dataset_ids: ["far_records"], kind: "records" },
+        { view_id: "oracle_output", label: "Oracle Output", dataset_ids: ["far_oracle_output"], kind: "records" },
+        { view_id: "source", label: "Source", dataset_ids: ["far_source"], kind: "source" },
+      ],
+    },
+    outcome: { status: "populated", title: "Extraction complete", message: "", record_count: 3 },
+    datasets: [
+      dataset("far_records", "FAR Clauses & Provisions", "business", [
+        farRecord("52.202-1", "Definitions", "Clause"),
+        farRecord("52.215-1", "Instructions to Offerors", "Provision"),
+        farRecord("52.215-1", "Instructions to Offerors", "Provision", "Alternate I"),
+      ]),
+      dataset("far_oracle_output", "Oracle Output", "transform", [
+        { record_id: "o1", record_status: null, links_to_dataset: null, cells: { "far.oracle.action": cell("far.oracle.action", "Action", "Sync") } },
+      ]),
+      dataset("far_source", "Source", "source", [
+        { record_id: "s1", record_status: null, links_to_dataset: null, cells: { "far.source.item": cell("far.source.item", "Item", "Source Document") } },
+      ]),
+    ],
+    qa_summary: { verified: 3, needs_review: 0, missing: 0, record_count: 3 },
+    processing_metadata: {},
+  } as unknown as StagingWorkbook;
+}
+
+describe("DocumentWorkspace with a profile-declared presentation", () => {
+  beforeEach(() => {
+    search = new URLSearchParams();
+    replace.mockReset();
+  });
+
+  it("shows only the profile's tabs, the first one open", async () => {
+    render(<DocumentWorkspace documentId="d1" />);
+    const tabs = await screen.findAllByRole("tab");
+    expect(tabs.map((tab) => tab.textContent)).toEqual(["FAR Clauses & Provisions", "Oracle Output", "Source"]);
+    expect(tabs[0].getAttribute("aria-selected")).toBe("true");
+    for (const generic of ["Overview", "Staging", "Canonical", "Transform", "QA"]) {
+      expect(screen.queryByRole("tab", { name: generic })).toBeNull();
+    }
+    fireEvent.click(tabs[1]);
+    expect(replace).toHaveBeenCalledWith("/documents/d1?view=oracle_output");
+  });
+
+  it("Export menu: Export All as before; Export Selected disabled until something is selected", async () => {
+    render(<DocumentWorkspace documentId="d1" />);
+    await screen.findAllByRole("tab");
+    fireEvent.click(screen.getByRole("button", { name: "Export" }));
+    expect(screen.getByText("Export All")).toBeTruthy();
+    for (const label of ["Excel", "CSV", "JSON"]) {
+      expect((screen.getByRole("menuitem", { name: label }) as HTMLButtonElement).disabled).toBe(true);
+    }
+    fireEvent.click(screen.getByRole("button", { name: "Export" }));
+    // Select one record's row in the FAR grid; the menu now names it.
+    fireEvent.click(screen.getByRole("checkbox", { name: "Select record 52.202-1" }));
+    fireEvent.click(screen.getByRole("button", { name: "Export" }));
+    const menu = screen.getByRole("menu");
+    expect(within(menu).getByText(/FAR Clauses & Provisions, \d+ cells/)).toBeTruthy();
+    expect((within(menu).getByRole("menuitem", { name: "Excel" }) as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it("names a records tab after its dataset (a FAR Part's table is its FAR Data)", async () => {
+    const staging = await import("@/lib/staging-workbook");
+    const base = workbook();
+    vi.mocked(staging.getStagingWorkbook).mockResolvedValueOnce({
+      ...base,
+      datasets: base.datasets.map((d) => (d.dataset_id === "far_records" ? { ...d, display_name: "FAR Data" } : d)),
+    } as StagingWorkbook);
+    render(<DocumentWorkspace documentId="d1" />);
+    const tabs = await screen.findAllByRole("tab");
+    expect(tabs.map((tab) => tab.textContent)).toEqual(["FAR Data", "Oracle Output", "Source"]);
+  });
+
+  it("shows FAR records as a compact grid with alternates kept under their record", async () => {
+    render(<DocumentWorkspace documentId="d1" />);
+    const filters = await screen.findByRole("group", { name: "Filter by record type" });
+    const labels = within(filters).getAllByRole("button").map((button) => button.textContent);
+    // The alternate belongs to 52.215-1: two FAR records, no "Alternate" peer type.
+    expect(labels).toEqual(["All 2", "Clause 1", "Provision 1"]);
+    expect(screen.getByLabelText("Review status")).toBeTruthy();
+    const row = screen.getByRole("row", { name: /52\.215-1/ });
+    expect(within(row).getByText("Alternate I")).toBeTruthy();
+    fireEvent.click(within(filters).getByRole("button", { name: /Clause/ }));
+    expect(screen.queryByRole("row", { name: /52\.215-1/ })).toBeNull();
+  });
+
+  it("opens the source tab with the source datasets and transcription", async () => {
+    search = new URLSearchParams("view=source");
+    render(<DocumentWorkspace documentId="d1" />);
+    expect(await screen.findByText("Source Document")).toBeTruthy();
+    expect(screen.getByText("Source transcription")).toBeTruthy();
+  });
+});
+
+describe("DocumentWorkspace for a contract", () => {
+  function contractWorkbook(): StagingWorkbook {
+    const base = workbook();
+    const row = (id: string, section: string, type: string, title: string) => ({
+      record_id: id,
+      record_status: "Verified" as const,
+      links_to_dataset: null,
+      cells: {
+        "contract.data.section": cell("contract.data.section", "Section", section),
+        "contract.data.record_type": cell("contract.data.record_type", "Record Type", type),
+        "contract.data.title": cell("contract.data.title", "Field / Title", title),
+      },
+    });
+    const summary = (id: string, group: string, label: string, value: string) => ({
+      record_id: id,
+      record_status: null,
+      links_to_dataset: null,
+      cells: {
+        "contract.overview.group": cell("contract.overview.group", "Category", group),
+        "contract.overview.label": cell("contract.overview.label", "Field", label),
+        "contract.overview.value": cell("contract.overview.value", "Value", value),
+      },
+    });
+    return {
+      ...base,
+      profile: {
+        ...base.profile,
+        profile_id: "contract_v3",
+        views: [
+          { view_id: "contract_data", label: "Contract Data", dataset_ids: ["contract_data"], kind: "records" },
+          { view_id: "contract_summary", label: "Contract Summary", dataset_ids: ["contract_overview"], kind: "records" },
+        ],
+      },
+      datasets: [
+        dataset("contract_data", "Contract Data", "business", [
+          row("d1", "Overview", "Field", "1. SOLICITATION NO."),
+          row("d2", "CLINs", "CLIN", "ALL SERVICES"),
+          row("d3", "FAR Clauses", "Clause", "Gratuities"),
+        ]),
+        dataset("contract_overview", "Contract Summary", "business", [
+          summary("s1", "Contract Identification", "Contract Number", "FA300224C0008"),
+          summary("s2", "Document Statistics", "FAR Clauses", "124"),
+        ]),
+      ],
+    } as StagingWorkbook;
+  }
+
+  beforeEach(async () => {
+    search = new URLSearchParams();
+    const staging = await import("@/lib/staging-workbook");
+    vi.mocked(staging.getStagingWorkbook).mockResolvedValue(contractWorkbook());
+  });
+
+  it("filters Contract Data by section", async () => {
+    render(<DocumentWorkspace documentId="d1" />);
+    const select = await screen.findByLabelText("Filter by section");
+    fireEvent.change(select, { target: { value: "FAR Clauses" } });
+    expect(screen.getByText("Gratuities")).toBeTruthy();
+    expect(screen.queryByText("ALL SERVICES")).toBeNull();
+  });
+
+  it("shows the Contract Summary as one card per category", async () => {
+    search = new URLSearchParams("view=contract_summary");
+    render(<DocumentWorkspace documentId="d1" />);
+    expect(await screen.findByRole("heading", { name: "Contract Identification" })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Document Statistics" })).toBeTruthy();
+    expect(screen.getByText("FA300224C0008")).toBeTruthy();
+    expect(screen.queryByRole("table")).toBeNull();
+  });
+
+  it("selects Contract Summary lines for export without touching their review state", async () => {
+    search = new URLSearchParams("view=contract_summary");
+    render(<DocumentWorkspace documentId="d1" />);
+    await screen.findByRole("heading", { name: "Contract Identification" });
+    fireEvent.click(screen.getByRole("checkbox", { name: "Select Contract Number" }));
+    expect(screen.getByTestId("selection-toolbar").textContent).toMatch(/3 cells selected.*1 record.*3 fields/);
+    fireEvent.click(screen.getByRole("button", { name: "Export" }));
+    const menu = screen.getByRole("menu");
+    expect((within(menu).getByRole("menuitem", { name: "CSV" }) as HTMLButtonElement).disabled).toBe(false);
+  });
+});
+
+describe("DocumentWorkspace combines small dataset tabs", () => {
+  // The Staging tab (documents open on Data).
+  function rows(prefix: string, field: string, label: string, n: number) {
+    return Array.from({ length: n }, (_, i) => ({
+      record_id: `${prefix}:${i}`,
+      record_status: "Verified" as const,
+      links_to_dataset: null,
+      cells: { [field]: cell(field, label, `${label} ${i + 1}`) },
+    }));
+  }
+
+  function invoiceWorkbook(): StagingWorkbook {
+    const single = (id: string, name: string, field: string, label: string) => ({
+      ...dataset(id, name, "business", rows(id, field, label, 1)),
+      cardinality: "single" as const,
+    });
+    return {
+      ...workbook(),
+      profile: { ...workbook().profile, profile_id: "invoice", display_name: "Invoice", views: [] },
+      datasets: [
+        single("invoice_summary", "Invoice Summary", "invoice.number", "Invoice Number"),
+        single("supplier", "Supplier", "invoice.supplier.name", "Supplier Name"),
+        dataset("invoice_lines", "Invoice Lines", "business", rows("lines", "invoice.line.description", "Description", 6)),
+        dataset("taxes_charges", "Taxes / Charges", "business", rows("tax", "invoice.tax.name", "Tax", 2)),
+        dataset("distributions", "Distributions", "business", []),
+      ],
+    } as unknown as StagingWorkbook;
+  }
+
+  beforeEach(async () => {
+    search = new URLSearchParams("view=staging");
+    const staging = await import("@/lib/staging-workbook");
+    vi.mocked(staging.getStagingWorkbook).mockResolvedValue(invoiceWorkbook());
+  });
+
+  it("puts datasets of 5 records or fewer on one tab, each as its own section; larger ones keep their tab", async () => {
+    render(<DocumentWorkspace documentId="d1" />);
+    const datasetTabs = within(await screen.findByRole("tablist", { name: "Datasets" })).getAllByRole("tab");
+    // Empty datasets get no tab; the three small ones share "Details" where the first was.
+    expect(datasetTabs.map((tab) => tab.textContent)).toEqual(["Details4", "Invoice Lines6"]);
+    expect(datasetTabs[0].getAttribute("aria-selected")).toBe("true");
+    for (const name of ["Invoice Summary", "Supplier", "Taxes / Charges"]) {
+      expect(screen.getByRole("region", { name })).toBeTruthy();
+    }
+    fireEvent.click(datasetTabs[1]);
+    expect(screen.queryByRole("region", { name: "Supplier" })).toBeNull();
+    expect(screen.getByText("Description 6")).toBeTruthy();
+  });
+
+  it("searches across the combined sections", async () => {
+    render(<DocumentWorkspace documentId="d1" />);
+    fireEvent.change(await screen.findByLabelText("Search Details"), { target: { value: "Tax 2" } });
+    expect(screen.getByText("Tax 2")).toBeTruthy();
+    expect(screen.queryByText("Tax 1")).toBeNull();
+  });
+});

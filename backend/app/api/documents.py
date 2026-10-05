@@ -4,6 +4,7 @@ from pathlib import Path
 from uuid import UUID, uuid4
 
 import fitz
+from pydantic import BaseModel
 from fastapi import (
     APIRouter,
     BackgroundTasks,
@@ -41,6 +42,8 @@ from app.schemas.document import (
     SelectPortfolioFileRequest,
     UploadedDocumentResponse,
 )
+from app.staging.document_labels import document_labels
+from app.services.document_deletion import delete_documents
 from app.services.dashboard_stats import (
     compute_document_confidence,
     compute_document_status,
@@ -51,7 +54,7 @@ from app.core.document_access import (
     scope_documents,
     staged_owner,
 )
-from app.core.auth import ActorContext, get_current_actor, require_permission
+from app.core.auth import ActorContext, get_current_actor, require_any_permission, require_permission
 from app.core.observability import bind_job_context, log_event
 from app.services.document_storage import (
     DocumentStorageError,
@@ -210,7 +213,16 @@ def _extract_metadata(
             author=None,
         )
 
-    if spec.kind in {"text", "csv", "html", "rtf"}:
+    if spec.kind == "xml":
+        # Malformed or entity-declaring XML is refused at upload.
+        from app.xml_records.parse import XmlSourceError, parse_tree
+
+        try:
+            parse_tree(file_path.read_bytes())
+        except XmlSourceError as exc:
+            raise SecurityValidationError(str(exc)) from exc
+
+    if spec.kind in {"text", "csv", "html", "xml", "rtf"}:
         return PDFMetadata(
             page_count=1,
             encrypted=False,
@@ -1084,6 +1096,7 @@ def _build_document_summary(
         source_status=source_status_for(
             settings, stored_filename=document.stored_filename
         ),
+        **document_labels(database, document),
     )
 
 
@@ -1110,6 +1123,17 @@ async def list_documents(
     ]
 
 
+class BulkDeleteRequest(BaseModel):
+    document_ids: list[str]
+
+
+class BulkDeleteResponse(BaseModel):
+    deleted: list[str]
+    not_found: list[str]
+    forbidden: list[str]
+    storage_errors: list[str]
+
+
 @router.delete(
     "/{document_id}",
     status_code=204,
@@ -1118,52 +1142,44 @@ async def delete_document(
     document_id: str,
     database: Session = Depends(get_database),
     actor: ActorContext = Depends(
-        require_permission("documents.delete")
+        require_any_permission("documents.delete", "documents.delete_own")
     ),
 ) -> Response:
-    document = database.get(Document, document_id)
+    """Deletes the document and everything that belongs to it
+    (services/document_deletion.py)."""
 
-    if document is None:
-        raise HTTPException(
-            status_code=404,
-            detail="Document not found.",
-        )
-
-    settings = get_settings()
-
-    # Child documents (portfolio-extracted files) point back at this one
-    # via parent_document_id, which has no ON DELETE CASCADE — detach
-    # them first so they survive as standalone documents instead of
-    # blocking the delete with a foreign-key violation.
-    for child in database.scalars(
-        select(Document).where(
-            Document.parent_document_id == document_id
-        )
-    ):
-        child.parent_document_id = None
-
-    local_path = settings.upload_path / document.stored_filename
-    if local_path.exists():
-        local_path.unlink()
-
-    try:
-        delete_object(settings, document.stored_filename)
-    except Exception:
-        # Remote storage cleanup is best-effort — the document row and
-        # its local file are the source of truth for whether it's gone.
-        pass
-
-    log_event(
-        "document_deleted",
-        document_id=document_id,
-        original_filename=document.original_filename,
-        actor_id=actor.id,
-    )
-
-    database.delete(document)
-    database.commit()
-
+    result = delete_documents(database, actor, [document_id])
+    if result.not_found:
+        raise HTTPException(status_code=404, detail="Document not found.")
+    if result.forbidden:
+        raise HTTPException(status_code=403, detail="You can delete only documents your workspace uploaded.")
+    log_event("document_deleted", document_id=document_id, actor_id=actor.id, rows=result.rows_deleted)
     return Response(status_code=204)
+
+
+@router.post("/bulk-delete", response_model=BulkDeleteResponse)
+async def bulk_delete_documents(
+    payload: BulkDeleteRequest,
+    database: Session = Depends(get_database),
+    actor: ActorContext = Depends(
+        require_any_permission("documents.delete", "documents.delete_own")
+    ),
+) -> BulkDeleteResponse:
+    """Deletes every listed document the caller may delete, in one
+    transaction; the rest are reported (not found / forbidden)."""
+
+    if not payload.document_ids:
+        raise HTTPException(status_code=422, detail="No documents selected.")
+    if len(payload.document_ids) > 500:
+        raise HTTPException(status_code=422, detail="Delete at most 500 documents at a time.")
+    result = delete_documents(database, actor, payload.document_ids)
+    log_event("documents_bulk_deleted", count=len(result.deleted), actor_id=actor.id, rows=result.rows_deleted)
+    return BulkDeleteResponse(
+        deleted=result.deleted,
+        not_found=result.not_found,
+        forbidden=result.forbidden,
+        storage_errors=result.storage_errors,
+    )
 
 
 @router.get(
@@ -1357,7 +1373,8 @@ def get_document_status_counts(
     )
     by_status: dict[str, int] = {}
     for document in candidates:
-        status = _build_document_summary(database, document).status
+        # Only the status is needed — not the full listing summary.
+        status = compute_document_status(database, document)
         by_status[status] = by_status.get(status, 0) + 1
 
     return DocumentStatusCountsResponse(total=total, by_status=by_status)

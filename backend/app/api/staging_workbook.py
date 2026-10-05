@@ -13,6 +13,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
+from app.api.downloads import attachment_header, excel_csv
 from app.core.auth import ActorContext, require_permission
 from app.database.dependencies import get_database
 from app.models.document import Document
@@ -25,8 +26,16 @@ from app.source_structure.models import (
 from app.source_structure.service import get_or_build_source_structure, page_transcript
 from app.staging import registry
 from app.staging.engine import profile_descriptor
-from app.staging.export import build_dataset_csv, build_workbook_xlsx, find_dataset
+from app.staging.document_labels import document_labels
+from app.staging.export import build_dataset_csv, build_profile_xlsx, build_workbook_xlsx, find_dataset
 from app.staging.models import ProfileDescriptor, StagingRecord, StagingWorkbook
+from app.staging.selection_export import (
+    FieldSelectionManifest,
+    SelectionError,
+    SelectionManifest,
+    build_selected_export,
+    build_selected_fields_export,
+)
 from app.staging.service import (
     compact_for_grid,
     get_staging_record,
@@ -91,6 +100,21 @@ def read_staging_record(
     return record
 
 
+@router.get("/{document_id}/staging-profile", response_model=ProfileDescriptor)
+def read_staging_profile(
+    document_id: str,
+    database: Session = Depends(get_database),
+    actor: ActorContext = Depends(require_permission("documents.view")),
+) -> ProfileDescriptor:
+    """The document's pinned profile — its presentation and exports —
+    without building the workbook (a FAR source has ~1,000 records)."""
+
+    document = database.get(Document, document_id)
+    if document is None:
+        raise HTTPException(status_code=404, detail=f"Document {document_id} not found.")
+    return profile_descriptor(pinned_profile(database, document), document_id)
+
+
 @router.get("/{document_id}/staging-workbook/export.xlsx")
 def export_staging_workbook_xlsx(
     document_id: str,
@@ -99,10 +123,17 @@ def export_staging_workbook_xlsx(
 ) -> Response:
     workbook = _workbook_or_404(database, document_id)
     filename = f"{workbook.document_filename.rsplit('.', 1)[0]}_staging.xlsx"
+    profile = registry.get_profile(workbook.profile.profile_id, workbook.profile.profile_version)
+    if profile is not None and profile.export_sheets:
+        # The profile's own workbook, from the same staged values.
+        document = database.get(Document, document_id)
+        content = build_profile_xlsx(workbook, profile.export_sheets, document_labels(database, document))
+    else:
+        content = build_workbook_xlsx(workbook)
     return Response(
-        content=build_workbook_xlsx(workbook),
+        content=content,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        headers={"Content-Disposition": attachment_header(filename)},
     )
 
 
@@ -119,7 +150,7 @@ def export_staging_workbook_json(
     return Response(
         content=workbook.model_dump_json(indent=1),
         media_type="application/json",
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        headers={"Content-Disposition": attachment_header(filename)},
     )
 
 
@@ -138,9 +169,64 @@ def export_staging_dataset_csv(
             status_code=404, detail=f"Unknown dataset {dataset_id!r}. Valid: {valid}"
         )
     return Response(
-        content=build_dataset_csv(dataset),
-        media_type="text/csv",
-        headers={"Content-Disposition": f'attachment; filename="{dataset_id}.csv"'},
+        content=excel_csv(build_dataset_csv(dataset)),
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": attachment_header(f"{dataset_id}.csv")},
+    )
+
+
+@router.post("/{document_id}/staging-workbook/datasets/{dataset_id}/export-selected")
+def export_staging_selection(
+    document_id: str,
+    dataset_id: str,
+    manifest: SelectionManifest,
+    database: Session = Depends(get_database),
+    actor: ActorContext = Depends(require_permission("export.read")),
+) -> Response:
+    """The cells a reviewer selected in a grid. The manifest names records
+    and fields only; values are read from the persisted staging workbook
+    (as Export All reads them — nothing is re-extracted). Records outside
+    this document's dataset and non-business fields are rejected."""
+
+    workbook = _workbook_or_404(database, document_id)
+    if find_dataset(workbook, dataset_id) is None:
+        raise HTTPException(status_code=404, detail=f"Unknown dataset {dataset_id!r}.")
+    try:
+        content, media_type, filename = build_selected_export(workbook, dataset_id, manifest)
+    except SelectionError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    if manifest.format == "csv":
+        content, media_type = excel_csv(content), "text/csv; charset=utf-8"
+    return Response(
+        content=content,
+        media_type=media_type,
+        headers={"Content-Disposition": attachment_header(filename)},
+    )
+
+
+@router.post("/{document_id}/staging-workbook/export-selected-fields")
+def export_staging_field_selection(
+    document_id: str,
+    manifest: FieldSelectionManifest,
+    database: Session = Depends(get_database),
+    actor: ActorContext = Depends(require_permission("export.read")),
+) -> Response:
+    """Values a reviewer selected in a label / value list (Supplier, Bill-To,
+    Charges & Totals), as one Section | Field | Value table. Like a grid
+    selection, the manifest names (dataset, record, field) only; labels and
+    values are read from the persisted staging workbook."""
+
+    workbook = _workbook_or_404(database, document_id)
+    try:
+        content, media_type, filename = build_selected_fields_export(workbook, manifest)
+    except SelectionError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    if manifest.format == "csv":
+        content, media_type = excel_csv(content), "text/csv; charset=utf-8"
+    return Response(
+        content=content,
+        media_type=media_type,
+        headers={"Content-Disposition": attachment_header(filename)},
     )
 
 
@@ -161,10 +247,11 @@ def export_staging_profile_artifact(
     artifact = profile.exporter(database, document, export_id) if profile.exporter is not None else None
     if artifact is None:
         raise HTTPException(status_code=404, detail=f"Unknown export {export_id!r} for this document.")
+    csv_artifact = artifact.media_type == "text/csv"
     return Response(
-        content=artifact.content,
-        media_type=artifact.media_type,
-        headers={"Content-Disposition": f'attachment; filename="{artifact.filename}"'},
+        content=excel_csv(artifact.content) if csv_artifact else artifact.content,
+        media_type="text/csv; charset=utf-8" if csv_artifact else artifact.media_type,
+        headers={"Content-Disposition": attachment_header(artifact.filename)},
     )
 
 

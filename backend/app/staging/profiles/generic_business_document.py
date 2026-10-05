@@ -36,6 +36,8 @@ from app.staging.models import (
     SourceColumnValue,
 )
 from app.staging.profile import (
+    SOURCE_SHEET,
+    ExportSheet,
     AdapterResult,
     DatasetDefinition,
     FieldDefinition,
@@ -703,6 +705,14 @@ GENERIC_PROFILE = StagingProfile(
         QA_REVIEW,
     ),
     adapter=adapt_generic,
+    export_sheets=(
+        ExportSheet("Document Summary", ("document_summary",)),
+        ExportSheet("Key Fields", ("key_fields",)),
+        ExportSheet("Contacts", ("contacts",)),
+        ExportSheet("Line Items", ("line_items",)),
+        ExportSheet("Other Tables", ("other_tables",)),
+        ExportSheet(SOURCE_SHEET, ()),
+    ),
     export_capabilities=(
         ExportCapability(
             capability_id="professional_excel",

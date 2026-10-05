@@ -33,15 +33,17 @@ VERIFIED: ReviewStatus = "Verified"
 NEEDS_REVIEW: ReviewStatus = "Needs Review"
 MISSING: ReviewStatus = "Missing"
 
-SourceType = Literal["pdf", "image", "html", "docx", "xlsx", "text", "system"]
+SourceType = Literal["pdf", "image", "html", "xml", "docx", "xlsx", "text", "system"]
 
 ValueType = Literal["text", "money", "number", "integer", "date", "code", "boolean"]
 
 Cardinality = Literal["single", "repeating"]
 
-# business: extracted business data. source/qa: always-derivable
-# inspection datasets that never count as "found something".
-DatasetRole = Literal["business", "source", "qa"]
+# business: extracted business data. transform: the same records shaped
+# for a target system (e.g. Oracle Output) — reviewed, never counted as
+# extracted records again. source/qa: always-derivable inspection datasets
+# that never count as "found something".
+DatasetRole = Literal["business", "transform", "source", "qa"]
 
 
 class SourceLocator(BaseModel):
@@ -161,6 +163,17 @@ class StagingRecord(BaseModel):
     links_to_dataset: str | None = None
     # Every original column of a table-derived record, mapped or not.
     source_columns: list[SourceColumnValue] = Field(default_factory=list)
+    # Grid payload only: fields whose long text is a preview; the full
+    # value loads with the record (get_staging_record).
+    truncated_fields: list[str] = Field(default_factory=list)
+
+    @model_serializer(mode="wrap")
+    def _omit_empty_truncation(self, handler):
+        # Only grid records with a text preview carry the key.
+        data = handler(self)
+        if isinstance(data, dict) and not data.get("truncated_fields"):
+            data.pop("truncated_fields", None)
+        return data
 
 
 class StagingColumn(BaseModel):
@@ -187,6 +200,8 @@ class StagingDataset(BaseModel):
     # True when records carry only their grid (and identity) cells; the
     # full record is served by the dataset record endpoint.
     compact: bool = False
+    # Grid rows carry complete values; the grid shows long text in full.
+    full_text: bool = False
     # Canonical fields whose column the source itself prints (only for
     # datasets declaring source-adaptive columns).
     source_columns: list[str] = Field(default_factory=list)
@@ -217,6 +232,16 @@ class ExportCapability(BaseModel):
     dataset_id: str | None = None
 
 
+class ProfileView(BaseModel):
+    """One tab of a profile's presentation: its datasets, in order.
+    kind "source" also shows the document's own transcription."""
+
+    view_id: str
+    label: str
+    dataset_ids: list[str]
+    kind: Literal["records", "source"] = "records"
+
+
 class ProfileDescriptor(BaseModel):
     profile_id: str
     profile_version: int
@@ -227,6 +252,9 @@ class ProfileDescriptor(BaseModel):
     # Destinations this profile's canonical fields can later be mapped to.
     # Declared now, implemented in Phase E.
     oracle_mapping_capability: Literal["planned", "available", "none"] = "none"
+    # The tabs a document of this profile is presented in, in order. Empty
+    # = the generic workspace tabs.
+    views: list[ProfileView] = Field(default_factory=list)
 
 
 class ExtractionOutcomeModel(BaseModel):

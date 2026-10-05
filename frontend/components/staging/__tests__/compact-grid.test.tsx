@@ -128,7 +128,8 @@ describe("compact grid (grid_fields)", () => {
   it("shows only the declared grid columns plus status — no long text in the grid", () => {
     render(<StagingDatasetTable dataset={farDataset()} documentId="doc-far" />);
     const headers = screen.getAllByRole("columnheader").map((th) => th.textContent?.trim());
-    expect(headers).toEqual(["FAR Number", "Title", "Official Heading", "Revision", "Type", "Status", ""]);
+    // A leading select-all checkbox column, then the declared grid columns.
+    expect(headers).toEqual(["", "FAR Number", "Title", "Official Heading", "Revision", "Type", "Status", "Details"]);
     expect(screen.queryByText("Actual Section Text")).toBeNull();
     expect(screen.queryByText("Evidence")).toBeNull();
   });
@@ -150,12 +151,35 @@ describe("compact grid (grid_fields)", () => {
     );
   });
 
-  it("leaves datasets without grid fields unchanged (every column, evidence, no drawer)", () => {
+  it("shows every column of a dataset without grid fields; evidence lives in the record drawer", () => {
     const dataset = { ...farDataset(), grid_fields: [], compact: false };
     render(<StagingDatasetTable dataset={dataset} documentId="doc-far" />);
     const headers = screen.getAllByRole("columnheader").map((th) => th.textContent?.trim());
     expect(headers).toContain("Actual Section Text");
-    expect(headers).toContain("Evidence");
-    expect(screen.queryByRole("button", { name: "Details" })).toBeNull();
+    // No technical columns in the business grid.
+    expect(headers).not.toContain("Evidence");
+    expect(headers).not.toContain("Location");
+    fireEvent.click(screen.getByRole("button", { name: "Details" }));
+    expect(screen.getByRole("dialog", { name: "Record details" })).toBeTruthy();
+  });
+
+  it("a full-text grid keeps rows one line high; complete values open in the drawer", () => {
+    const body = "Unique Entity Identifier (Oct 2016)\n" + "(a) Definition. ".repeat(40) + "\n(End of provision)";
+    const base = farDataset();
+    const records = Array.from({ length: 30 }, (_, index) => ({
+      ...base.records[0],
+      record_id: `r${index}`,
+      cells: { ...base.records[0].cells, "far.official_heading": cell("far.official_heading", "Official Heading", body) },
+    }));
+    render(<StagingDatasetTable documentId="doc-far" dataset={{ ...base, full_text: true, compact: false, records }} />);
+    // The whole value is in the cell, on one ellipsized line.
+    const oneLine = body.replace(/\s+/g, " ");
+    const spans = screen.getAllByText(oneLine);
+    expect(spans.length).toBe(30); // 100 rows per page by default
+    expect(spans[0].className).toContain("truncate");
+    expect(spans[0].closest("td")?.className).toContain("h-11");
+    fireEvent.click(screen.getAllByRole("button", { name: "Details" })[0]);
+    const drawer = screen.getByRole("dialog", { name: "Record details" });
+    expect(within(drawer).getByText(/\(End of provision\)/)).toBeTruthy();
   });
 });

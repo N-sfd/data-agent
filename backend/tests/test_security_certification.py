@@ -221,8 +221,12 @@ def test_public_workspace_serves_core_flow_without_a_credential() -> None:
         workbook = client.get(f"/api/documents/{document_id}/staging-workbook", headers=workspace)
         assert workbook.status_code == 200, workbook.text
 
-        # Even the owning workspace cannot delete.
-        assert client.delete(f"/api/documents/{document_id}", headers=workspace).status_code == 403
+        # Another workspace cannot delete it (nor learn it exists) …
+        other = {"X-Workspace-Token": uuid4().hex + uuid4().hex}
+        assert client.delete(f"/api/documents/{document_id}", headers=other).status_code == 404
+        # … the owning workspace can delete its own upload.
+        assert client.delete(f"/api/documents/{document_id}", headers=workspace).status_code == 204
+        assert client.get(f"/api/documents/{document_id}", headers=workspace).status_code == 404
 
 
 def test_public_workspace_ignores_spoofed_admin_header() -> None:
@@ -230,12 +234,16 @@ def test_public_workspace_ignores_spoofed_admin_header() -> None:
     enforced = get_settings().model_copy(update={"rbac_enforced": True})
 
     with patch("app.core.auth.get_settings", return_value=enforced):
+        # Another workspace's document, with a spoofed admin header: the
+        # header grants nothing, so the document stays out of reach.
         document_id = _workspace_upload(workspace)
+        intruder = {"X-Workspace-Token": uuid4().hex + uuid4().hex}
         response = client.delete(
             f"/api/documents/{document_id}",
-            headers={**workspace, "X-Actor-Id": "actor-admin-default"},
+            headers={**intruder, "X-Actor-Id": "actor-admin-default"},
         )
-    assert response.status_code == 403
+        assert response.status_code == 404
+        assert client.get(f"/api/documents/{document_id}", headers=workspace).status_code == 200
 
 
 def test_public_workspace_still_rejects_an_invalid_credential() -> None:
@@ -251,7 +259,7 @@ def test_public_workspace_still_rejects_an_invalid_credential() -> None:
 
 
 def test_workspace_role_permissions() -> None:
-    for allowed in ("documents.upload", "extraction.run", "review.accept", "export.read"):
+    for allowed in ("documents.upload", "extraction.run", "review.accept", "export.read", "documents.delete_own"):
         assert role_has_permission("workspace", allowed)
     for denied in (
         "documents.delete",

@@ -56,6 +56,17 @@ def parse_html_file(file_path: str | Path) -> dict:
     return {"paragraphs": paragraphs, "tables": tables, "text": text}
 
 
+def parse_xml_file(file_path: str | Path) -> dict:
+    """Readable transcription of an XML file ('Label: value' per element,
+    records under their element path) — app/xml_records/parse.py."""
+
+    from app.xml_records.parse import readable_text
+
+    text = readable_text(Path(file_path).read_bytes())
+    paragraphs = [line for line in text.splitlines() if line.strip()]
+    return {"paragraphs": paragraphs, "tables": [], "text": text}
+
+
 def parse_rtf_file(file_path: str | Path) -> dict:
     path = Path(file_path)
     raw = path.read_text(encoding="utf-8", errors="replace")

@@ -81,6 +81,12 @@ class DocumentSummaryResponse(BaseModel):
     # (local cache or Supabase backup). Surfaces older DB rows whose file
     # disappeared before remote backup existed.
     source_status: Literal["available", "missing"] = "available"
+    # The persisted staging resolution (app/staging/document_labels.py):
+    # what the document is listed as. None until it has been staged.
+    profile_id: str | None = None
+    profile_label: str | None = None
+    type_label: str | None = None
+    staging_status: Literal["staged", "not_staged"] = "not_staged"
 
 
 class DocumentSearchResponse(BaseModel):

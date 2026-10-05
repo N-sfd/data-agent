@@ -10,7 +10,7 @@ const STEPS = [
   {
     id: "upload",
     label: "Upload",
-    description: "PDF, DOCX, scan, or image",
+    description: "PDF, HTML, XML, scan or image",
     Icon: Upload,
   },
   {
@@ -89,7 +89,12 @@ export default function WorkflowDiagram({
                 <span className="workflow-diagram-icon-wrap">
                   <Icon className="h-4 w-4" strokeWidth={1.75} />
                 </span>
-                <div className="min-w-0">
+                <div className="workflow-diagram-text">
+                  {!compact && (
+                    <span className="workflow-diagram-number">
+                      {String(index + 1).padStart(2, "0")}
+                    </span>
+                  )}
                   <p className="workflow-diagram-label">{step.label}</p>
                   {!compact && (
                     <p className="workflow-diagram-desc">{step.description}</p>

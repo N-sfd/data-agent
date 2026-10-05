@@ -27,6 +27,15 @@ export interface FieldItem {
   category: string | null;
   fragments?: SourceColumnValue[];
   emphasis?: "total";
+  /** Where the value is stored (dataset, record, field), for Export
+   * Selected. Absent for a value that has no single stored cell. */
+  source?: FieldSource;
+}
+
+export interface FieldSource {
+  datasetId: string;
+  recordId: string;
+  field: string;
 }
 
 export interface PresentationSection {
@@ -50,6 +59,9 @@ export interface PresentationSection {
   /** Enclosing source heading shown above this section when it changes
    * ("Section G - Contract Administration Data"). */
   supertitle?: string;
+  /** A grid composed here (not a staged dataset): where each of its cells
+   * is stored, by record id then field, for Export Selected. */
+  cellSources?: Record<string, Record<string, FieldSource>>;
 }
 
 export interface PresentationGroup {
@@ -164,6 +176,7 @@ function fieldItems(dataset: StagingDataset, context: string): FieldItem[] {
       fieldId: columns.fieldId ? valueText(record.cells[columns.fieldId.canonical_field]) || null : null,
       category: columns.category ? valueText(record.cells[columns.category.canonical_field]) || null : null,
       fragments: record.source_columns,
+      source: { datasetId: dataset.dataset_id, recordId: record.record_id, field: columns.value.canonical_field },
     });
   }
   return items;
@@ -186,6 +199,7 @@ function singleItems(dataset: StagingDataset, context: string): FieldItem[] {
       sourceLabel: cell.source_column?.raw_header ?? null,
       fieldId: column.canonical_field,
       category: null,
+      source: { datasetId: dataset.dataset_id, recordId: record.record_id, field: column.canonical_field },
     }));
 }
 
@@ -302,7 +316,17 @@ function invoiceCharges(
     if (!totalsRecord) return null;
     const entry = Object.entries(totalsRecord.cells).find(([key]) => key.endsWith(`.${suffix}`));
     if (!entry || isBlank(entry[1].value)) return null;
-    return { id: `totals:${suffix}`, label, cell: entry[1], context: "Charges & Totals", sourceLabel: null, fieldId: entry[0], category: null, emphasis };
+    return {
+      id: `totals:${suffix}`,
+      label,
+      cell: entry[1],
+      context: "Charges & Totals",
+      sourceLabel: null,
+      fieldId: entry[0],
+      category: null,
+      emphasis,
+      source: { datasetId: totals!.dataset_id, recordId: totalsRecord.record_id, field: entry[0] },
+    };
   };
 
   const middle: FieldItem[] = [];
@@ -319,6 +343,7 @@ function invoiceCharges(
       sourceLabel: valueText(cellEnding(record, "label")) || null,
       fieldId: amount.canonical_field,
       category: null,
+      source: { datasetId: charges!.dataset_id, recordId: record.record_id, field: amount.canonical_field },
     });
   }
   for (const item of rerouted) {
@@ -468,6 +493,7 @@ function pivotTables(items: FieldItem[]): { sections: PresentationSection[]; res
     const rowOrder: string[] = [];
     const columnOrder: string[] = [];
     const rows = new Map<string, Record<string, StagingCell>>();
+    const sources = new Map<string, Record<string, FieldSource>>();
     for (const item of cells) {
       const [rowLabel, ...columnParts] = item.label.split(" / ");
       const columnLabel = columnParts.join(" / ").trim();
@@ -476,7 +502,9 @@ function pivotTables(items: FieldItem[]): { sections: PresentationSection[]; res
         rowOrder.push(rowLabel);
       }
       if (!columnOrder.includes(columnLabel)) columnOrder.push(columnLabel);
-      rows.get(rowLabel)![`table.${index}.col.${columnOrder.indexOf(columnLabel)}`] = item.cell;
+      const columnField = `table.${index}.col.${columnOrder.indexOf(columnLabel)}`;
+      rows.get(rowLabel)![columnField] = item.cell;
+      if (item.source) sources.set(rowLabel, { ...(sources.get(rowLabel) ?? {}), [columnField]: item.source });
     }
     const rowKey = `table.${index}.row`;
     const columns: StagingColumn[] = [
@@ -514,7 +542,12 @@ function pivotTables(items: FieldItem[]): { sections: PresentationSection[]; res
       identity_fields: [rowKey],
     };
     const section = gridSection(dataset, tables.size > 1 ? `Table ${index}` : null, ["row", "rows"]);
-    if (section) sections.push(section);
+    if (section) {
+      section.cellSources = Object.fromEntries(
+        rowOrder.map((rowLabel, row) => [`${origin}:${row}`, sources.get(rowLabel) ?? {}]),
+      );
+      sections.push(section);
+    }
   }
   return { sections, rest };
 }
@@ -655,6 +688,7 @@ function contractDetailSections(dataset: StagingDataset): PresentationSection[] 
         sourceLabel: valueText(cells["contract.detail.source_label"]) || null,
         fieldId: valueText(cells["contract.detail.field_id"]) || null,
         category: null,
+        source: { datasetId: dataset.dataset_id, recordId: record.record_id, field: "contract.detail.value" },
       },
     ]);
   }
@@ -934,6 +968,7 @@ export function composePresentation(workbook: StagingWorkbook): PresentationMani
             sourceLabel: charge.label,
             fieldId: charge.cell.canonical_field,
             category: null,
+            source: { datasetId: id, recordId: record.record_id, field: charge.cell.canonical_field },
           });
         }
         return !charge;

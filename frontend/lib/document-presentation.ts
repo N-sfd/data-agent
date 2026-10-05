@@ -10,46 +10,22 @@ export type OperationalStatus =
 export interface DocumentPresentation {
   typeLabel: string;
   profileLabel: string;
+  /** Whether a staging resolution exists (else: Reprocess). */
+  staged: boolean;
   status: OperationalStatus;
   statusLabel: string;
 }
 
-/** Display type and profile from the filename and stored document type.
- * The staging profile is authoritative once a document is opened; this is
- * only the list-row hint so users do not see a contract-only repository. */
+/** Type and Profile as Data Agent resolved them — the persisted staging
+ * resolution the server returns, never a guess from the filename. A
+ * document that was never staged has neither (it can be reprocessed). */
 export function presentDocument(document: DocumentSummary): DocumentPresentation {
-  const name = document.original_filename.toLowerCase();
-  const stored = (document.document_type ?? "").toLowerCase();
-
-  let typeLabel = document.document_type?.trim() || "Document";
-  let profileLabel = "Generic";
-
-  if (name.includes("part_52") || (name.endsWith(".html") && name.includes("far"))) {
-    typeLabel = "FAR";
-    profileLabel = "FAR Part 52";
-  } else if (stored.includes("invoice") || name.includes("invoice")) {
-    typeLabel = "Invoice";
-    profileLabel = "Invoice";
-  } else if (
-    stored.includes("certificate") ||
-    name.includes("certificate") ||
-    name.includes("matric")
-  ) {
-    typeLabel = "Certificate";
-    profileLabel = "Generic";
-  } else if (
-    stored.includes("government") ||
-    stored.includes("contract") ||
-    name.includes("contract")
-  ) {
-    typeLabel = "Contract";
-    profileLabel = "Contract V3";
-  }
-
+  const staged = document.staging_status === "staged" && Boolean(document.profile_label);
   const status = operationalStatus(document);
   return {
-    typeLabel,
-    profileLabel,
+    typeLabel: staged ? (document.type_label ?? document.profile_label ?? "") : "—",
+    profileLabel: staged ? (document.profile_label ?? "") : "Not staged",
+    staged,
     status,
     statusLabel: STATUS_LABEL[status],
   };

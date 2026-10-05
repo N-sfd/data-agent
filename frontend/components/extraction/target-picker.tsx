@@ -9,6 +9,7 @@ import {
   groupTargets,
 } from "@/lib/target-groups";
 import type { DocumentTarget, TargetType } from "@/types/document";
+import { humanizeExample, humanizeMethod } from "@/lib/method-labels";
 
 export interface CustomQuickPick {
   key: string;
@@ -35,9 +36,7 @@ interface TargetPickerProps {
 function confidenceLabel(target: DocumentTarget): string {
   const pct = Math.round(target.confidence * 100);
   const page = target.page_numbers[0];
-  const method = target.discovery_method
-    ? ` · ${target.discovery_method.split("+")[0]}`
-    : "";
+  const method = target.discovery_method ? ` · ${humanizeMethod(target.discovery_method)}` : "";
   const pagePart = page ? ` · page ${page}` : "";
   return `${pct}% confidence${pagePart}${method}`;
 }
@@ -247,7 +246,7 @@ export default function TargetPicker({
                         </span>
                         {target.source_examples[0] && (
                           <span className="mt-0.5 line-clamp-1 text-[11px] text-text-muted">
-                            {target.source_examples[0]}
+                            {humanizeExample(target.source_examples[0])}
                           </span>
                         )}
                       </span>

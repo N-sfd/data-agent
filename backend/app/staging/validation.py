@@ -96,8 +96,22 @@ def value_in_evidence(value: object, evidence: str, value_type: str) -> bool:
     needle = _collapse(str(value))
     if not needle:
         return False
-    pattern = r"(?<![0-9a-z])" + re.escape(needle) + r"(?![0-9a-z])"
-    return re.search(pattern, _collapse(evidence)) is not None
+    # A substring search with the token-boundary test, rather than a regex
+    # compiled per value (values can be whole clause texts).
+    hay = _collapse(evidence)
+    start = hay.find(needle)
+    while start != -1:
+        end = start + len(needle)
+        before = hay[start - 1] if start > 0 else ""
+        after = hay[end] if end < len(hay) else ""
+        if not _is_token_char(before) and not _is_token_char(after):
+            return True
+        start = hay.find(needle, start + 1)
+    return False
+
+
+def _is_token_char(char: str) -> bool:
+    return bool(char) and ("0" <= char <= "9" or "a" <= char <= "z")
 
 
 def _type_check(value: object, value_type: str) -> ValidationCheck | None:

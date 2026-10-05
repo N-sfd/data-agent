@@ -56,6 +56,10 @@ export function locationLabel(cell: StagingCell): string {
   if (!provenance) return "—";
   if (provenance.source_page) return String(provenance.source_page);
   const locator = provenance.source_locator;
+  // XML: the element path inside the root ("Clause[3]/Title").
+  if (provenance.source_type === "xml" && locator?.dom_path) {
+    return locator.dom_path.split("/").slice(2).join("/") || locator.dom_path;
+  }
   if (provenance.source_type === "html" && locator) {
     if (locator.table_index != null) {
       const row =

@@ -234,6 +234,6 @@ def test_invoice_all_fields_is_the_union_with_matching_states():
     import csv
     import io
 
-    csv_rows = list(csv.reader(io.StringIO(client.get(f"/api/documents/{wb['document_id']}/staging-workbook/datasets/all_fields.csv").text)))
+    csv_rows = list(csv.reader(io.StringIO(client.get(f"/api/documents/{wb['document_id']}/staging-workbook/datasets/all_fields.csv").content.decode("utf-8-sig"))))
     assert csv_rows[0][:3] == ["Category", "Field", "Value"]
     assert len(csv_rows) - 1 == len(records) > 0

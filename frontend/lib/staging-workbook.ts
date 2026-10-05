@@ -20,7 +20,7 @@ export interface SourceLocator {
 export interface CellProvenance {
   source_document_id: string;
   source_filename: string;
-  source_type: "pdf" | "image" | "html" | "docx" | "xlsx" | "text" | "system";
+  source_type: "pdf" | "image" | "html" | "xml" | "docx" | "xlsx" | "text" | "system";
   source_page: number | null;
   source_bbox: [number, number, number, number] | null;
   evidence_text: string | null;
@@ -74,6 +74,9 @@ export interface StagingRecord {
   record_status: ReviewStatus | null;
   links_to_dataset: string | null;
   source_columns?: SourceColumnValue[];
+  /** Grid payload only: fields whose long text is a preview; the full
+   * value loads with the record (getStagingRecord). */
+  truncated_fields?: string[];
 }
 
 export interface StagingColumn {
@@ -88,7 +91,9 @@ export interface StagingDataset {
   dataset_id: string;
   display_name: string;
   cardinality: "single" | "repeating";
-  role: "business" | "source" | "qa";
+  /** transform: the same records shaped for a target system (e.g. Oracle
+   * Output) — never counted as extracted records again. */
+  role: "business" | "transform" | "source" | "qa";
   description: string | null;
   columns: StagingColumn[];
   records: StagingRecord[];
@@ -99,6 +104,8 @@ export interface StagingDataset {
   /** Records carry only their grid cells (no provenance); the full record
    * is fetched with getStagingRecord. */
   compact?: boolean;
+  /** Grid rows carry complete values; the grid shows long text in full. */
+  full_text?: boolean;
   /** Columns the source itself prints (kept even when empty). */
   source_columns?: string[];
 }
@@ -119,6 +126,17 @@ export interface ProfileDescriptor {
   document_families: string[];
   export_capabilities: ExportCapability[];
   oracle_mapping_capability: "planned" | "available" | "none";
+  /** The tabs this document is presented in. Empty = the generic tabs. */
+  views?: ProfileView[];
+}
+
+/** One tab of a profile's presentation; "source" also shows the
+ * document's own transcription. */
+export interface ProfileView {
+  view_id: string;
+  label: string;
+  dataset_ids: string[];
+  kind: "records" | "source";
 }
 
 export type OutcomeStatus =
@@ -169,6 +187,11 @@ export async function getStagingWorkbook(documentId: string): Promise<StagingWor
   return apiFetch<StagingWorkbook>(`/api/documents/${documentId}/staging-workbook`);
 }
 
+/** The document's profile (presentation, exports) without the workbook. */
+export async function getStagingProfile(documentId: string): Promise<ProfileDescriptor> {
+  return apiFetch<ProfileDescriptor>(`/api/documents/${documentId}/staging-profile`);
+}
+
 /** Every cell (with provenance and checks) of one record — the detail view
  * of a compact grid row. */
 export async function getStagingRecord(
@@ -197,8 +220,13 @@ export async function downloadExport(
     throw new Error(`${capability.label} failed (${response.status})`);
   }
   const disposition = response.headers.get("Content-Disposition") ?? "";
+  // The exact (UTF-8) name when the server sends one, else the ASCII one.
+  const encoded = /filename\*=UTF-8''([^;]+)/i.exec(disposition)?.[1];
   const filename =
-    /filename="([^"]+)"/.exec(disposition)?.[1] ?? `${fallbackName}.${capability.format}`;
+    (encoded ? decodeURIComponent(encoded) : undefined) ??
+    /filename="([^"]+)"/.exec(disposition)?.[1] ??
+    // "part_52.html" -> "part_52.csv", never "part_52.html.csv".
+    `${fallbackName.replace(/\.(pdf|html?|xml|docx?|xlsx?|csv|txt|rtf|json|pptx?|png|jpe?g|tiff?)$/i, "")}.${capability.format}`;
   if (capability.format === "csv") {
     downloadBlob(await response.text(), filename, "text/csv;charset=utf-8;");
     return;
@@ -254,4 +282,87 @@ export async function getRegionContext(
   return apiFetch<RegionContext>(
     `/api/documents/${documentId}/source-structure/regions/${encodeURIComponent(regionId)}`,
   );
+}
+
+export type SelectedExportFormat = "xlsx" | "csv" | "json";
+
+export const SELECTED_EXPORT_FORMATS: { format: SelectedExportFormat; label: string }[] = [
+  { format: "xlsx", label: "Excel" },
+  { format: "csv", label: "CSV" },
+  { format: "json", label: "JSON" },
+];
+
+/** Export Selected: the manifest names records and fields by id only; the
+ * server reads the values from the persisted staging workbook. */
+export async function downloadSelectedExport(
+  documentId: string,
+  datasetId: string,
+  format: SelectedExportFormat,
+  selection: { record_id: string; fields: string[] }[],
+  fallbackName: string,
+): Promise<void> {
+  await postSelectedExport(
+    `/api/documents/${documentId}/staging-workbook/datasets/${encodeURIComponent(datasetId)}/export-selected`,
+    { format, selection },
+    format,
+    `${fallbackName.replace(/\.[A-Za-z0-9]{2,5}$/, "")}_${datasetId}_selected.${format}`,
+  );
+}
+
+/** One selected value, by id: which dataset, record and field. */
+export interface SelectedFieldRef {
+  dataset_id: string;
+  record_id: string;
+  field: string;
+}
+
+/** Export Selected for label / value lists (Supplier, Charges & Totals …),
+ * whose values come from several datasets: one Section | Field | Value
+ * table, in the order given. Ids only, as for a grid. */
+export async function downloadSelectedFieldsExport(
+  documentId: string,
+  format: SelectedExportFormat,
+  fields: SelectedFieldRef[],
+  fallbackName: string,
+): Promise<void> {
+  await postSelectedExport(
+    `/api/documents/${documentId}/staging-workbook/export-selected-fields`,
+    { format, fields },
+    format,
+    `${fallbackName.replace(/\.[A-Za-z0-9]{2,5}$/, "")}_selected_fields.${format}`,
+  );
+}
+
+async function postSelectedExport(
+  url: string,
+  body: object,
+  format: SelectedExportFormat,
+  fallbackFilename: string,
+): Promise<void> {
+  const response = await fetchWithRetry(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!response.ok) {
+    let detail = `Export failed (${response.status})`;
+    try {
+      const payload = await response.json();
+      if (typeof payload?.detail === "string") detail = payload.detail;
+    } catch {
+      // keep the status message
+    }
+    throw new Error(detail);
+  }
+  const disposition = response.headers.get("Content-Disposition") ?? "";
+  const encoded = /filename\*=UTF-8''([^;]+)/i.exec(disposition)?.[1];
+  const filename =
+    (encoded ? decodeURIComponent(encoded) : undefined) ??
+    /filename="([^"]+)"/.exec(disposition)?.[1] ??
+    fallbackFilename;
+  if (format === "csv") {
+    downloadBlob(await response.text(), filename, EXPORT_MIME.csv);
+    return;
+  }
+  downloadBlob(await response.blob(), filename, EXPORT_MIME[format]);
 }

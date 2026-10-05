@@ -1,10 +1,17 @@
+const BOM = "\uFEFF";
+
 export function downloadBlob(
   content: string | Blob,
   filename: string,
   type: string,
 ) {
-  const blob =
-    content instanceof Blob ? content : new Blob([content], { type });
+  // Excel reads a CSV without a byte-order mark as Windows-1252, turning
+  // "›" into "â€º"; response.text() drops the server's mark, so add it here.
+  const text =
+    typeof content === "string" && type.startsWith("text/csv") && !content.startsWith(BOM)
+      ? `${BOM}${content}`
+      : content;
+  const blob = text instanceof Blob ? text : new Blob([text], { type });
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = url;

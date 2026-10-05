@@ -194,6 +194,20 @@ UPLOAD_TYPES: dict[str, UploadTypeSpec] = {
         ),
         signature=None,
     ),
+    ".xml": UploadTypeSpec(
+        kind="xml",
+        extension=".xml",
+        content_type="application/xml",
+        allowed_content_types=frozenset(
+            {
+                "application/xml",
+                "text/xml",
+                "text/plain",
+                "application/octet-stream",
+            }
+        ),
+        signature=None,
+    ),
     ".rtf": UploadTypeSpec(
         kind="rtf",
         extension=".rtf",
@@ -281,13 +295,13 @@ UPLOAD_TYPES: dict[str, UploadTypeSpec] = {
 }
 
 SUPPORTED_TYPE_LABEL = (
-    "PDF, DOCX, DOC, XLSX, XLS, PPTX, PPT, TXT, CSV, RTF, HTML, "
+    "PDF, DOCX, DOC, XLSX, XLS, PPTX, PPT, TXT, CSV, RTF, HTML, XML, "
     "PNG, JPG, TIFF, BMP, WEBP"
 )
 
 # Kinds whose text/tables are ingested at upload into DocumentPage rows.
 NATIVE_PAGE_KINDS = frozenset(
-    {"docx", "xlsx", "pptx", "text", "csv", "html", "rtf"}
+    {"docx", "xlsx", "pptx", "text", "csv", "html", "xml", "rtf"}
 )
 
 RASTER_EXTENSIONS = frozenset(

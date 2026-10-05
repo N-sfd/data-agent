@@ -45,6 +45,8 @@ from app.staging.models import (
     ValidationCheck,
 )
 from app.staging.profile import (
+    SOURCE_SHEET,
+    ExportSheet,
     AdapterResult,
     DatasetDefinition,
     FieldDefinition,
@@ -1387,6 +1389,14 @@ INVOICE_V1_PROFILE = StagingProfile(
         QA_REVIEW,
     ),
     adapter=adapt_invoice,
+    export_sheets=(
+        ExportSheet("Invoice Summary", ("invoice_summary",)),
+        ExportSheet("Parties", ("supplier", "customer", "reference")),
+        ExportSheet("Line Items", ("invoice_lines", "distributions")),
+        ExportSheet("Charges & Totals", ("taxes_charges", "totals")),
+        ExportSheet("Other Information", ("other_fields",)),
+        ExportSheet(SOURCE_SHEET, ()),
+    ),
     export_capabilities=(
         ExportCapability(
             capability_id="professional_excel",

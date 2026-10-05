@@ -1,17 +1,18 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { ChevronLeft, ChevronRight, Plus, Search, X } from "lucide-react";
+import { ChevronLeft, ChevronRight, MoreHorizontal, Plus, Search, X } from "lucide-react";
 
 import { ErrorState, LoadingState } from "@/components/layout/StatusState";
-import { getDocumentStatusCounts, searchDocuments } from "@/lib/documents";
+import { deleteDocuments, getDocumentStatusCounts, searchDocuments, startProcessingJob } from "@/lib/documents";
 import {
   presentDocument,
   statusMark,
   type OperationalStatus,
 } from "@/lib/document-presentation";
+import { downloadExport, getStagingProfile } from "@/lib/staging-workbook";
 import type { DocumentStatus, DocumentSummary } from "@/types/document";
 
 const PAGE_SIZE = 25;
@@ -46,6 +47,12 @@ const TONE: Record<OperationalStatus, string> = {
   processing: "text-text-secondary",
 };
 
+function updated(value: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "—";
+  return date.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
+}
+
 export default function DocumentsHome() {
   const router = useRouter();
   const params = useSearchParams();
@@ -61,7 +68,13 @@ export default function DocumentsHome() {
   const [counts, setCounts] = useState<Record<Filter, number> | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [menuFor, setMenuFor] = useState<string | null>(null);
+  const [confirm, setConfirm] = useState<DocumentSummary[] | null>(null);
+  const [notice, setNotice] = useState("");
 
+  // Counts and the list both come from the server — refreshed after any
+  // deletion or reprocess (reloadKey).
   useEffect(() => {
     let active = true;
     getDocumentStatusCounts(family || undefined)
@@ -80,7 +93,7 @@ export default function DocumentsHome() {
     return () => {
       active = false;
     };
-  }, [family]);
+  }, [family, reloadKey]);
 
   // The Documents menu links here with ?filter= / ?family=; follow it.
   const [seenFilter, setSeenFilter] = useState(urlFilter);
@@ -130,9 +143,68 @@ export default function DocumentsHome() {
 
   const from = total === 0 ? 0 : offset + 1;
   const to = Math.min(offset + PAGE_SIZE, total);
+  const pageIds = documents.map((document) => document.document_id);
+  const allSelected = pageIds.length > 0 && pageIds.every((id) => selected.has(id));
+
+  function toggle(id: string) {
+    setSelected((current) => {
+      const next = new Set(current);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  async function exportDocument(document: DocumentSummary) {
+    setMenuFor(null);
+    try {
+      const profile = await getStagingProfile(document.document_id);
+      const capability = profile.export_capabilities.find((item) => item.format === "xlsx");
+      if (!capability) throw new Error("This document has no Excel export.");
+      await downloadExport(capability, document.original_filename.replace(/\.[^.]+$/, ""));
+    } catch (err) {
+      setNotice(err instanceof Error ? err.message : "Export failed.");
+    }
+  }
+
+  async function reprocess(document: DocumentSummary) {
+    setMenuFor(null);
+    try {
+      await startProcessingJob(document.document_id);
+      setNotice(`Reprocessing ${document.original_filename}…`);
+      setReloadKey((key) => key + 1);
+    } catch (err) {
+      setNotice(err instanceof Error ? err.message : "Reprocess failed.");
+    }
+  }
+
+  async function confirmDelete() {
+    if (!confirm) return;
+    const ids = confirm.map((document) => document.document_id);
+    try {
+      const result = await deleteDocuments(ids);
+      const refused = result.not_found.length + result.forbidden.length;
+      setNotice(
+        `${result.deleted.length} document${result.deleted.length === 1 ? "" : "s"} deleted` +
+          (refused ? ` · ${refused} could not be deleted (not yours or already gone)` : "") +
+          (result.storage_errors.length ? ` · ${result.storage_errors.length} stored file(s) need cleanup` : "") +
+          ".",
+      );
+      setSelected((current) => {
+        const next = new Set(current);
+        for (const id of result.deleted) next.delete(id);
+        return next;
+      });
+      setConfirm(null);
+      setReloadKey((key) => key + 1);
+    } catch (err) {
+      setNotice(err instanceof Error ? err.message : "Delete failed.");
+      setConfirm(null);
+    }
+  }
 
   return (
-    <div className="mx-auto w-full max-w-6xl px-4 py-8 sm:px-6">
+    <div className="w-full px-4 py-8 sm:px-6" data-testid="documents-home">
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight text-foreground">
@@ -203,13 +275,39 @@ export default function DocumentsHome() {
         </div>
       </div>
 
+      {notice && (
+        <div className="mt-4 flex items-center justify-between rounded-lg border border-border bg-surface-soft px-3 py-2 text-sm text-text-secondary" role="status">
+          {notice}
+          <button type="button" onClick={() => setNotice("")} aria-label="Dismiss" className="text-text-muted hover:text-foreground">
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+      )}
+
+      {selected.size > 0 && (
+        <div className="mt-4 flex items-center gap-3 rounded-lg border border-border bg-surface px-3 py-2 text-sm" role="region" aria-label="Selection">
+          <span className="font-medium text-foreground">{selected.size} selected</span>
+          <button
+            type="button"
+            onClick={() => setConfirm(documents.filter((document) => selected.has(document.document_id)))}
+            className="rounded-md border border-danger/40 px-2.5 py-1 text-xs font-medium text-danger hover:bg-danger/5"
+          >
+            Delete
+          </button>
+          <button type="button" onClick={() => setSelected(new Set())} className="text-xs text-text-secondary hover:text-foreground">
+            Clear selection
+          </button>
+        </div>
+      )}
+
       {error && (
         <div className="mt-6">
           <ErrorState error={error} onRetry={() => setReloadKey((key) => key + 1)} />
         </div>
       )}
 
-      <div className="mt-4 overflow-hidden rounded-xl border border-border bg-surface">
+      {/* relative: keeps absolutely positioned (sr-only) labels inside the scroller. */}
+      <div className="relative mt-4 overflow-x-auto rounded-xl border border-border bg-surface">
         {loading ? (
           <LoadingState title="Loading documents..." description="Connecting to Data Agent…" />
         ) : documents.length === 0 ? (
@@ -220,30 +318,86 @@ export default function DocumentsHome() {
           <table className="min-w-full text-sm">
             <thead>
               <tr className="border-b border-border text-left text-[11px] font-medium text-text-muted">
+                <th className="w-10 px-3 py-2">
+                  <input
+                    type="checkbox"
+                    aria-label="Select all on this page"
+                    checked={allSelected}
+                    onChange={() =>
+                      setSelected((current) => {
+                        const next = new Set(current);
+                        for (const id of pageIds) {
+                          if (allSelected) next.delete(id);
+                          else next.add(id);
+                        }
+                        return next;
+                      })
+                    }
+                  />
+                </th>
                 <th className="px-3 py-2">Document</th>
                 <th className="px-3 py-2">Type</th>
                 <th className="hidden px-3 py-2 sm:table-cell">Profile</th>
                 <th className="px-3 py-2">Status</th>
+                <th className="hidden px-3 py-2 md:table-cell">Updated</th>
+                <th className="w-12 px-3 py-2">
+                  <span className="sr-only">Actions</span>
+                </th>
               </tr>
             </thead>
             <tbody>
               {documents.map((document) => {
                 const row = presentDocument(document);
+                const open = () => router.push(`/documents/${document.document_id}`);
                 return (
                   <tr
                     key={document.document_id}
-                    onClick={() => router.push(`/documents/${document.document_id}`)}
+                    onClick={open}
                     className="h-11 cursor-pointer border-b border-border/70 last:border-0 hover:bg-surface-soft"
                   >
-                    <td className="px-4 py-3 font-medium text-foreground">
+                    <td className="px-3 py-2" onClick={(event) => event.stopPropagation()}>
+                      <input
+                        type="checkbox"
+                        aria-label={`Select ${document.original_filename}`}
+                        checked={selected.has(document.document_id)}
+                        onChange={() => toggle(document.document_id)}
+                      />
+                    </td>
+                    <td className="max-w-[28rem] truncate px-3 py-2 font-medium text-foreground" title={document.original_filename}>
                       {document.original_filename}
                     </td>
-                    <td className="px-4 py-3 text-text-secondary">{row.typeLabel}</td>
-                    <td className="hidden px-4 py-3 text-text-secondary sm:table-cell">
+                    <td className="px-3 py-2 text-text-secondary">{row.typeLabel}</td>
+                    <td className={`hidden px-3 py-2 sm:table-cell ${row.staged ? "text-text-secondary" : "text-text-muted"}`}>
                       {row.profileLabel}
                     </td>
-                    <td className={`px-4 py-3 font-medium ${TONE[row.status]}`}>
+                    <td className={`px-3 py-2 font-medium ${TONE[row.status]}`}>
                       {statusMark(row.status)} {row.statusLabel}
+                    </td>
+                    <td className="hidden px-3 py-2 text-text-secondary tabular-nums md:table-cell">{updated(document.last_updated)}</td>
+                    <td className="relative px-3 py-2 text-right" onClick={(event) => event.stopPropagation()}>
+                      <button
+                        type="button"
+                        aria-label={`Actions for ${document.original_filename}`}
+                        aria-haspopup="menu"
+                        aria-expanded={menuFor === document.document_id}
+                        onClick={() => setMenuFor((current) => (current === document.document_id ? null : document.document_id))}
+                        className="rounded-md p-1 text-text-secondary hover:bg-surface-soft hover:text-foreground"
+                      >
+                        <MoreHorizontal className="h-4 w-4" />
+                      </button>
+                      {menuFor === document.document_id && (
+                        <RowMenu
+                          staged={row.staged}
+                          onClose={() => setMenuFor(null)}
+                          onOpen={open}
+                          onExport={() => void exportDocument(document)}
+                          onReprocess={() => void reprocess(document)}
+                          onDelete={() => {
+                            setMenuFor(null);
+                            setConfirm([document]);
+                          }}
+                        />
+                      )}
                     </td>
                   </tr>
                 );
@@ -280,6 +434,117 @@ export default function DocumentsHome() {
           </div>
         </div>
       )}
+
+      {confirm && <DeleteDialog documents={confirm} onCancel={() => setConfirm(null)} onConfirm={confirmDelete} />}
+    </div>
+  );
+}
+
+function RowMenu({
+  staged,
+  onClose,
+  onOpen,
+  onExport,
+  onReprocess,
+  onDelete,
+}: {
+  staged: boolean;
+  onClose: () => void;
+  onOpen: () => void;
+  onExport: () => void;
+  onReprocess: () => void;
+  onDelete: () => void;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    function onDocument(event: MouseEvent) {
+      if (ref.current && !ref.current.contains(event.target as Node)) onClose();
+    }
+    function onKey(event: KeyboardEvent) {
+      if (event.key === "Escape") onClose();
+    }
+    document.addEventListener("mousedown", onDocument);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDocument);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [onClose]);
+  const item = "block w-full px-3 py-1.5 text-left text-sm hover:bg-surface-soft";
+  return (
+    <div ref={ref} role="menu" className="absolute right-3 top-9 z-30 w-40 rounded-lg border border-border bg-surface py-1 shadow-md">
+      <button type="button" role="menuitem" className={item} onClick={onOpen}>
+        Open
+      </button>
+      <button type="button" role="menuitem" className={`${item} disabled:text-text-muted`} onClick={onExport} disabled={!staged}>
+        Export
+      </button>
+      <button type="button" role="menuitem" className={item} onClick={onReprocess}>
+        Reprocess
+      </button>
+      <div className="my-1 border-t border-border" />
+      <button type="button" role="menuitem" className={`${item} text-danger`} onClick={onDelete}>
+        Delete
+      </button>
+    </div>
+  );
+}
+
+function DeleteDialog({
+  documents,
+  onCancel,
+  onConfirm,
+}: {
+  documents: DocumentSummary[];
+  onCancel: () => void;
+  onConfirm: () => Promise<void>;
+}) {
+  const [busy, setBusy] = useState(false);
+  const cancelRef = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    cancelRef.current?.focus();
+    function onKey(event: KeyboardEvent) {
+      if (event.key === "Escape" && !busy) onCancel();
+    }
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [onCancel, busy]);
+  const many = documents.length > 1;
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 px-4" role="dialog" aria-modal="true" aria-labelledby="delete-title">
+      <div className="w-full max-w-md rounded-xl border border-border bg-surface p-5 shadow-xl">
+        <h2 id="delete-title" className="text-base font-semibold text-foreground">
+          {many ? `Delete ${documents.length} documents?` : "Delete document?"}
+        </h2>
+        <ul className="mt-2 max-h-40 space-y-0.5 overflow-y-auto text-sm font-medium text-foreground">
+          {documents.map((document) => (
+            <li key={document.document_id} className="truncate">
+              {document.original_filename}
+            </li>
+          ))}
+        </ul>
+        <p className="mt-3 text-sm leading-6 text-text-secondary">
+          This will permanently delete the source document{many ? "s" : ""}, extracted data, staging data, review
+          information, and generated artifacts.
+        </p>
+        <div className="mt-5 flex justify-end gap-2">
+          <button ref={cancelRef} type="button" onClick={onCancel} disabled={busy} className="btn-secondary px-3 py-1.5 text-sm">
+            Cancel
+          </button>
+          <button
+            type="button"
+            disabled={busy}
+            onClick={async () => {
+              setBusy(true);
+              await onConfirm();
+              setBusy(false);
+            }}
+            className="rounded-lg bg-danger px-3 py-1.5 text-sm font-medium text-white hover:bg-danger/90 disabled:opacity-60"
+          >
+            {busy ? "Deleting…" : many ? `Delete ${documents.length} Documents` : "Delete Document"}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }

@@ -10,6 +10,7 @@ user confirmed (Performance Start = "Award", the only box marked).
 
 from __future__ import annotations
 
+import io
 from collections import Counter
 from pathlib import Path
 from uuid import uuid4
@@ -468,7 +469,8 @@ def test_navy_contract_staging_workbook():
 
     # Exports carry what the tabs show, in full.
     labels = [c["label"] for c in workbook["profile"]["export_capabilities"]]
-    assert labels[:2] == ["Contract Workbook (Excel)", "Contract Workbook (JSON)"]
+    assert labels[:3] == ["Contract Workbook (Excel)", "Contract Summary (CSV)", "Contract Data (CSV)"]
+    assert "Contract Workbook (JSON)" in labels
     exported = client.get(f"/api/documents/{document_id}/staging-workbook/export.json")
     assert exported.status_code == 200
     full = {d["dataset_id"]: d for d in exported.json()["datasets"]}
@@ -477,10 +479,82 @@ def test_navy_contract_staging_workbook():
         if r["cells"]["contract.contract_clause.clause_number"]["value"] == "52.211-10"
     )
     assert clause["cells"]["contract.contract_clause.text"]["value"].startswith("The Contractor shall be required to")
-    csv_text = client.get(f"/api/documents/{document_id}/staging-workbook/datasets/line_items.csv").text
+    csv_text = client.get(f"/api/documents/{document_id}/staging-workbook/datasets/line_items.csv").content.decode("utf-8-sig")
     assert csv_text.splitlines()[0].startswith("ITEM NO,SUPPLIES/SERVICES,MAX QUANTITY,UNIT,UNIT PRICE,MAX AMOUNT")
     xlsx = client.get(f"/api/documents/{document_id}/staging-workbook/export.xlsx")
     assert xlsx.status_code == 200 and xlsx.content[:2] == b"PK"
+    from openpyxl import load_workbook
+
+    book = load_workbook(io.BytesIO(xlsx.content))
+    lines = book["LINE ITEMS"]
+    # Banner title, subtitle, spacer, then the source's own column labels.
+    assert lines["A1"].value.endswith(f"— {full['line_items']['display_name']}")
+    assert f"Source: {NAVY.name}" in lines["A2"].value
+    assert [c.value for c in lines[4]][:3] == ["ITEM NO", "SUPPLIES/SERVICES", "MAX QUANTITY"]
+    assert [c.value for c in lines[4]][-1] == "MAX AMOUNT"
+    assert "SOURCE" in book.sheetnames
+    assert lines["A1"].fill.fgColor.rgb.endswith("1F3A56") and lines.freeze_panes == "A5"
+
+    # --- the presentation: Contract Summary | Contract Data | Source ------------------------
+    assert [v["label"] for v in workbook["profile"]["views"]] == ["Contract Summary", "Contract Data", "Source"]
+    data = full["contract_data"]
+    # An SF 1442 award gets the SF 1442 columns, in this order.
+    assert [c["display_label"] for c in data["columns"]] == [
+        "Section", "Record Type", "Record ID", "Field / Title", "Description / Text",
+        "Solicitation / Contract Number", "Amendment / Modification", "Contractor / Government Party",
+        "CLIN / Item Number", "Quantity", "Unit", "Unit Price", "Amount", "Performance / Delivery",
+        "FAR / DFARS Number", "Clause / Provision Type", "Effective Date", "Alternate / Deviation",
+        "Signature / Award Information", "Source Section", "Source Reference",
+    ]
+    rows = [{c["display_label"]: c["value"] for c in r["cells"].values()} for r in data["records"]]
+    # Every detail, line item and clause appears exactly once.
+    assert sum(r["Record Type"] == "Field" for r in rows) == len(full["contract_details"]["records"])
+    assert sum(r["Section"] == "CLINs" for r in rows) == len(full["line_items"]["records"]) == 4
+    assert sum(r["Record Type"] == "Clause" for r in rows) == len(full["contract_clauses"]["records"])
+    sections = [r["Section"] for r in rows]
+    assert sections.index("Overview") < sections.index("CLINs") < sections.index("FAR Clauses")
+    solicitation = next(r for r in rows if r["Record ID"] == "solicitation_number")
+    assert solicitation["Field / Title"] == "1. SOLICITATION NO." and solicitation["Description / Text"] == "N4019221R28000019"
+    assert solicitation["Solicitation / Contract Number"] == "N4019221R28000019"
+    assert solicitation["Source Reference"] == f"{NAVY.name} · p. 1"
+    commencement = next(r for r in rows if r["Record ID"] == "52.211-10")
+    assert commencement["Section"] == "FAR Clauses" and commencement["FAR / DFARS Number"] == "52.211-10"
+    assert commencement["Clause / Provision Type"] == f"Clause · {IN_FULL_TEXT}"
+    assert commencement["Description / Text"].startswith("The Contractor shall be required to")
+    assert commencement["Source Section"] == "Section 00 70 00 - Conditions of the Contract"
+    line = next(r for r in rows if r["Section"] == "CLINs")
+    assert line["CLIN / Item Number"] == line["Record ID"] and line["Quantity"]
+    assert any(r["Contractor / Government Party"] for r in rows if r["Record Type"] == "Field")
+    # Values keep their review state and provenance.
+    first = data["records"][0]
+    assert first["cells"]["contract.data.value"]["provenance"]["source_page"] == 1
+    # The presentation never counts a record twice.
+    assert workbook["qa_summary"]["record_count"] == sum(
+        1 for d in workbook["datasets"]
+        if d["role"] == "business" and d["dataset_id"] not in ("contract_data", "contract_overview")
+        for r in d["records"] if any(c["value"] is not None for c in r["cells"].values())
+    )
+
+    summary = [{c["display_label"]: c["value"] for c in r["cells"].values()} for r in full["contract_overview"]["records"]]
+    groups = {r["Category"] for r in summary}
+    assert {"Contract Identification", "Award / Parties", "Document Statistics"} <= groups
+    assert not any(r["Field"] == "Domains" for r in summary)  # an OASIS+ concept only
+    assert {"Field": "Contract Type", "Value": "SF 1442 award"}.items() <= next(
+        r for r in summary if r["Field"] == "Contract Type"
+    ).items()
+    assert len(summary) < 60  # a dashboard, not the data
+    stats = {r["Field"]: r["Value"] for r in summary if r["Category"] == "Document Statistics"}
+    assert stats["CLINs / Line Items"] == 4
+    assert stats["FAR Clauses"] == sum(r["Section"] == "FAR Clauses" for r in rows)
+    assert any(r["Field"] == "Solicitation Number" and r["Value"] == "N4019221R28000019" for r in summary)
+
+    presented = client.get(f"/api/documents/{document_id}/staging-workbook/exports/contract_workbook.xlsx")
+    assert presented.status_code == 200
+    book = load_workbook(io.BytesIO(presented.content), read_only=True)
+    assert book.sheetnames[:3] == ["CONTRACT SUMMARY", "CONTRACT DATA", "LINE ITEMS"] and "SOURCE" in book.sheetnames
+    sheet = list(book["CONTRACT DATA"].iter_rows(values_only=True))
+    assert list(sheet[3]) == [c["display_label"] for c in data["columns"]]
+    assert len(sheet) - 4 == len(rows)
 
 
 def test_xlsx_cells_drop_control_characters_and_mark_truncation():
@@ -554,3 +628,78 @@ def test_gsa_workbook_keeps_printed_line_item_columns():
     assert len(datasets["contract_attachments"]["records"]) == 19
     assert len(datasets["contract_sections"]["records"]) > 100
     assert len({r["cells"]["contract.body_table.table_id"]["value"] for r in datasets["section_tables"]["records"]}) == 9
+
+
+
+@_requires(GSA)
+def test_oasis_contract_gets_oasis_columns():
+    pdf = fitz.open(GSA)
+    pdf.set_metadata({"subject": str(uuid4())})
+    upload = client.post("/api/documents/upload", files={"file": (GSA.name, pdf.tobytes(), "application/pdf")})
+    assert upload.status_code == 201, upload.text
+    document_id = upload.json()["document_id"]
+    assert client.post(f"/api/documents/{document_id}/extract-pages", json={"run_ocr": False}).status_code == 200
+    database = SessionLocal()
+    try:
+        document = database.get(Document, document_id)
+        rows = list(database.scalars(select(DocumentPage).where(DocumentPage.document_id == document_id)))
+        run_and_persist_v3_extraction(database=database, document=document, pages=rows)
+        resolve_and_persist_profile(database, document)
+    finally:
+        database.close()
+
+    full = {d["dataset_id"]: d for d in client.get(f"/api/documents/{document_id}/staging-workbook/export.json").json()["datasets"]}
+    data = full["contract_data"]
+    assert [c["display_label"] for c in data["columns"]] == [
+        "Section", "Record Type", "Record ID", "Title", "Description / Text", "Domain", "NAICS / PSC", "CLIN",
+        "Contract / Pricing Type", "Labor / Rate Information", "Requirement / Deliverable", "Period / Frequency",
+        "FAR / GSAR Number", "Incorporation Type", "Effective Date", "Alternate / Deviation", "Attachment",
+        "Source Section", "Source Reference",
+    ]
+    rows = [{c["display_label"]: c["value"] for c in r["cells"].values()} for r in data["records"]]
+    assert any(r["Domain"] for r in rows)
+    attachments = [r for r in rows if r["Section"] == "Attachments"]
+    assert attachments and all(r["Attachment"] for r in attachments)
+    clauses = [r for r in rows if r["Record Type"] == "Clause"]
+    assert clauses and all(r["FAR / GSAR Number"] == r["Record ID"] for r in clauses)
+    summary = {
+        r["cells"]["contract.overview.label"]["value"]: r["cells"]["contract.overview.value"]["value"]
+        for r in full["contract_overview"]["records"]
+    }
+    assert summary["Contract Type"] == "OASIS+ IDIQ contract"
+    assert summary.get("Domains")
+
+
+def test_contract_subtype_and_column_sets():
+    from app.staging.profiles.contract_presentation import COLUMN_SETS, contract_subtype
+
+    assert contract_subtype("STANDARD FORM 1442 (REV. 8/2014)") == "sf1442"
+    assert contract_subtype("OASIS+ Unrestricted Small Business") == "oasis"
+    assert contract_subtype("SOLICITATION, OFFER, AND AWARD") == "dod"
+    assert len(COLUMN_SETS["dod"]) == 17 and len(COLUMN_SETS["oasis"]) == 19 and len(COLUMN_SETS["sf1442"]) == 21
+    for columns in COLUMN_SETS.values():
+        assert [label for _, label in columns][:3] == ["Section", "Record Type", "Record ID"]
+        assert [label for _, label in columns][-2:] == ["Source Section", "Source Reference"]
+
+
+def test_download_header_survives_any_filename():
+    from app.api.downloads import attachment_header
+
+    header = attachment_header("Contract (27).pdf → SF1442 Award.xlsx")
+    header.encode("latin-1")  # must be a valid HTTP header
+    assert 'filename="Contract (27).pdf _ SF1442 Award.xlsx"' in header
+    assert "filename*=UTF-8''Contract%20%2827%29.pdf%20%E2%86%92%20SF1442%20Award.xlsx" in header
+
+
+def test_pricing_types_are_tagged_except_on_clauses():
+    from app.staging.profile import RawRecord
+    from app.staging.profiles.contract_presentation import _enrich
+
+    section = RawRecord(record_id="s", values={"section": "Contract Sections", "record_type": "Section", "record_id": "H.3",
+                                                "title": "Contract Types", "value": "Task orders may be Firm-Fixed-Price or Time and Materials."})
+    clause = RawRecord(record_id="c", values={"section": "FAR Clauses", "record_type": "Clause", "record_id": "52.246-2",
+                                               "title": "Inspection of Supplies-Fixed-Price", "value": None})
+    _enrich(section)
+    _enrich(clause)
+    assert section.values["pricing_type"] == "Firm-Fixed-Price; Time-and-Materials"
+    assert not clause.values.get("pricing_type") and clause.values["clause_number"] == "52.246-2"

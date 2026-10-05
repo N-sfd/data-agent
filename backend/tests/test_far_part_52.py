@@ -8,6 +8,7 @@ present locally (they are not required at runtime).
 
 from __future__ import annotations
 
+import codecs
 import io
 import json
 import re
@@ -251,27 +252,41 @@ def test_embedded_references_are_an_index_not_records():
     assert "52.219-9" not in records and "52.101" not in records
 
 
-def test_business_export_columns_do_not_invent_dates_or_attributes():
+def test_business_export_is_the_clause_library_layout_with_type_and_split_text():
     rows = build_canonical(extract_far(far_html()), "doc")
     by_key = {r.clause_key: views.business_row(r) for r in rows}
     assert list(views.BUSINESS_COLUMNS) == [
-        "Date Published", "Number", "Title", "Display Name", "Provision", "Clause",
-        "Clause Type", "Type", "Description", "Text", "Intent", "Start Date",
-        "Attribute Category", "Attribute 1", "Source Reference",
+        "Action", "Date Published", "Number", "Title", "Display Name", "Type", "Intent", "Language",
+        "Clause Type", "Status", "Description", "Provision Yn", "Global Yn", "Lock Text Yn",
+        "Insert By Reference", "Text", "Provision Text", "Clause Text", "Start Date",
+        "Attribute Category", "Attribute 1", "Source XML", "Source Reference",
     ]
     basic = by_key["FAR-52.204-3"]
     assert basic["Number"] == "52.204-3"
-    assert basic["Title"]
+    assert basic["Title"].startswith("FAR 52.204-3 - ")
+    assert basic["Type"] == "Provision" and basic["Provision Yn"] == "Y"
     assert basic["Text"] and "Taxpayer" in basic["Text"]
-    assert basic["Intent"] is None and basic["Start Date"] is None
-    assert basic["Attribute Category"] is None and basic["Attribute 1"] is None
+    # The prescription is the Description, not the start of the text.
+    assert basic["Description"].startswith("As prescribed")
+    assert not basic["Text"].startswith("As prescribed")
+    assert basic["Provision Text"] == basic["Text"] and basic["Clause Text"] is None
+    assert basic["Action"] == "Sync" and basic["Clause Type"] == "STANDARD" and basic["Attribute 1"] == "52.204-3"
+    assert basic["Date Published"] and basic["Start Date"] == basic["Date Published"]
+    assert basic["Source XML"] is None
     assert basic["Source Reference"] and "page" not in basic["Source Reference"].lower()
-    assert by_key["FAR-52.203-1"]["Type"] == "Reserved"
-    assert by_key["FAR-52.203-1"]["Clause Type"] == "Reserved"
-    assert by_key["FAR-52.203-1"]["Clause"] is None
+    reserved = by_key["FAR-52.203-1"]
+    assert reserved["Type"] == "Reserved"
+    # Records that are not loaded carry no library defaults.
+    assert reserved["Action"] is None and reserved["Clause Type"] is None and reserved["Provision Yn"] is None
     alternate = by_key["FAR-52.215-1-ALT-I"]
-    assert alternate["Clause Type"] == "Alternate" and alternate["Clause"] is None
+    assert alternate["Type"] in ("Clause", "Provision") and alternate["Title"].endswith("Alternate I")
+    assert alternate["Action"] is None
+    # Part and subpart instructions (52.100 ...) are Sections with their text.
+    section = by_key["FAR-52.100"]
+    assert section["Type"] == "Section" and section["Text"]
+    assert section["Provision Text"] is None and section["Clause Text"] is None
     assert all(views.business_row(r)["Source Reference"] for r in rows)
+    assert views.published_date("Sep 2023") == "2023-09-01" and views.published_date("n/a") is None
 
 
 def test_canonical_model_keys_types_and_load_eligibility():
@@ -326,6 +341,49 @@ def test_resolution_uses_structure_never_the_filename():
     assert preparation["profile_id"] != "far_part_52"
 
 
+def far_pdf() -> bytes:
+    """A policy Part (not 52) printed from acquisition.gov: contents, then
+    "Parent topic", then each heading above its own text."""
+
+    import fitz
+
+    contents, body = [], []
+    for s in range(1, 4):
+        subpart = f"Subpart 46.{s} - Subpart {s} Title"
+        contents.append(subpart)
+        body.append(subpart)
+        for n in range(1, 5):
+            heading = f"46.{s}0{n} Section {s}{n} title."
+            contents.append(heading)
+            body += [heading, f"(a) Text of section {s}{n} cites 52.246-2 and 46.10{n}."]
+    paragraphs = ["Part 46 - Quality Assurance", *contents, "Parent topic: Federal Acquisition Regulation", *body]
+    document = fitz.open()
+    page, y = document.new_page(), 40
+    for text in paragraphs:
+        if y > 760:
+            page, y = document.new_page(), 40
+        page.insert_text((50, y), text, fontsize=9)
+        y += 22
+    return document.tobytes()
+
+
+def test_far_part_pdf_resolves_to_the_far_profile_with_records():
+    response = client.post("/api/documents/upload", files={"file": ("part-46.pdf", far_pdf(), "application/pdf")})
+    assert response.status_code == 201, response.text
+    document_id = response.json()["document_id"]
+    assert client.post(f"/api/documents/{document_id}/extract-pages", json={"run_ocr": False}).status_code == 200
+    assert _prepare(document_id)["profile_id"] == "far_part_52"
+    workbook = _workbook(document_id)
+    records = next(d for d in workbook["datasets"] if d["dataset_id"] == "far_records")["records"]
+    numbers = [r["cells"]["far.record.far_number"]["value"] for r in records]
+    assert numbers[:3] == ["Subpart 46.1", "46.101", "46.102"] and len(numbers) == 15
+    qa = {
+        r["cells"]["qa.check"]["value"]: r["cells"]["qa.result"]["value"]
+        for r in next(d for d in workbook["datasets"] if d["dataset_id"] == "qa_review")["records"]
+    }
+    assert qa["Stable unique clause keys"] == "PASS"
+
+
 def test_existing_profiles_keep_their_capabilities():
     for key in ("contract_v3", "invoice", "generic_business_document"):
         profile = registry.latest(key)
@@ -362,43 +420,99 @@ def _workbook(document_id: str) -> dict:
 
 def test_workbook_tabs_and_states(far_document):
     workbook = _workbook(far_document)
-    assert workbook["profile"]["profile_id"] == "far_part_52"
-    assert [d["display_name"] for d in workbook["datasets"]] == [
-        "Overview", "FAR Sections", "Clauses & Provisions", "Alternates", "FAR References",
-        "Canonical Model", "Business Export", "Oracle Output Map", "All Fields", "Source Documents", "QA Review",
+    profile = workbook["profile"]
+    assert profile["profile_id"] == "far_part_52"
+    # Three business-facing tabs; QA sits with the source.
+    assert [(v["label"], v["dataset_ids"]) for v in profile["views"]] == [
+        ("FAR Clauses & Provisions", ["far_records"]),
+        ("Oracle Output", ["far_oracle_output"]),
+        ("Source", ["far_source", "qa_review"]),
     ]
+    assert [d["dataset_id"] for d in workbook["datasets"]] == ["far_records", "far_oracle_output", "far_source", "qa_review"]
     assert workbook["qa_summary"]["needs_review"] == 0 and workbook["qa_summary"]["verified"] > 0
-    clauses = next(d for d in workbook["datasets"] if d["dataset_id"] == "far_clauses")
-    assert clauses["compact"] is True
-    assert clauses["grid_fields"] == [
-        "far.clause.far_number", "far.clause.title", "far.clause.official_heading", "far.clause.revision_date",
-        "far.clause.clause_type",
-    ]
-    # Grid rows carry values and states only — no long text, no provenance.
-    row = clauses["records"][0]
-    assert "far.clause.section_text" not in row["cells"]
+    records = next(d for d in workbook["datasets"] if d["dataset_id"] == "far_records")
+    # The Part 52 columns in order; the FAR_REGULATION fields other Parts
+    # use (Part / Subpart titles, Part 53 forms) are blank here.
+    labels = [c["display_label"] for c in records["columns"]]
+    assert [label for label in labels if label in views.FAR_RECORD_COLUMNS] == list(views.FAR_RECORD_COLUMNS)
+    assert records["display_name"] == "FAR Clauses & Provisions"
+    assert records["compact"] is True
+    # Grid rows carry values and states only — no provenance.
+    row = records["records"][0]
     assert all(cell["provenance"] is None for cell in row["cells"].values())
-    output_map = next(d for d in workbook["datasets"] if d["dataset_id"] == "far_oracle_output_map")
-    assert output_map["display_name"] == "Oracle Output Map" and len(output_map["records"]) == 12
-    assert "not a final Oracle import file" in output_map["description"]
+    oracle = next(d for d in workbook["datasets"] if d["dataset_id"] == "far_oracle_output")
+    assert oracle["role"] == "transform"
+    assert [c["display_label"] for c in oracle["columns"]] == list(views.ORACLE_OUTPUT_COLUMNS)
+    # The Oracle shape is a view of the same records, not more records.
+    assert workbook["outcome"]["record_count"] == len(records["records"])
+
+
+def _far_rows(workbook: dict) -> dict[str, dict]:
+    records = next(d for d in workbook["datasets"] if d["dataset_id"] == "far_records")
+    rows = {}
+    for record in records["records"]:
+        values = {cell["display_label"]: cell["value"] for cell in record["cells"].values()}
+        rows[" ".join(v for v in (values["FAR Number"], values["Alternate"]) if v)] = values
+    return rows
+
+
+def test_far_clauses_and_provisions_follow_far_semantics(far_document):
+    rows = _far_rows(_workbook(far_document))
+    taxpayer = rows["52.204-3"]
+    assert taxpayer["Title"] == "Taxpayer Identification"
+    assert taxpayer["Record Type"] == "Provision" and taxpayer["Record Status"] == "Active"
+    assert (taxpayer["FAR Part"], taxpayer["FAR Subpart"], taxpayer["FAR Section"]) == ("Part 52", "Subpart 52.2", "52.204")
+    assert taxpayer["Revision Date"] == "Oct 1998"
+    assert taxpayer["Description"] == "Taxpayer Identification (Oct 1998)"
+    assert taxpayer["Prescription / Usage"].startswith("As prescribed")
+    assert taxpayer["Prescription Reference"] == "4.905"
+    assert taxpayer["Cross References"] == "52.204-6"
+    # A provision's body only in Provision Text, without its prescription.
+    assert taxpayer["Provision Text"].startswith("Taxpayer Identification (Oct 1998)")
+    assert taxpayer["Clause Text"] is None
+    assert taxpayer["Source Reference"].startswith("far_part_52_sample.html › Subpart 52.2")
+    assert taxpayer["Source Reference"].endswith("#FAR_52_204_3")
+
+    clause = rows["52.212-5"]
+    assert clause["Record Type"] == "Clause" and clause["Provision Text"] is None
+    assert clause["Prescription Reference"] == "9.999(a)"
+    assert "Contract Terms and Conditions" in clause["Clause Text"]
+
+    # Alternates keep their FAR Number and their parent's type.
+    alt = rows["52.215-1 Alternate I"]
+    assert alt["Record Type"] == "Provision" and alt["Title"] == rows["52.215-1"]["Title"]
+    assert alt["Prescription Reference"] == "15.209(a)(1)"
+    assert alt["Provision Text"] and alt["Clause Text"] is None
+    # Its heading and instruction have their own columns; the body follows them.
+    assert alt["Description"].startswith("Alternate I")
+    assert alt["Provision Text"].startswith("(f)(4) The Government intends")
+    assert rows["52.215-1 Alternate II"]["Prescription Reference"] == "15.209(a)(2)"
+
+    # Structural records: no body columns, no invented statuses.
+    # A Part 52 section is classified by its regulatory function.
+    assert rows["52.000"]["Record Type"] == "Scope"
+    assert rows["52.000"]["Provision Text"] is None and rows["52.000"]["Clause Text"] is None
+    assert rows["52.203-1"]["Record Status"] == "Reserved"
+    assert rows["Subpart 52.1"]["Record Type"] == "Subpart"
+    assert all(r["Record Status"] in ("Active", "Reserved") for r in rows.values())
 
 
 def test_record_details_carry_text_and_dom_provenance(far_document):
     response = client.get(
-        f"/api/documents/{far_document}/staging-workbook/datasets/far_clauses/records/far_clauses:FAR-52.204-3"
+        f"/api/documents/{far_document}/staging-workbook/datasets/far_records/records/far_records:FAR-52.204-3"
     )
     assert response.status_code == 200, response.text
     cells = response.json()["cells"]
-    text = cells["far.clause.section_text"]["value"]
-    assert "(A) Deeper item." in text and text.startswith("As prescribed in 4.905")
-    heading = cells["far.clause.official_heading"]
+    text = cells["far.record.provision_text"]["value"]
+    assert "(A) Deeper item." in text
+    heading = cells["far.record.description"]
     assert heading["review_status"] == "Verified"
     locator = heading["provenance"]["source_locator"]
     assert locator["element_id"] == "FAR_52_204_3" and locator["dom_path"].startswith("/html/body")
     assert locator["section_path"][-1] == "52.204-3 Taxpayer Identification."
     # HTML has no pages and no coordinates — none are invented.
     assert heading["provenance"]["source_page"] is None and heading["provenance"]["source_bbox"] is None
-    missing = client.get(f"/api/documents/{far_document}/staging-workbook/datasets/far_clauses/records/nope")
+    missing = client.get(f"/api/documents/{far_document}/staging-workbook/datasets/far_records/records/nope")
     assert missing.status_code == 404
 
 
@@ -409,31 +523,54 @@ def test_exports_workbook_csv_and_json(far_document):
     xlsx = client.get(f"{base}/far_workbook.xlsx")
     assert xlsx.status_code == 200
     wb = load_workbook(io.BytesIO(xlsx.content), read_only=True)
-    assert wb.sheetnames == [
-        "01_FAR_STAGING", "02_ORACLE_MAPPING", "03_VALIDATION", "99_LONG_TEXT",
-        "04_STRUCTURED_FAR", "05_EXTRACTION_GUIDE", "06_CANONICAL_MODEL", "07_ORACLE_OUTPUT_MAP",
-        "08_BUSINESS_EXPORT",
-    ]
-    staging = list(wb["01_FAR_STAGING"].iter_rows(values_only=True))
-    assert list(staging[3]) == list(views.STAGING_COLUMNS)
-    assert list(staging[3])[-2:] == ["Paragraph", "Subparagraph"]
-    canonical = list(wb["06_CANONICAL_MODEL"].iter_rows(values_only=True))
-    assert list(canonical[3]) == list(views.CANONICAL_COLUMNS)
-    business = list(wb["08_BUSINESS_EXPORT"].iter_rows(values_only=True))
-    assert list(business[3]) == list(views.BUSINESS_COLUMNS)
-    keys = [r[1] for r in canonical[4:]]
-    assert "FAR-52.215-1-ALT-II" in keys and "FAR-Subpart_52.2" in keys
-    output_map = list(wb["07_ORACLE_OUTPUT_MAP"].iter_rows(values_only=True))
-    assert output_map[0][0] == "Oracle Output Mapping — Adapter Specification"
-    statuses = {r[7] for r in output_map[4:] if r[0]}
-    assert statuses == {"READY", "REQUIRES ORACLE TEMPLATE", "PENDING TARGET TEMPLATE"}
+    # LONG TEXT only exists when a value is longer than an Excel cell.
+    assert wb.sheetnames == ["FAR CLAUSES & PROVISIONS", "ORACLE OUTPUT", "SOURCE"]
+    far = list(wb["FAR CLAUSES & PROVISIONS"].iter_rows(values_only=True))
+    assert far[0][0] == "FAR Part 52 — Clauses & Provisions"
+    assert list(far[3]) == list(views.FAR_RECORD_COLUMNS)
+    oracle = list(wb["ORACLE OUTPUT"].iter_rows(values_only=True))
+    assert list(oracle[3]) == list(views.ORACLE_OUTPUT_COLUMNS)
+    source = {r[0]: r[1] for r in list(wb["SOURCE"].iter_rows(values_only=True))[4:]}
+    assert source["Source Document"] == "far_part_52_sample.html"
+    assert source["Alternates (each follows its basic record)"] >= 2
+    assert source["Records (incl. alternates)"] == len(far) - 4
 
-    csv = client.get(f"{base}/06_CANONICAL_MODEL.csv")
-    assert csv.status_code == 200 and csv.text.startswith("Source Sequence ID,Clause Key")
+    technical = load_workbook(io.BytesIO(client.get(f"{base}/far_transformation.xlsx").content), read_only=True)
+    assert technical.sheetnames[0] == "01_FAR_STAGING" and "08_BUSINESS_EXPORT" in technical.sheetnames
+
+    csv = client.get(f"{base}/far_clauses_provisions.csv")
+    # UTF-8 with a byte-order mark, so Excel does not show "›" as "â€º".
+    assert csv.status_code == 200 and csv.content.startswith(codecs.BOM_UTF8)
+    assert csv.headers["content-type"] == "text/csv; charset=utf-8"
+    assert csv.content.decode("utf-8-sig").startswith("FAR Number,Title,Record Type,FAR Part")
+    assert client.get(f"{base}/oracle_output.csv").content.decode("utf-8-sig").startswith("Action,Date Published,Number")
+    assert client.get(f"{base}/06_CANONICAL_MODEL.csv").content.decode("utf-8-sig").startswith("Source Sequence ID,Clause Key")
     payload = json.loads(client.get(f"{base}/far_canonical.json").text)
     assert payload["profile"] == "far_part_52@1"
     assert {r["Clause Key"] for r in payload["canonical_model"]} >= {"FAR-52.204-3", "FAR-52.215-1-ALT-I"}
+    assert len(payload["far_clauses_provisions"]) == len(payload["canonical_model"])
     assert client.get(f"{base}/unknown.bin").status_code == 404
+
+
+def test_long_text_sheet_appears_only_when_a_cell_overflows():
+    from openpyxl import load_workbook
+
+    from app.far.exports import build_far_workbook
+    from app.models.document_far_record import DocumentFarRecord
+
+    body = "As prescribed in 1.101, insert the following clause:\nLong Clause (Jan 2020)\n" + "x" * 40_000
+    row = DocumentFarRecord(
+        clause_key="FAR-52.299-1", basic_clause_key="FAR-52.299-1", source_sequence_id="1", source_order=1,
+        content_type="CLAUSE_OR_PROVISION", load_eligible=True, far_number="52.299-1", title="Long Clause",
+        clause_type="Clause", prescription="As prescribed in 1.101, insert the following clause:",
+        source_text=body, embedded_references=[], provenance_json={}, issues=[], extractor_version=1,
+    )
+    wb = load_workbook(io.BytesIO(build_far_workbook([row], {}, "long.html")), read_only=True)
+    assert wb.sheetnames[-1] == "LONG TEXT"
+    cell = list(wb["FAR CLAUSES & PROVISIONS"].iter_rows(values_only=True))[4][14]
+    assert "continued in LONG TEXT" in cell
+    parts = [p for p in list(wb["LONG TEXT"].iter_rows(values_only=True))[4:] if p[0] == "FAR CLAUSES & PROVISIONS"]
+    assert [p[3] for p in parts] == ["1 of 2", "2 of 2"] and parts[0][1:3] == ("52.299-1", "Clause Text")
 
 
 def test_other_profiles_have_no_profile_exports():
@@ -583,3 +720,63 @@ def test_reference_source_ambiguities_are_needs_review_not_verified():
     assert not _prescription_reference_check(multi.prescription_reference, multi.prescription)[0].passed
     assert not _clause_type_check(by_number["52.209-1"])[0].passed  # "insert the following clause" / "(End of provision)"
     assert _clause_type_check(by_number["52.204-6"])[0].passed
+
+
+def test_grid_carries_a_text_preview_and_names_the_truncated_fields():
+    from app.staging.models import StagingCell, StagingDataset, StagingRecord
+    from app.staging.service import GRID_TEXT_PREVIEW, compact_for_grid
+
+    long_text = "word " * 400
+    record = StagingRecord(
+        record_id="r1",
+        cells={
+            "far.business.text": StagingCell(canonical_field="far.business.text", display_label="Text", value=long_text),
+            "far.business.number": StagingCell(canonical_field="far.business.number", display_label="Number", value="52.101"),
+        },
+    )
+    dataset = StagingDataset(
+        dataset_id="far_business", display_name="Business Export", cardinality="repeating", columns=[],
+        records=[record], grid_fields=["far.business.text", "far.business.number"],
+    )
+
+    class _Workbook:
+        datasets = [dataset]
+
+    compact_for_grid(_Workbook())
+    cell = dataset.records[0].cells["far.business.text"]
+    assert len(cell.value) <= GRID_TEXT_PREVIEW + 1 and cell.value.endswith("…")
+    assert dataset.records[0].truncated_fields == ["far.business.text"]
+    assert dataset.records[0].cells["far.business.number"].value == "52.101"
+    assert "truncated_fields" in dataset.records[0].model_dump()
+    plain = StagingRecord(record_id="r2", cells={})
+    assert "truncated_fields" not in plain.model_dump()
+
+
+def test_full_text_grid_keeps_complete_values():
+    from app.staging.models import StagingCell, StagingDataset, StagingRecord
+    from app.staging.service import compact_for_grid
+
+    long_text = "word " * 400
+    record = StagingRecord(
+        record_id="r1",
+        cells={"far.record.clause_text": StagingCell(canonical_field="far.record.clause_text", display_label="Clause Text", value=long_text)},
+    )
+    dataset = StagingDataset(
+        dataset_id="far_records", display_name="FAR Clauses & Provisions", cardinality="repeating", columns=[],
+        records=[record], grid_fields=["far.record.clause_text"], full_text=True,
+    )
+
+    class _Workbook:
+        datasets = [dataset]
+
+    compact_for_grid(_Workbook())
+    assert dataset.records[0].cells["far.record.clause_text"].value == long_text
+    assert dataset.records[0].truncated_fields == []
+
+
+def test_far_records_tab_serves_complete_texts(far_document):
+    records = next(d for d in _workbook(far_document)["datasets"] if d["dataset_id"] == "far_records")
+    assert records["full_text"] is True
+    taxpayer = next(r for r in records["records"] if r["record_id"] == "far_records:FAR-52.204-3")
+    assert "truncated_fields" not in taxpayer
+    assert taxpayer["cells"]["far.record.provision_text"]["value"].rstrip().endswith("(End of provision)")

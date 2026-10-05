@@ -64,6 +64,12 @@ export interface DocumentSummary {
   relationship?: string | null;
   repository_status?: RepositoryStatus;
   source_status?: "available" | "missing";
+  /** The persisted staging resolution — what the document is listed as.
+   * Null until the document has been staged (offer Reprocess). */
+  profile_id?: string | null;
+  profile_label?: string | null;
+  type_label?: string | null;
+  staging_status?: "staged" | "not_staged";
 }
 
 export interface HierarchyNode {

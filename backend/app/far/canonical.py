@@ -3,6 +3,7 @@ document (document_far_records).
 
     Content Type          Load Eligible   Key
     CLAUSE_OR_PROVISION   YES             FAR-52.204-3
+    SECTION               NO              FAR-37.101   (a policy Part's section text)
     RESERVED              NO              FAR-52.203-1
     SUBPART               NO              FAR-Subpart_52.1
     ALTERNATE             NO              FAR-52.215-1-ALT-I   (Basic Clause Key FAR-52.215-1)
@@ -17,12 +18,14 @@ reproduce the source record.
 from __future__ import annotations
 
 import time
+from pathlib import Path
 
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
-from app.far.dom import EXTRACTOR_VERSION, FarExtraction, FarSourceRecord, extract_far
+from app.far.dom import EXTRACTOR_VERSION, FarExtraction, FarSourceRecord, extract_far, part_number
+from app.far.text import extract_far_text
 from app.models.document import Document
 from app.models.document_far_record import DocumentFarRecord
 from app.services.document_storage import ensure_local_copy
@@ -32,10 +35,12 @@ CLAUSE_OR_PROVISION = "CLAUSE_OR_PROVISION"
 RESERVED = "RESERVED"
 SUBPART = "SUBPART"
 ALTERNATE = "ALTERNATE"
+SECTION = "SECTION"
 
 NOTE_RESERVED = "Reserved source record; retain for traceability, exclude from load."
 NOTE_EMBEDDED = "Contains embedded FAR cross-references; do not create master rows from references."
 NOTE_STRUCTURAL = "Structural heading only."
+NOTE_SECTION = "Regulation section text (not a clause or provision); retain for reference, exclude from clause load."
 NOTE_ALTERNATE = (
     "Structural alternate of {basic}; linked by Basic Clause Key. Exclude from load until the "
     "Oracle alternate/variant template is bound."
@@ -68,6 +73,8 @@ def build_canonical(extraction: FarExtraction, document_id: str) -> list[Documen
             content_type, load, notes = SUBPART, False, [NOTE_STRUCTURAL]
         elif record.kind == "reserved":
             content_type, load, notes = RESERVED, False, [NOTE_RESERVED]
+        elif part_number(record.far_number) != "52" and record.clause_type is None:
+            content_type, load, notes = SECTION, False, [NOTE_SECTION]
         else:
             content_type, load, notes = CLAUSE_OR_PROVISION, True, []
         if record.basic_embedded_references:
@@ -95,6 +102,8 @@ def build_canonical(extraction: FarExtraction, document_id: str) -> list[Documen
             # alternates): the split is lossless when the parts add up.
             "grouped_nonspace_chars": len("".join(record.grouped_text.split())),
             "narrative_alternate_mentions": record.narrative_alternate_mentions,
+            "page": record.page,
+            "end_page": record.end_page,
         }
         rows.append(
             DocumentFarRecord(
@@ -174,6 +183,7 @@ def build_canonical(extraction: FarExtraction, document_id: str) -> list[Documen
                         "record_dom_path": record.dom_path,
                         "record_element_id": record.element_id,
                         "reserved_alternate": alternate.reserved,
+                        "page": int(alternate.dom_path.split()[-1]) if alternate.dom_path.startswith("page ") else None,
                     },
                     issues=[],
                 )
@@ -185,18 +195,36 @@ def _source_bytes(document: Document) -> bytes:
     return ensure_local_copy(get_settings(), stored_filename=document.stored_filename).read_bytes()
 
 
+def is_pdf_source(document: Document) -> bool:
+    return Path(document.stored_filename or document.original_filename or "").suffix.lower() == ".pdf"
+
+
+def page_texts(database: Session, document: Document) -> list[tuple[int, str]]:
+    from app.models.document_page import DocumentPage
+
+    return [
+        (page.page_number, page.final_text or "")
+        for page in database.scalars(
+            select(DocumentPage).where(DocumentPage.document_id == document.id).order_by(DocumentPage.page_number)
+        )
+    ]
+
+
 def materialize_far_records(database: Session, document: Document) -> dict:
     """(Re)builds the document's canonical FAR records; commits. Returns
-    the run summary also stored in the document's ingestion provenance."""
+    the run summary also stored in the document's ingestion provenance.
+    HTML is read through its DOM; a PDF through its stored page text."""
 
     started = time.perf_counter()
-    extraction = extract_far(_source_bytes(document))
+    pdf = is_pdf_source(document)
+    extraction = extract_far_text(page_texts(database, document)) if pdf else extract_far(_source_bytes(document))
     parsed_ms = int((time.perf_counter() - started) * 1000)
     rows = build_canonical(extraction, document.id)
     database.execute(delete(DocumentFarRecord).where(DocumentFarRecord.document_id == document.id))
     database.add_all(rows)
     summary = {
         "extractor_version": EXTRACTOR_VERSION,
+        "source_format": "pdf" if pdf else "html",
         "part_heading": extraction.part_heading,
         "articles": extraction.article_count,
         "records": len(extraction.records),

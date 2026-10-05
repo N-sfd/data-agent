@@ -30,6 +30,7 @@ from fastapi import APIRouter, HTTPException, Response
 from fastapi import Depends
 from sqlalchemy.orm import Session
 
+from app.api.downloads import attachment_header
 from app.core.auth import ActorContext, require_permission
 from app.database.dependencies import get_database
 from app.schemas.v3_document import NormalizedV3Document
@@ -73,7 +74,7 @@ async def get_v3_dataset_csv(
         content=csv_text,
         media_type="text/csv",
         headers={
-            "Content-Disposition": f'attachment; filename="{dataset}.csv"'
+            "Content-Disposition": attachment_header(f"{dataset}.csv")
         },
     )
 
@@ -94,5 +95,5 @@ async def get_v3_export_xlsx(
     return Response(
         content=workbook_bytes,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        headers={"Content-Disposition": attachment_header(filename)},
     )

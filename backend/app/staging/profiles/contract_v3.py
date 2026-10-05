@@ -15,14 +15,26 @@ from app.contract_structure.forms import FINANCIAL
 from app.models.document import Document
 from app.schemas.v3_document import NormalizedV3Document, RowProvenance
 from app.services.v3_reader import get_normalized_v3_document
-from app.staging.models import ExportCapability, ValidationCheck
+from app.staging.models import ExportCapability, ProfileView, ValidationCheck
 from app.staging.profile import (
+    SOURCE_SHEET,
+    ExportSheet,
     AdapterResult,
     DatasetDefinition,
+    ExportArtifact,
     FieldDefinition,
     FieldRule,
     RawRecord,
     StagingProfile,
+)
+from app.staging.profiles.contract_presentation import (
+    CONTRACT_DATA,
+    CONTRACT_OVERVIEW,
+    SUBTYPE_LABELS,
+    column_labels,
+    contract_data_records,
+    contract_overview_records,
+    contract_subtype,
 )
 from app.source_structure.ocr_geometry import PageGeometry
 from app.staging.provenance import make_provenance
@@ -889,6 +901,21 @@ def _clause_records(document: Document, structure: dict) -> tuple[list[RawRecord
     return clauses, transforms
 
 
+def _opening_text(database: Session, document: Document, pages: int = 4) -> str:
+    """The first pages' text — where the form number / program is named."""
+
+    from sqlalchemy import select
+
+    from app.models.document_page import DocumentPage
+
+    texts = database.scalars(
+        select(DocumentPage.final_text)
+        .where(DocumentPage.document_id == document.id, DocumentPage.page_number <= pages)
+        .order_by(DocumentPage.page_number)
+    )
+    return "\n".join(text or "" for text in texts)
+
+
 def adapt_contract_v3(database: Session, document: Document) -> AdapterResult:
     doc = get_normalized_v3_document(database, document.id)
     geometry = PageGeometry(database, document.id)
@@ -953,10 +980,23 @@ def adapt_contract_v3(database: Session, document: Document) -> AdapterResult:
             for i, row in enumerate(doc.qa_review)
         ],
     }
+    # The business presentation over the records above (never re-extracted).
+    filename = document.original_filename or "contract.pdf"
+    subtype = contract_subtype(_opening_text(database, document))
+    records["contract_data"] = contract_data_records(records, filename)
+    records["contract_overview"] = contract_overview_records(document, records, records["contract_data"], subtype)
     return AdapterResult(
         records=records,
         outcome_provenance=document.ingestion_provenance,
+        # Contract Data shows its subtype's columns, in that order.
+        dataset_descriptions={
+            "contract_data": (
+                f"Everything extracted from this {SUBTYPE_LABELS[subtype]}, one record per row, in the columns for "
+                "that contract type. Text is verbatim; every value links to its page."
+            )
+        },
         column_labels={
+            "contract_data": column_labels(subtype),
             "line_items": line_labels,
             "delivery_information": delivery_labels,
             "contract_clauses": clause_labels,
@@ -964,16 +1004,37 @@ def adapt_contract_v3(database: Session, document: Document) -> AdapterResult:
     )
 
 
+_XLSX = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+
+
+def export_contract(database: Session, document: Document, export_id: str) -> ExportArtifact | None:
+    """The contract workbook (the profile's export sheets), from the staged
+    values the Staging Workbook shows."""
+
+    if export_id != "contract_workbook.xlsx":
+        return None
+    from app.staging.document_labels import document_labels
+    from app.staging.export import build_profile_xlsx
+    from app.staging.service import get_staging_workbook
+
+    stem = (document.original_filename or "contract").rsplit(".", 1)[0]
+    workbook = get_staging_workbook(database, document.id)
+    content = build_profile_xlsx(workbook, CONTRACT_V3_PROFILE.export_sheets, document_labels(database, document))
+    return ExportArtifact(content, _XLSX, f"{stem}_contract.xlsx")
+
+
 CONTRACT_V3_PROFILE = StagingProfile(
     profile_id="contract_v3",
     profile_version=1,
     display_name="Contract",
     description=(
-        "Federal contract / solicitation / award staging schema, based on the "
-        "V3 canonical extraction workbook."
+        "Federal contract / solicitation / award: every extracted record in one Contract Data view, "
+        "a compact Contract Summary, and full source traceability."
     ),
     document_families=("government_contract",),
     datasets=(
+        CONTRACT_DATA,
+        CONTRACT_OVERVIEW,
         CONTRACT_DETAILS,
         LINE_ITEMS,
         DELIVERY_INFORMATION,
@@ -995,15 +1056,52 @@ CONTRACT_V3_PROFILE = StagingProfile(
         QA_REVIEW,
     ),
     adapter=adapt_contract_v3,
+    export_sheets=(
+        ExportSheet("Contract Summary", ("contract_overview",)),
+        ExportSheet("Contract Data", ("contract_data",)),
+        # The schedule's own line items, else the V3 CLINs.
+        ExportSheet("Line Items", ("line_items", "clins"), first_populated=True),
+        ExportSheet("Clauses & Provisions", ("contract_clauses", "clauses"), first_populated=True),
+        ExportSheet("Other Information", ("delivery_information", "contract_attachments")),
+        ExportSheet(SOURCE_SHEET, ()),
+    ),
     materializer=materialize_contract_structure,
+    # Every export serializes the staged values shown in the workbook. (The
+    # V3 tables' own exports remain available from the V3 API only.)
     export_capabilities=(
-        # What the three tabs show, in full: every dataset, every column
-        # the source prints (even empty), long text, provenance.
         ExportCapability(
-            capability_id="contract_workbook_xlsx",
+            capability_id="contract_presentation_xlsx",
             label="Contract Workbook (Excel)",
             format="xlsx",
             href="/api/documents/{document_id}/staging-workbook/export.xlsx",
+        ),
+        ExportCapability(
+            capability_id="contract_summary_csv",
+            label="Contract Summary (CSV)",
+            format="csv",
+            href="/api/documents/{document_id}/staging-workbook/datasets/contract_overview.csv",
+            dataset_id="contract_overview",
+        ),
+        ExportCapability(
+            capability_id="contract_data_csv",
+            label="Contract Data (CSV)",
+            format="csv",
+            href="/api/documents/{document_id}/staging-workbook/datasets/contract_data.csv",
+            dataset_id="contract_data",
+        ),
+        ExportCapability(
+            capability_id="contract_lines_csv",
+            label="Line Items (CSV)",
+            format="csv",
+            href="/api/documents/{document_id}/staging-workbook/datasets/line_items.csv",
+            dataset_id="line_items",
+        ),
+        ExportCapability(
+            capability_id="contract_clauses_csv",
+            label="Clauses & Provisions (CSV)",
+            format="csv",
+            href="/api/documents/{document_id}/staging-workbook/datasets/contract_clauses.csv",
+            dataset_id="contract_clauses",
         ),
         ExportCapability(
             capability_id="contract_workbook_json",
@@ -1011,55 +1109,15 @@ CONTRACT_V3_PROFILE = StagingProfile(
             format="json",
             href="/api/documents/{document_id}/staging-workbook/export.json",
         ),
-        ExportCapability(
-            capability_id="professional_excel",
-            label="Professional Excel (V3 workbook)",
-            format="xlsx",
-            href="/api/documents/{document_id}/v3/export.xlsx",
-        ),
-        *(
-            ExportCapability(
-                capability_id=f"staging_csv_{dataset_id}",
-                label=f"{name} CSV",
-                format="csv",
-                href=f"/api/documents/{{document_id}}/staging-workbook/datasets/{dataset_id}.csv",
-                dataset_id=dataset_id,
-            )
-            for dataset_id, name in (
-                ("contract_details", "Contract Details"),
-                ("line_items", "Line Items"),
-                ("delivery_information", "Delivery Information"),
-                ("contract_attachments", "Attachments"),
-                ("contract_sections", "Contract Sections"),
-                ("section_tables", "Section Tables"),
-                ("contract_clauses", "Clauses"),
-                ("clause_transformation", "Clause Transformation"),
-            )
-        ),
-        *(
-            ExportCapability(
-                capability_id="dataset_csv",
-                label=f"V3 {name} CSV",
-                format="csv",
-                href=f"/api/documents/{{document_id}}/v3/{csv_name}.csv",
-                dataset_id=dataset_id,
-            )
-            for dataset_id, csv_name, name in (
-                ("all_fields", "all-fields-business", "All Fields"),
-                ("all_fields", "all-fields", "All Fields + Evidence"),
-                ("clins", "clins", "CLINs"),
-                ("funding", "funding", "Funding"),
-                ("performance_delivery", "performance-delivery", "Performance & Delivery"),
-                ("attachments", "attachments", "Attachments"),
-                ("clauses", "clauses", "Clauses"),
-                ("far_references", "far-references", "FAR References"),
-                ("dfars", "dfars", "DFARS"),
-                ("contract_summary", "contract-summary", "Contract Summary"),
-            )
-        ),
     ),
     oracle_mapping_capability="planned",
     # The V3 pipeline is sufficient; structure is still available on
     # demand (e.g. the source-structure endpoints) but not built per job.
     source_structure="optional",
+    exporter=export_contract,
+    views=(
+        ProfileView(view_id="contract_summary", label="Contract Summary", dataset_ids=["contract_overview"]),
+        ProfileView(view_id="contract_data", label="Contract Data", dataset_ids=["contract_data"]),
+        ProfileView(view_id="source", label="Source", dataset_ids=["source_documents", "qa_review"], kind="source"),
+    ),
 )

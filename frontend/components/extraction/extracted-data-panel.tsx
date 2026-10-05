@@ -213,27 +213,38 @@ function FieldRow({
 }) {
   return (
     <div>
-      <button
-        type="button"
+      {/* A button-like row, not a <button>: the value inside it is its own
+          button (search popover), and buttons cannot nest. */}
+      <div
+        role="button"
+        tabIndex={0}
+        aria-expanded={expanded}
         onClick={onToggle}
-        className="flex w-full items-center gap-4 px-4 py-3 text-left transition hover:bg-surface-soft/80"
+        onKeyDown={(event) => {
+          if (event.target !== event.currentTarget) return;
+          if (event.key === "Enter" || event.key === " ") {
+            event.preventDefault();
+            onToggle();
+          }
+        }}
+        className="flex w-full cursor-pointer items-center gap-4 px-4 py-3 text-left transition hover:bg-surface-soft/80 focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary"
       >
         <span className="min-w-[140px] shrink-0 text-sm text-text-secondary">
           {field.label}
         </span>
-        <span className="min-w-0 flex-1">
+        <div className="min-w-0 flex-1">
           <ClickableFieldValue
             fieldKey={field.field_key}
             fieldLabel={field.label}
             value={field.value}
           />
-        </span>
+        </div>
         <ConfidenceIndicator confidence={field.confidence} />
         <span className="hidden shrink-0 text-xs text-primary sm:inline">
           View Source
         </span>
         <StatusPill status={field.review_status} />
-      </button>
+      </div>
 
       {expanded && (
         <div className="border-t border-border/60 bg-surface-soft/50 px-4 py-3 text-sm">

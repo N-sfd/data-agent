@@ -28,6 +28,7 @@ _PROCESSORS = {
     ".csv": _NATIVE,
     ".html": _NATIVE,
     ".htm": _NATIVE,
+    ".xml": _NATIVE,
     ".rtf": _NATIVE,
     ".png": _IMAGE,
     ".jpg": _IMAGE,

@@ -27,6 +27,9 @@
   --primary: var(--sirion-teal);
   --primary-hover: #0a4a4f;
   --primary-soft: #e6eff0;
+  /* Grid selection: a light tint and a hairline edge of the primary teal. */
+  --selection-tint: rgba(13, 91, 97, 0.12);
+  --selection-edge: rgba(13, 91, 97, 0.6);
   --accent: var(--accent-purple);
   --success: #29976a;
   --warning: #c58b27;
@@ -935,9 +938,10 @@ body {
   }
 }
 
+/* Cards in a row share one height; connectors sit at their middle. */
 .workflow-diagram-step {
   display: flex;
-  align-items: center;
+  align-items: stretch;
   min-width: 0;
   width: 100%;
 }
@@ -949,6 +953,8 @@ body {
   margin: 0 0.35rem;
   background: linear-gradient(90deg, var(--border), var(--primary));
   opacity: 0.5;
+  flex-shrink: 0;
+  align-self: center;
 }
 
 @media (min-width: 640px) {
@@ -961,8 +967,8 @@ body {
   display: flex;
   flex: 1;
   align-items: flex-start;
-  gap: 0.625rem;
-  padding: 0.625rem 0.75rem;
+  gap: 0.75rem;
+  padding: 0.75rem 0.875rem;
   border-radius: 0.75rem;
   border: 1px solid var(--border);
   background: var(--surface-soft);
@@ -1018,18 +1024,47 @@ body {
   background: color-mix(in srgb, var(--primary) 20%, var(--surface));
 }
 
+.workflow-diagram-text {
+  min-width: 0;
+}
+
+.workflow-diagram-number {
+  display: block;
+  font-size: 0.625rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
 .workflow-diagram-label {
   font-size: 0.8125rem;
   font-weight: 600;
   color: var(--foreground);
-  line-height: 1.2;
+  line-height: 1.25;
 }
 
 .workflow-diagram-desc {
-  margin-top: 0.125rem;
+  margin-top: 0.1875rem;
   font-size: 0.6875rem;
-  line-height: 1.35;
+  line-height: 1.4;
   color: var(--text-secondary);
+  text-wrap: pretty;
+}
+
+/* Five cards on a medium screen: icon above the text, so the label and
+   description use the card's full width instead of a sliver beside it. */
+@media (min-width: 640px) and (max-width: 1099px) {
+  .workflow-diagram-node {
+    flex-direction: column;
+    gap: 0.5rem;
+    padding: 0.75rem;
+  }
+
+  .workflow-diagram-connector {
+    width: 0.75rem;
+    margin: 0 0.25rem;
+  }
 }
 
 .workflow-diagram-compact .workflow-diagram-node {
@@ -1062,8 +1097,7 @@ body {
   box-shadow: 0 1px 2px rgb(15 23 42 / 0.06);
 }
 
-.content-section,
-.content-section-wide {
+.content-section {
   margin: 0 auto;
   max-width: 80rem;
   padding: 3rem 1.5rem 4rem;
@@ -1071,10 +1105,24 @@ body {
 }
 
 @media (min-width: 1024px) {
-  .content-section,
-  .content-section-wide {
+  .content-section {
     padding: 3rem 3rem 5rem;
   }
+}
+
+/* Data workspaces (extraction, staging tables): the full content width
+   with 24px gutters — the data gets the screen, not a centered column. */
+.content-section-wide {
+  margin: 0;
+  max-width: none;
+  padding: 2rem 1.5rem 4rem;
+  background: var(--background);
+}
+
+.content-section-wide .extraction-bar-inner {
+  max-width: none;
+  padding-left: 0;
+  padding-right: 0;
 }
 
 .btn-hero-primary {
@@ -1245,5 +1293,137 @@ body {
 @media (max-width: 639px) {
   .sticky-group-header {
     top: 13.5rem;
+  }
+}
+
+/* A selected grid cell (selection export): a tint plus a hairline border,
+   painted over the cell's own (possibly sticky, opaque) background. */
+.cell-selected {
+  /* The tint is a background layer over the cell's own (possibly opaque,
+     sticky) background — cheap to paint, unlike a huge inset shadow. */
+  background-image: linear-gradient(var(--selection-tint), var(--selection-tint));
+  box-shadow: inset 0 0 0 1px var(--selection-edge);
+}
+
+/* A cell's own selection checkbox: hidden until the row is hovered, solid
+   once checked — so a wide grid never reads as a wall of checkboxes.
+   visibility (not opacity) keeps ~1,600 hidden checkboxes from becoming
+   compositing effects that every repaint must re-layerize. */
+.cell-check {
+  visibility: hidden;
+}
+tr:hover .cell-check,
+.group:hover .cell-check,
+.cell-check:checked,
+.cell-check:indeterminate {
+  visibility: visible;
+}
+@media (hover: none) {
+  .cell-check {
+    visibility: visible;
+  }
+}
+
+/* Excel-style resize edges: a column header's right edge, a row's bottom
+   edge (its first cell). A hairline shows on hover / focus. */
+.grid-resize {
+  position: absolute;
+  z-index: 5;
+  touch-action: none;
+  outline: none;
+}
+.grid-resize-column {
+  top: 0;
+  right: -4px;
+  width: 8px;
+  height: 100%;
+  cursor: col-resize;
+}
+.grid-resize-row {
+  left: 0;
+  bottom: -4px;
+  width: 100%;
+  height: 8px;
+  cursor: row-resize;
+}
+.grid-resize::after {
+  content: "";
+  position: absolute;
+  background: transparent;
+}
+.grid-resize-column::after {
+  top: 4px;
+  bottom: 4px;
+  left: 3px;
+  width: 2px;
+}
+.grid-resize-row::after {
+  left: 4px;
+  right: 4px;
+  top: 3px;
+  height: 2px;
+}
+th:hover > .grid-resize-column::after,
+tr:hover .grid-resize-row::after {
+  background: var(--border);
+}
+.grid-resize:hover::after,
+.grid-resize:focus-visible::after {
+  background: var(--primary);
+}
+/* A row made taller than one line wraps its values instead of clipping
+   them to a single ellipsized line. */
+.grid-row-wrap .truncate {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+/* A hand-set row height applies to every cell (over the grid's h-8 / h-11). */
+.grid-row-wrap > td {
+  height: inherit;
+}
+
+/* A column header's selection checkbox: faint until the header row is
+   hovered, so a wide grid's header reads as labels. Opacity (not
+   visibility) keeps it reachable by keyboard; few enough to be cheap. */
+.col-check {
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+thead:hover .col-check,
+.col-check:focus-visible,
+.col-check:checked,
+.col-check:indeterminate {
+  opacity: 1;
+}
+@media (hover: none) {
+  .col-check {
+    opacity: 1;
+  }
+}
+
+/* A sideways-scrolling tab row without a visible scrollbar. */
+.scrollbar-none {
+  scrollbar-width: none;
+}
+.scrollbar-none::-webkit-scrollbar {
+  display: none;
+}
+
+/* A label / value list's checkbox: faint until its row is hovered or
+   focused; all show once anything is picked (selection mode). */
+.list-check {
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+.list-row:hover .list-check,
+.list-selecting .list-check,
+.list-check:focus-visible,
+.list-check:checked,
+.list-check:indeterminate {
+  opacity: 1;
+}
+@media (hover: none) {
+  .list-check {
+    opacity: 1;
   }
 }

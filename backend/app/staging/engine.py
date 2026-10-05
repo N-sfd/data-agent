@@ -47,8 +47,21 @@ def evidence_literal(value: object, evidence: str | None, value_type: str) -> st
     text = re.sub(r"\s+", " ", str(value)).strip()
     if not text:
         return None
-    parts = [re.escape(part) for part in text.split(" ")]
-    match = re.search(r"\s+".join(parts), evidence, re.IGNORECASE)
+    # Fast paths before compiling a pattern per value (values can be whole
+    # clause texts): the value as printed, then case-insensitively.
+    position = evidence.find(text)
+    if position != -1:
+        return evidence[position : position + len(text)]
+    lowered, needle = evidence.lower(), text.lower()
+    if len(lowered) == len(evidence) and len(needle) == len(text):
+        position = lowered.find(needle)
+        if position != -1:
+            return evidence[position : position + len(text)]
+    parts = text.split(" ")
+    # Only differently spaced text can still match; a missing word can't.
+    if any(part.lower() not in lowered for part in parts):
+        return None
+    match = re.search(r"\s+".join(re.escape(part) for part in parts), evidence, re.IGNORECASE)
     return match.group(0) if match else None
 
 
@@ -75,8 +88,15 @@ def _build_dataset(
     definition: DatasetDefinition,
     raws: list[RawRecord],
     column_labels: dict[str, str] | None = None,
+    display_name: str | None = None,
+    description: str | None = None,
 ) -> StagingDataset:
     labels = column_labels or {}
+    fields = definition.fields
+    if definition.labelled_columns_only:
+        # Slots in the file's own order (the order of its labels).
+        by_field = {f.canonical_field: f for f in fields}
+        fields = tuple(by_field[c] for c in labels if c in by_field)
     if definition.cardinality == "single" and definition.role == "business" and not raws:
         # A single-record dataset with nothing found still renders every
         # expected field as Missing, rather than an empty panel.
@@ -86,7 +106,7 @@ def _build_dataset(
     for raw in raws:
         flagged = "review" in (raw.builder_status or "").lower()
         cells: dict[str, StagingCell] = {}
-        for field_def in definition.fields:
+        for field_def in fields:
             value = raw.values.get(field_def.key)
             provenance = _cell_provenance(raw, field_def.key, value, field_def.value_type)
             validation, status, reasons = evaluate_cell(
@@ -135,10 +155,10 @@ def _build_dataset(
 
     return StagingDataset(
         dataset_id=definition.dataset_id,
-        display_name=definition.display_name,
+        display_name=display_name or definition.display_name,
         cardinality=definition.cardinality,
         role=definition.role,
-        description=definition.description,
+        description=description or definition.description,
         columns=[
             StagingColumn(
                 canonical_field=f.canonical_field,
@@ -147,12 +167,13 @@ def _build_dataset(
                 value_type=f.value_type,
                 expected=f.expected,
             )
-            for f in definition.fields
+            for f in fields
         ],
         records=records,
         identity_fields=list(definition.identity_fields),
         grid_fields=list(definition.grid_fields),
         source_columns=list(labels) if definition.source_adaptive_columns else [],
+        full_text=definition.full_text_grid,
     )
 
 
@@ -234,6 +255,7 @@ def profile_descriptor(profile: StagingProfile, document_id: str) -> ProfileDesc
             for capability in profile.export_capabilities
         ],
         oracle_mapping_capability=profile.oracle_mapping_capability,
+        views=list(profile.views),
     )
 
 
@@ -249,8 +271,11 @@ def assemble_workbook(
             definition,
             adapter_result.records.get(definition.dataset_id, []),
             adapter_result.column_labels.get(definition.dataset_id),
+            adapter_result.dataset_names.get(definition.dataset_id),
+            adapter_result.dataset_descriptions.get(definition.dataset_id),
         )
         for definition in profile.datasets
+        if definition.dataset_id not in adapter_result.omit_datasets
     ]
     if profile.auto_qa_dataset:
         qa_definition = profile.dataset(profile.auto_qa_dataset)
@@ -267,9 +292,10 @@ def assemble_workbook(
             for dataset in datasets
         ]
 
+    uncounted = {definition.dataset_id for definition in profile.datasets if not definition.counts_records}
     summary = QaSummary()
     for dataset in datasets:
-        if dataset.role != "business":
+        if dataset.role != "business" or dataset.dataset_id in uncounted:
             continue
         for record in dataset.records:
             if _has_value(record):
@@ -285,7 +311,7 @@ def assemble_workbook(
     needs_review_records = sum(
         1
         for dataset in datasets
-        if dataset.role == "business"
+        if dataset.role == "business" and dataset.dataset_id not in uncounted
         for record in dataset.records
         if _has_value(record) and record.record_status == NEEDS_REVIEW
     )
@@ -295,10 +321,23 @@ def assemble_workbook(
         provenance=adapter_result.outcome_provenance,
     )
 
+    descriptor = profile_descriptor(profile, document.id)
+    # A per-dataset export follows its dataset: gone when the document has
+    # no use for it, captioned with the document's own dataset name.
+    descriptor.export_capabilities = [
+        capability.model_copy(
+            update={"label": f"{adapter_result.dataset_names[capability.dataset_id]} CSV"}
+        )
+        if capability.dataset_id in adapter_result.dataset_names
+        else capability
+        for capability in descriptor.export_capabilities
+        if capability.dataset_id not in adapter_result.omit_datasets
+    ]
+
     return StagingWorkbook(
         document_id=document.id,
         document_filename=document.original_filename,
-        profile=profile_descriptor(profile, document.id),
+        profile=descriptor,
         outcome=ExtractionOutcomeModel(**outcome.model_dump()),
         datasets=datasets,
         qa_summary=summary,

@@ -10,7 +10,8 @@ from __future__ import annotations
 import re
 from collections import Counter
 
-from app.far.canonical import ALTERNATE, CLAUSE_OR_PROVISION, RESERVED, SUBPART
+from app.far import regulation
+from app.far.canonical import ALTERNATE, CLAUSE_OR_PROVISION, RESERVED, SECTION, SUBPART
 from app.far.oracle_map import (
     OUTPUT_MAP,
     PENDING_TEMPLATE,
@@ -37,27 +38,51 @@ STRUCTURED_COLUMNS = (
     "Prescription", "Alternate", "Alternate Date", "Alternate Instruction", "Embedded FAR References",
     "Actual Section Text", "Section", "Subsection", "Paragraph", "Subparagraph",
 )
+# The clause-library layout (one row per FAR record, source order), plus
+# Type and the text split by type so provisions and clauses read apart.
 BUSINESS_COLUMNS = (
+    "Action",
     "Date Published",
     "Number",
     "Title",
     "Display Name",
-    "Provision",
-    "Clause",
-    "Clause Type",
     "Type",
-    "Description",
-    "Text",
     "Intent",
+    "Language",
+    "Clause Type",
+    "Status",
+    "Description",
+    "Provision Yn",
+    "Global Yn",
+    "Lock Text Yn",
+    "Insert By Reference",
+    "Text",
+    "Provision Text",
+    "Clause Text",
     "Start Date",
     "Attribute Category",
     "Attribute 1",
+    "Source XML",
     "Source Reference",
 )
 
+# Clause-library values for every load-eligible FAR record, as in the
+# approved target layout. Structural, reserved and alternate records are
+# not loaded, so they carry none of these.
+LIBRARY_DEFAULTS = {
+    "Action": "Sync",
+    "Intent": "B",
+    "Language": "US",
+    "Clause Type": "STANDARD",
+    "Status": "APPROVED",
+    "Global Yn": "Y",
+    "Lock Text Yn": "Y",
+    "Insert By Reference": "N",
+    "Attribute Category": "FAR_PART_52",
+}
 
-def _yes(flag: bool) -> str | None:
-    return "Yes" if flag else None
+_MONTHS = {m: i for i, m in enumerate(("jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"), 1)}
+_MONTH_YEAR = re.compile(r"^\s*([A-Za-z]{3})[a-z]*\.?\s+(\d{4})\s*$")
 
 
 def source_reference(row: DocumentFarRecord) -> str | None:
@@ -72,43 +97,80 @@ def source_reference(row: DocumentFarRecord) -> str | None:
     return " | ".join(pieces) or None
 
 
-def business_row(row: DocumentFarRecord) -> dict:
-    """Final business export. Blank means unsupported, never a guessed value.
+def published_date(version: str | None) -> str | None:
+    """"Sep 2023" -> "2023-09-01"; anything else stays blank."""
 
-    Date Published is the source revision/publication date. Start Date is
-    not copied from it. Intent and Oracle attributes stay blank until an
-    approved rule or target template exists.
-    """
+    match = _MONTH_YEAR.match(version or "")
+    month = _MONTHS.get(match.group(1).lower()) if match else None
+    return f"{match.group(2)}-{month:02d}-01" if match and month else None
+
+
+def record_type(row: DocumentFarRecord) -> str:
+    """Provision or Clause (alternates take their basic record's type);
+    Section for the Part/Subpart instructions (52.000, 52.1xx, 52.200)."""
 
     if row.content_type == RESERVED:
-        clause_type = "Reserved"
-    elif row.content_type == SUBPART:
-        clause_type = "Subpart"
-    elif row.content_type == ALTERNATE:
-        clause_type = "Alternate"
-    elif row.clause_type in ("Clause", "Provision"):
-        clause_type = row.clause_type
-    else:
-        clause_type = None
+        return "Reserved"
+    if row.content_type == SUBPART:
+        return "Subpart"
+    if row.clause_type in ("Clause", "Provision"):
+        return row.clause_type
+    return "Alternate" if row.content_type == ALTERNATE else "Section"
+
+
+def body_text(row: DocumentFarRecord) -> str | None:
+    """The provision/clause text after its prescription ("As prescribed in
+    ..., insert the following clause:"), which is the Description. The text
+    is sliced, never rewritten; when the prescription does not lead the
+    text exactly, the whole text is kept."""
+
+    text = row.source_text
+    if not text or not row.prescription or row.content_type == ALTERNATE:
+        return text
+    tokens = row.prescription.split()
+    pattern = r"\s*" + r"\s*".join(re.escape(token) for token in tokens) + r"\s*"
+    match = re.match(pattern, text)
+    rest = text[match.end():] if match else ""
+    return rest if rest.strip() else text
+
+
+def business_row(row: DocumentFarRecord) -> dict:
+    """The clause-library row. Values come from the source (number, title,
+    dates, prescription, text) or the approved library defaults for
+    load-eligible records; Source XML stays blank until the import file
+    naming is supplied."""
+
+    kind = record_type(row)
     title = row.subpart_title if row.content_type == SUBPART else row.title
-    description = row.official_heading or row.alternate_heading or title
-    return {
-        "Date Published": row.version_date,
-        "Number": row.far_number,
-        "Title": title,
-        "Display Name": row.display_name,
-        "Provision": _yes(clause_type == "Provision"),
-        "Clause": _yes(clause_type == "Clause"),
-        "Clause Type": clause_type,
-        "Type": "Reserved" if row.content_type == RESERVED else None,
-        "Description": description,
-        "Text": row.source_text,
-        "Intent": None,
-        "Start Date": None,
-        "Attribute Category": None,
-        "Attribute 1": None,
-        "Source Reference": source_reference(row),
-    }
+    alternate = f" {row.alternate_code}" if row.alternate_code else ""
+    if row.content_type == SUBPART:
+        full_title = row.display_name
+    else:
+        full_title = f"FAR {row.far_number} - {title}{alternate}" if title else None
+    date = published_date(row.version_date)
+    text = body_text(row)
+    library = row.load_eligible
+    values = {column: None for column in BUSINESS_COLUMNS}
+    if library:
+        values.update(LIBRARY_DEFAULTS)
+    values.update(
+        {
+            "Date Published": date,
+            "Number": row.far_number,
+            "Title": full_title,
+            "Display Name": f"{title}{alternate}" if title else None,
+            "Type": kind,
+            "Description": row.alternate_instruction if row.content_type == ALTERNATE else row.prescription,
+            "Provision Yn": ("Y" if kind == "Provision" else "N") if library else None,
+            "Text": text,
+            "Provision Text": text if kind == "Provision" else None,
+            "Clause Text": text if kind == "Clause" else None,
+            "Start Date": date,
+            "Attribute 1": row.far_number if library else None,
+            "Source Reference": source_reference(row),
+        }
+    )
+    return values
 
 
 CANONICAL_COLUMNS = (
@@ -284,7 +346,7 @@ def _nonspace(text: str | None) -> int:
     return len("".join((text or "").split()))
 
 
-_KEY = re.compile(r"^FAR-(?:Subpart_52\.\d+|52\.\d{3}(?:-\d+)?)(?:-ALT-[IVX]+)?$")
+_KEY = re.compile(r"^FAR-(?:Subpart_\d{1,2}\.\d+|\d{1,2}\.\d{3,4}(?:-\d+)?)(?:-ALT-[IVX]+)?$")
 _EG = re.compile(r"\be\.g\.", re.I)
 
 
@@ -305,11 +367,11 @@ def validation_rows(rows: list[DocumentFarRecord], summary: dict | None = None) 
     articles = summary.get("articles")
     add(
         "FAR records extracted",
-        "One record per FAR article heading (the Part 52 title is not a record)",
+        "One record per FAR article heading (the Part title is not a record)",
         len(base) > 0,
         f"{len(base)} source/base FAR records"
-        + (f" from {articles} FAR-headed source articles (Part 52 title included)" if articles else "")
-        + f": {types.get(CLAUSE_OR_PROVISION, 0)} clause/provision/section, {types.get(RESERVED, 0)} reserved, "
+        + (f" from {articles} FAR-headed source articles (Part title included)" if articles else "")
+        + f": {types.get(CLAUSE_OR_PROVISION, 0)} clause/provision, {types.get(SECTION, 0)} section, {types.get(RESERVED, 0)} reserved, "
         f"{types.get(SUBPART, 0)} subpart headings.",
     )
     incomplete = [
@@ -349,7 +411,7 @@ def validation_rows(rows: list[DocumentFarRecord], summary: dict | None = None) 
         "FAR # + Title",
         "Combined field populated",
         all(r.display_name for r in base),
-        "Example: 52.101 Using Part 52.",
+        f"Example: {base[0].display_name}." if base else "No records.",
     )
     add(
         "SubID + Subtitle",
@@ -483,3 +545,297 @@ def overview(rows: list[DocumentFarRecord], summary: dict | None = None) -> dict
         "clauses": sum(1 for r in base if r.clause_type == "Clause"),
         "provisions": sum(1 for r in base if r.clause_type == "Provision"),
     }
+
+
+# --- FAR Clauses & Provisions (the business-facing FAR view) --------------------------------
+# FAR source semantics only: nothing here is an Oracle field or default.
+# One row per FAR record in source order; an alternate follows its basic
+# record, keeps its FAR Number and names itself in Alternate.
+
+FAR_RECORD_COLUMNS = (
+    "FAR Number",
+    "Title",
+    "Record Type",
+    "FAR Part",
+    "FAR Subpart",
+    "FAR Section",
+    "Record Status",
+    "Revision Date",
+    "Description",
+    "Prescription / Usage",
+    "Prescription Reference",
+    "Alternate",
+    "Cross References",
+    "Provision Text",
+    "Clause Text",
+    "Section Text",
+    "Source Reference",
+)
+
+# FAR_REGULATION core schema (Parts 1–51): one table for the whole Part.
+# (header, row key) — the record text is the regulatory text.
+CORE_RECORD_COLUMNS = (
+    ("FAR Number", "FAR Number"),
+    ("Title", "Title"),
+    ("Record Type", "Record Type"),
+    ("FAR Part", "FAR Part"),
+    ("FAR Part Title", "FAR Part Title"),
+    ("FAR Subpart", "FAR Subpart"),
+    ("FAR Subpart Title", "FAR Subpart Title"),
+    ("FAR Section", "FAR Section"),
+    ("Record Status", "Record Status"),
+    ("Description / Regulatory Text", "Section Text"),
+    ("Prescription / Usage", "Prescription / Usage"),
+    ("Prescription Reference", "Prescription Reference"),
+    ("Cross References", "Cross References"),
+    ("Source Reference", "Source Reference"),
+)
+# Part 53 (Forms): the core schema plus the form fields.
+FORM_RECORD_COLUMNS = CORE_RECORD_COLUMNS[:12] + (
+    ("Form Number", "Form Number"),
+    ("Form Name", "Form Name"),
+    ("Form Type", "Form Type"),
+    ("Prescribing FAR Reference", "Prescribing FAR Reference"),
+    ("Form Usage", "Form Usage"),
+    ("Replacement / Supersession", "Replacement / Supersession"),
+) + CORE_RECORD_COLUMNS[12:]
+# Part 52: the provision/clause extension (FAR_RECORD_COLUMNS).
+CLAUSE_RECORD_COLUMNS = tuple((column, column) for column in FAR_RECORD_COLUMNS)
+
+
+def record_columns(part: str | None) -> tuple[tuple[str, str], ...]:
+    """The FAR record table's columns for this Part — Part 52 fields are
+    never forced onto Parts 1–51 or 53."""
+
+    if part == "52":
+        return CLAUSE_RECORD_COLUMNS
+    if part == "53":
+        return FORM_RECORD_COLUMNS
+    return CORE_RECORD_COLUMNS
+
+
+# The Oracle transformation view: target fields only, from business_row.
+ORACLE_OUTPUT_COLUMNS = (
+    "Action",
+    "Date Published",
+    "Number",
+    "Title",
+    "Display Name",
+    "Intent",
+    "Language",
+    "Clause Type",
+    "Status",
+    "Description",
+    "Provision Yn",
+    "Global Yn",
+    "Lock Text Yn",
+    "Insert By Reference",
+    "Text",
+    "Start Date",
+    "Attribute Category",
+    "Attribute 1",
+    "Source Reference",
+)
+
+_PART = re.compile(r"^(?:Subpart\s+)?(\d+)\.")
+# "3.1004(a)", "15.209 (a)(1)", "12.301(b)(2)" — section plus paragraphs.
+_PRESCRIBING = re.compile(r"(\d+\.\d+(?:-\d+)*)\s*((?:\(\s*[A-Za-z0-9]+\s*\))*)")
+
+
+def far_part(row: DocumentFarRecord) -> str | None:
+    match = _PART.match(row.far_number or "")
+    return f"Part {match.group(1)}" if match else None
+
+
+def prescription_reference_text(usage: str | None) -> str | None:
+    """'As prescribed in 3.1004 (a), insert ...' -> '3.1004(a)'; several
+    prescribing sections are listed in source order."""
+
+    if not usage:
+        return None
+    lead = re.split(r",|\binsert\b|\buse\b|\badd\b|\bsubstitute\b", usage, maxsplit=1)[0]
+    refs = []
+    for section, paragraphs in _PRESCRIBING.findall(lead):
+        ref = section + re.sub(r"\s+", "", paragraphs)
+        if ref not in refs:
+            refs.append(ref)
+    return "; ".join(refs) or None
+
+
+def far_record_type(row: DocumentFarRecord, parents: dict[str, DocumentFarRecord]) -> str:
+    """Clause / Provision / Section / Subpart / Reserved. An alternate is
+    a variant of its basic record and takes that record's type."""
+
+    if is_alternate_row(row):
+        parent = parents.get(row.basic_clause_key)
+        return record_type(parent) if parent is not None else "Alternate"
+    return record_type(row)
+
+
+def far_source_reference(row: DocumentFarRecord, filename: str | None) -> str:
+    """'part_52.html › Subpart 52.2 › 52.202-1 Definitions. · #FAR_52_202_1'.
+    The DOM path itself stays in the cell provenance."""
+
+    prov = row.provenance_json or {}
+    trail = [str(part) for part in (prov.get("section_path") or [])[1:]]
+    pieces = [filename or "source"] + trail
+    if is_alternate_row(row) and row.alternate_code:
+        pieces.append(row.alternate_code)
+    reference = " › ".join(pieces)
+    element = prov.get("element_id")
+    return f"{reference} · #{element}" if element else reference
+
+
+def _after_leads(text: str, leads: list[str | None]) -> str | None:
+    """The text after its leading heading/instruction sentences, matched
+    token by token (source spacing varies); sliced, never rewritten. When
+    the leads don't open the text exactly, the whole text is kept; when
+    they are the whole text (an instruction-only alternate), there is no
+    separate body."""
+
+    rest = text
+    for lead in leads:
+        if not lead:
+            continue
+        pattern = r"\s*" + r"\s*".join(re.escape(token) for token in lead.split()) + r"\s*\.?\s*"
+        match = re.match(pattern, rest)
+        if not match:
+            return text
+        rest = rest[match.end():]
+    return rest if rest.strip() else None
+
+
+def far_body(row: DocumentFarRecord) -> str | None:
+    """A record's own body: after its prescription; for an alternate,
+    after its heading and instruction (both shown in their own columns)."""
+
+    if is_alternate_row(row):
+        return _after_leads(row.source_text, [row.alternate_heading, row.alternate_instruction]) if row.source_text else None
+    return body_text(row)
+
+
+def part_number(row: DocumentFarRecord) -> str | None:
+    match = _PART.match(row.far_number or "")
+    return match.group(1) if match else None
+
+
+def document_part(rows: list[DocumentFarRecord]) -> str | None:
+    """The Part a FAR file is: the part most of its records belong to."""
+
+    counts = Counter(part_number(r) for r in rows if part_number(r))
+    return counts.most_common(1)[0][0] if counts else None
+
+
+def far_record_row(
+    row: DocumentFarRecord,
+    parents: dict[str, DocumentFarRecord],
+    filename: str | None = None,
+    part_title: str | None = None,
+) -> dict:
+    """FAR_REGULATION: one row per FAR record of any Part. Part 52 keeps its
+    clause/provision semantics (Revision Date, Prescription "As prescribed
+    in …", Alternate, Provision / Clause Text); Parts 1–51 and 53 get the
+    regulatory function as Record Type and their own prescriptions
+    ("51.107 → 52.251-1"); Part 53 adds form fields. Values are filled only
+    when the source states them."""
+
+    alternate = is_alternate_row(row)
+    kind = far_record_type(row, parents)
+    part = part_number(row)
+    clause_part = part == "52"
+    usage = row.alternate_instruction if alternate else row.prescription
+    # Only the body after the prescription; one text column per record —
+    # a regulation section's (or subpart's) own text is Section Text.
+    text = far_body(row) if kind != "Reserved" else None
+    prescription_reference = prescription_reference_text(usage)
+    regulatory_record = kind == "Section"
+    prescribed = regulation.prescriptions(text) if regulatory_record and not clause_part else None
+    if prescribed is not None:
+        usage, prescription_reference = prescribed.usage, "; ".join(prescribed.references)
+    if regulatory_record:
+        kind = regulation.classify_record(row.title, text, prescribed)
+    references = regulation.typed_references(row.source_text, row.far_number)
+    if clause_part:
+        # Part 52 indexes its embedded 52.xxx-x references; other citations
+        # (CFR, U.S.C., …) follow them.
+        others = [r for r in references if r.kind != "FAR"]
+        cross = "; ".join(p for p in (refs_text(row), regulation.references_text(others)) if p) or None
+    else:
+        cross = regulation.references_text(references)
+    form = regulation.form_info(row.title, text) if part == "53" and regulatory_record else None
+    if alternate:
+        description = row.alternate_heading
+    elif row.content_type == SUBPART:
+        description = None
+    else:
+        description = row.official_heading
+    return {
+        "FAR Number": row.far_number,
+        "Title": row.subpart_title if row.content_type == SUBPART else row.title,
+        "Record Type": kind,
+        "FAR Part": far_part(row),
+        "FAR Part Title": part_title,
+        "FAR Subpart": row.subpart if row.content_type != SUBPART else None,
+        "FAR Subpart Title": row.subpart_title if row.content_type != SUBPART else None,
+        "FAR Section": row.subsection,
+        "Record Status": "Reserved" if row.content_type == RESERVED else "Active",
+        "Revision Date": row.version_date,
+        "Description": description,
+        "Prescription / Usage": usage,
+        "Prescription Reference": prescription_reference,
+        "Alternate": row.alternate_code if alternate else None,
+        "Form Number": form.number if form else None,
+        "Form Name": form.name if form else None,
+        "Form Type": form.form_type if form else None,
+        "Prescribing FAR Reference": form.prescribing_reference if form else None,
+        "Form Usage": form.usage if form else None,
+        "Replacement / Supersession": form.supersession if form else None,
+        "Cross References": cross,
+        "Provision Text": text if kind == "Provision" else None,
+        "Clause Text": text if kind == "Clause" else None,
+        "Section Text": text if kind not in ("Clause", "Provision") else None,
+        "Source Reference": far_source_reference(row, filename),
+    }
+
+
+def far_parents(rows: list[DocumentFarRecord]) -> dict[str, DocumentFarRecord]:
+    return {r.clause_key: r for r in rows if not is_alternate_row(r)}
+
+
+def oracle_output_row(row: DocumentFarRecord) -> dict:
+    business = business_row(row)
+    return {column: business.get(column) for column in ORACLE_OUTPUT_COLUMNS}
+
+
+def source_rows(rows: list[DocumentFarRecord], summary: dict | None, filename: str | None) -> list[dict]:
+    """Document-level source metadata and traceability (Item | Detail)."""
+
+    summary = summary or {}
+    counts = overview(rows, summary)
+    parents = far_parents(rows)
+    types = Counter(far_record_type(r, parents) for r in rows if not is_alternate_row(r))
+    items = [
+        ("Source Document", filename),
+        ("Source Type", "PDF (FAR regulation text)" if summary.get("source_format") == "pdf" else "HTML (FAR regulation text)"),
+        ("Part", summary.get("part_heading")),
+        ("Records (incl. alternates)", len(rows)),
+        ("Base FAR Records", counts["records"]),
+        ("Base Clauses", types.get("Clause", 0)),
+        ("Base Provisions", types.get("Provision", 0)),
+        ("Sections", types.get("Section", 0)),
+        ("Subparts", types.get("Subpart", 0)),
+        ("Reserved", types.get("Reserved", 0)),
+        ("Alternates (each follows its basic record)", counts["alternates"]),
+        ("Records With Revision Date", counts["dated"]),
+        ("Records With Prescription", counts["prescriptions"]),
+        ("Records With Cross References", counts["with_references"]),
+        ("Extraction Method", "DOM structure (headings, paragraphs, element ids) — no OCR, no AI"),
+        (
+            "Traceability",
+            "Every value links to its HTML element (element id and DOM path); Source Reference shows "
+            "the heading trail. Text is kept verbatim.",
+        ),
+    ]
+    if summary.get("duration_ms") is not None:
+        items.append(("Processing Time (ms)", summary.get("duration_ms")))
+    return [{"Item": item, "Detail": detail} for item, detail in items if detail not in (None, "")]

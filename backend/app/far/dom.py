@@ -1,4 +1,8 @@
-"""FAR Part 52 HTML → one record per FAR article, DOM first.
+"""FAR Part HTML → one record per FAR article, DOM first.
+
+Any FAR Part (Part 52's clauses and provisions, or a policy Part such as
+Part 42's sections); the Part heading fixes which numbers are the Part's
+own records.
 
 The regulation's HTML (acquisition.gov / DITA output) nests one <article>
 per FAR unit: the Part, each Subpart, and every section / provision /
@@ -21,18 +25,18 @@ from dataclasses import dataclass, field
 
 from lxml import html as lxml_html
 
-EXTRACTOR_VERSION = 1
+EXTRACTOR_VERSION = 2
 
 _HEADING_TAGS = ("h1", "h2", "h3", "h4", "h5", "h6")
 _CONTAINERS = {"div", "section", "ul", "ol", "dl", "blockquote", "tbody", "thead", "tfoot", "figure", "main", "form", "fieldset", "center"}
 _SKIP = {"script", "style", "noscript", "template", "nav", "article"}
 _TABLE_SEPARATOR = " | "
 
-# "52.204-6", "52.000", "Subpart 52.1", "Part 52" at the start of a heading.
-_NUMBER = re.compile(r"^(?P<number>(?:Part|Subpart)\s+52(?:\.\d+)?|52\.\d{3}(?:-\d+)?)(?![\d-])")
-_CLAUSE_NUMBER = re.compile(r"^52\.\d{3}(?:-\d+)?$")
-_SUBPART = re.compile(r"^Subpart\s+52\.\d+$")
-_PART = re.compile(r"^Part\s+52$")
+# "52.204-6", "42.1101", "Subpart 42.1", "Part 42" at the start of a heading.
+_NUMBER = re.compile(r"^(?P<number>(?:Part|Subpart)\s+\d{1,2}(?:\.\d+)?|\d{1,2}\.\d{3,4}(?:-\d+)?)(?![\d-])")
+_CLAUSE_NUMBER = re.compile(r"^\d{1,2}\.\d{3,4}(?:-\d+)?$")
+_SUBPART = re.compile(r"^Subpart\s+\d{1,2}\.\d+$")
+_PART = re.compile(r"^Part\s+\d{1,2}$")
 _TITLE_LEAD = re.compile(r"^[\s\-‐-―:]+")
 _RESERVED = re.compile(r"^\[\s*Reserved\s*\]$", re.I)
 
@@ -53,6 +57,19 @@ _PRESCRIPTION_REFERENCE = re.compile(
 _INSERT_KIND = re.compile(r"\b(?:insert|use)\b[^:]*?\b(?P<kind>provision|clause)\b", re.I)
 _END_MARKER = re.compile(r"^\(End of (?P<kind>provision|clause)\)$", re.I)
 _FAR_REFERENCE = re.compile(r"(?<![\d.])52\.\d{3}(?:-\d+)?(?!\d)(?!-\d)")
+# Outside Part 52 every FAR section is a cross-reference ("see 37.104").
+_ANY_FAR_REFERENCE = re.compile(r"(?<![\d.$])\d{1,2}\.\d{3,4}(?:-\d+)?(?!\d)(?!-\d)")
+
+
+def part_number(number: str | None) -> str | None:
+    """"52" for "52.204-6", "Subpart 52.1" or "Part 52"."""
+
+    match = re.search(r"(\d{1,2})(?:\.|$)", number or "")
+    return match.group(1) if match else None
+
+
+def reference_pattern(part: str | None) -> re.Pattern:
+    return _FAR_REFERENCE if part in (None, "52") else _ANY_FAR_REFERENCE
 
 
 def clean(text: str | None) -> str:
@@ -119,6 +136,9 @@ class FarSourceRecord:
     source_char_count: int = 0
     rendered_char_count: int = 0
     issues: list[str] = field(default_factory=list)
+    # PDF sources: the page the heading is on and the record's last page.
+    page: int | None = None
+    end_page: int | None = None
 
     @property
     def section_group(self) -> str | None:
@@ -269,7 +289,7 @@ def _source_chars(el) -> int:
 
 def _references(text: str, own: str) -> list[str]:
     seen: list[str] = []
-    for match in _FAR_REFERENCE.finditer(text):
+    for match in reference_pattern(part_number(own)).finditer(text):
         ref = match.group(0)
         if ref != own and ref not in seen:
             seen.append(ref)
@@ -421,17 +441,31 @@ def _record(article, tree, sequence: int, number: str, title: str, heading, trai
     return record
 
 
+_NO_BODY = "Section heading has no body text."
+
+
+def clear_parent_no_body(records: list[FarSourceRecord]) -> None:
+    """A section whose text is all in its subsections (16.202 → 16.202-1,
+    16.202-2) has no body of its own by design — not an issue."""
+
+    numbers = {r.far_number for r in records}
+    for record in records:
+        if _NO_BODY in record.issues and any(n.startswith(record.far_number + "-") for n in numbers):
+            record.issues.remove(_NO_BODY)
+
+
 def _expected_number(element_id: str | None) -> str | None:
     """"FAR_52_204_6" → "52.204-6"; "FAR_Subpart_52_1" → "Subpart 52.1"."""
 
     if not element_id:
         return None
-    match = re.fullmatch(r"FAR_(Subpart_)?52_(\d+)(?:_(\d+))?", element_id)
+    match = re.fullmatch(r"FAR_(Subpart_)?(\d{1,2})_(\d+)(?:_(\d+))?", element_id)
     if not match:
         return None
+    part = match.group(2)
     if match.group(1):
-        return f"Subpart 52.{match.group(2)}"
-    return f"52.{match.group(2)}" + (f"-{match.group(3)}" if match.group(3) else "")
+        return f"Subpart {part}.{match.group(3)}"
+    return f"{part}.{match.group(3)}" + (f"-{match.group(4)}" if match.group(4) else "")
 
 
 def extract_far(raw: bytes) -> FarExtraction:
@@ -443,6 +477,7 @@ def extract_far(raw: bytes) -> FarExtraction:
     articles = root.xpath("//article")
     subpart: tuple[str, str] | None = None
     part_trail: list[str] = []
+    part: str | None = None
 
     for article in articles:
         heading = _own_heading(article)
@@ -452,8 +487,15 @@ def extract_far(raw: bytes) -> FarExtraction:
         if number is None:
             continue
         if _PART.match(number):
-            part_heading = clean(element_text(heading))
-            part_trail = [part_heading]
+            if part_heading is None:
+                part_heading = clean(element_text(heading))
+                part_trail = [part_heading]
+                part = part_number(number)
+            continue
+        # Only the Part's own numbers are its records (a heading quoting
+        # another Part's section is not).
+        part = part or part_number(number)
+        if part_number(number) != part:
             continue
         subpart_ancestor = next(
             (
@@ -479,6 +521,7 @@ def extract_far(raw: bytes) -> FarExtraction:
             record.issues.append(f"Heading number {number} does not match element id {article.get('id')}.")
         records.append(record)
 
+    clear_parent_no_body(records)
     seen: dict[str, int] = {}
     for record in records:
         seen[record.far_number] = seen.get(record.far_number, 0) + 1
@@ -491,7 +534,7 @@ def extract_far(raw: bytes) -> FarExtraction:
     return FarExtraction(
         part_heading=part_heading,
         records=records,
-        # FAR-headed articles: every record plus the Part 52 title article.
+        # FAR-headed articles: every record plus the Part title article.
         article_count=len(records) + (1 if part_heading else 0),
         warnings=warnings,
     )
@@ -503,40 +546,67 @@ class FarRecognition:
     reasons: list[str]
 
 
-def recognize_far_part_52(raw: bytes) -> FarRecognition:
-    """Structural evidence that a document IS FAR Part 52 (not a contract
-    that cites FAR clauses): a Part 52 heading, Subpart 52.x headings and
-    many numbered FAR provision/clause headings, each opening its own
-    section. The filename is never consulted."""
+def score_far_structure(
+    part: str | None, subparts: int, numbered: int, prescribed: int, parent_topic: bool
+) -> FarRecognition:
+    """A FAR Part heading, Subpart N.x headings and many numbered FAR
+    section headings of that Part, plus either clause prescriptions or the
+    regulation's own "Parent topic: Federal Acquisition Regulation"."""
+
+    reasons: list[str] = []
+    score = 0.0
+    if part:
+        score += 0.25
+        reasons.append(f"Part {part} heading")
+    if subparts >= 2:
+        score += 0.25
+        reasons.append(f"{subparts} Subpart {part or 'N'}.x headings")
+    if numbered >= 10:
+        score += 0.3
+        reasons.append(f"{numbered} numbered FAR section/clause headings")
+    if prescribed >= 10:
+        score += 0.2
+        reasons.append(f"{prescribed} 'As prescribed in' prescriptions")
+    elif parent_topic:
+        score += 0.2
+        reasons.append("'Parent topic: Federal Acquisition Regulation'")
+    return FarRecognition(round(score, 2), reasons or ["no FAR Part structure"])
+
+
+_PARENT_TOPIC = re.compile(r"Parent topic:\s*Federal Acquisition Regulation", re.I)
+
+
+def recognize_far_part(raw: bytes) -> FarRecognition:
+    """Structural evidence that a document IS a FAR Part (not a contract
+    that cites FAR clauses): a Part heading, Subpart headings and many
+    numbered FAR headings of that Part, each opening its own section. The
+    filename is never consulted."""
 
     root = parse(raw)
-    part = subparts = numbered = prescribed = 0
+    part: str | None = None
+    subparts = numbered = prescribed = 0
+    numbers: list[str] = []
     for heading in root.xpath("//h1|//h2|//h3|//h4|//h5|//h6"):
         number, _title = _split_heading(heading)
         if number is None:
             continue
         if _PART.match(number):
-            part += 1
-        elif _SUBPART.match(number):
+            part = part or part_number(number)
+        else:
+            numbers.append(number)
+    part_of = part or (part_number(numbers[0]) if numbers else None)
+    for number in numbers:
+        if part_number(number) != part_of:
+            continue
+        if _SUBPART.match(number):
             subparts += 1
         else:
             numbered += 1
     for p in root.xpath("//p"):
         if _PRESCRIPTION.match(clean(p.text_content())):
             prescribed += 1
+    return score_far_structure(part, subparts, numbered, prescribed, bool(_PARENT_TOPIC.search(root.text_content())))
 
-    reasons: list[str] = []
-    score = 0.0
-    if part:
-        score += 0.25
-        reasons.append("Part 52 heading")
-    if subparts >= 2:
-        score += 0.25
-        reasons.append(f"{subparts} Subpart 52.x headings")
-    if numbered >= 20:
-        score += 0.3
-        reasons.append(f"{numbered} numbered FAR section/clause headings")
-    if prescribed >= 10:
-        score += 0.2
-        reasons.append(f"{prescribed} 'As prescribed in' prescriptions")
-    return FarRecognition(round(score, 2), reasons or ["no FAR Part 52 structure"])
+
+# Kept for callers of the Part 52 name.
+recognize_far_part_52 = recognize_far_part

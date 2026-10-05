@@ -33,6 +33,8 @@ from app.source_structure.service import document_page_words, get_or_build_sourc
 from app.staging.labels import humanize_label
 from app.staging.models import CellProvenance, ExportCapability, SourceColumn, SourceColumnValue
 from app.staging.profile import (
+    SOURCE_SHEET,
+    ExportSheet,
     AdapterResult,
     DatasetDefinition,
     FieldDefinition,
@@ -790,6 +792,13 @@ ACADEMIC_TRANSCRIPT_PROFILE = StagingProfile(
     document_families=("academic_transcript",),
     datasets=(STUDENT_PROGRAM, ACADEMIC_RECORD, ACADEMIC_SUMMARY, OTHER_INFORMATION, ALL_FIELDS, QA_REVIEW),
     adapter=adapt_transcript,
+    export_sheets=(
+        ExportSheet("Student & Program", ("student_program",)),
+        ExportSheet("Academic Record", ("academic_record",)),
+        ExportSheet("Academic Summary", ("academic_summary",)),
+        ExportSheet("Other Information", ("other_information",)),
+        ExportSheet(SOURCE_SHEET, ()),
+    ),
     export_capabilities=(
         ExportCapability(
             capability_id="professional_excel",

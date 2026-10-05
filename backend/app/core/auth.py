@@ -209,3 +209,20 @@ def require_permission(permission: Permission):
         return actor
 
     return _check
+
+
+def require_any_permission(*permissions: Permission):
+    """FastAPI dependency factory — 403 unless the actor has one of
+    ``permissions`` (finer checks happen in the handler)."""
+
+    async def _check(
+        actor: ActorContext = Depends(get_current_actor),
+    ) -> ActorContext:
+        if not any(actor.has(permission) for permission in permissions):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Permission denied: {' or '.join(permissions)}",
+            )
+        return actor
+
+    return _check

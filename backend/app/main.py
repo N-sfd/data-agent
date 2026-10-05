@@ -146,7 +146,8 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
-    expose_headers=["X-Request-ID"],
+    # Content-Disposition carries the export's file name to the browser app.
+    expose_headers=["X-Request-ID", "Content-Disposition"],
 )
 
 app.include_router(

@@ -551,7 +551,8 @@ def test_all_fields_is_the_union_and_its_csv_is_never_header_only():
     import csv
     import io
 
-    rows = list(csv.reader(io.StringIO(csv_text)))
+    # The CSV opens with a UTF-8 BOM so Excel reads it as UTF-8.
+    rows = list(csv.reader(io.StringIO(csv_text.removeprefix("﻿"))))
     assert rows[0] == ["Category", "Field", "Value", "Type", "Found By", "Source Page", "Evidence", "Review Status"]
     assert len(rows) - 1 == len(records) > 0
 

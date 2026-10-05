@@ -151,6 +151,10 @@ def _append_qa_info(workbook: StagingWorkbook, record_id: str, values: dict) -> 
     return workbook
 
 
+# Long text in a grid is a preview; the full text loads with the record.
+GRID_TEXT_PREVIEW = 400
+
+
 def compact_for_grid(workbook: StagingWorkbook) -> StagingWorkbook:
     """The workbook as served to the UI: a dataset that declares grid
     fields carries only those cells per record — value and review state,
@@ -163,17 +167,20 @@ def compact_for_grid(workbook: StagingWorkbook) -> StagingWorkbook:
             continue
         keep = set(dataset.grid_fields) | set(dataset.identity_fields)
         for record in dataset.records:
-            record.cells = {
-                k: v.model_copy(
-                    update={
-                        "provenance": None,
-                        "raw_value": None,
-                        "validation": CellValidation(status=v.validation.status),
-                    }
-                )
-                for k, v in record.cells.items()
-                if k in keep
-            }
+            cells = {}
+            for k, v in record.cells.items():
+                if k not in keep:
+                    continue
+                update = {
+                    "provenance": None,
+                    "raw_value": None,
+                    "validation": CellValidation(status=v.validation.status),
+                }
+                if not dataset.full_text and isinstance(v.value, str) and len(v.value) > GRID_TEXT_PREVIEW:
+                    update["value"] = v.value[:GRID_TEXT_PREVIEW].rstrip() + "…"
+                    record.truncated_fields.append(k)
+                cells[k] = v.model_copy(update=update)
+            record.cells = cells
             record.source_columns = []
         dataset.compact = True
     return workbook

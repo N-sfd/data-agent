@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.api.downloads import attachment_header
 from app.core.auth import ActorContext, require_permission
 from app.core.config import get_settings
 from app.core.observability import get_request_id
@@ -173,7 +174,7 @@ async def export_document_csv(
         content=csv_body,
         media_type="text/csv; charset=utf-8",
         headers={
-            "Content-Disposition": f'attachment; filename="{filename}"',
+            "Content-Disposition": attachment_header(filename),
         },
     )
 
@@ -216,7 +217,7 @@ async def export_line_items_csv(
         content=csv_body,
         media_type="text/csv; charset=utf-8",
         headers={
-            "Content-Disposition": f'attachment; filename="{filename}"',
+            "Content-Disposition": attachment_header(filename),
         },
     )
 
@@ -265,7 +266,7 @@ async def export_document_xlsx(
             "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         ),
         headers={
-            "Content-Disposition": f'attachment; filename="{filename}"',
+            "Content-Disposition": attachment_header(filename),
         },
     )
 

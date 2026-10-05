@@ -8,7 +8,8 @@ analyst         Upload, extract, view; draft edit; no approve/send
 viewer          Read-only repository/results (no review/export/send)
 service_account API-only scoped extraction/export (and send if granted)
 workspace       Built-in role for credential-less requests: upload, extract,
-                review, ordinary export; no delete/authoritative/Oracle/admin
+                review, ordinary export, delete its own uploads; no
+                authoritative export/Oracle/admin
 """
 
 from __future__ import annotations
@@ -28,6 +29,8 @@ Permission = Literal[
     "documents.view",
     "documents.upload",
     "documents.delete",
+    # Delete only documents the caller's own workspace uploaded.
+    "documents.delete_own",
     "extraction.run",
     "fields.edit_draft",
     "review.accept",
@@ -116,6 +119,8 @@ ROLE_PERMISSIONS: Final[dict[Role, frozenset[Permission]]] = {
             "review.edit",
             "review.reject",
             "export.read",
+            # Its own uploads only (services/document_deletion.py).
+            "documents.delete_own",
             # no documents.delete, export.authoritative, oracle.*, admin.*
         }
     ),

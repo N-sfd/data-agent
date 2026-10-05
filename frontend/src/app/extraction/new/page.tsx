@@ -1,10 +1,11 @@
 "use client";
 
 import { Suspense, useEffect, useRef, useState } from "react";
+import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 
 
-import { Sparkles } from "lucide-react";
+import { ArrowRight, Sparkles } from "lucide-react";
 
 import ContentSection from "@/components/layout/ContentSection";
 import PageHero from "@/components/layout/PageHero";
@@ -44,6 +45,7 @@ import {
   universalExtract,
 } from "@/lib/documents";
 import { listExtractionModels } from "@/lib/extraction-models";
+import { getStagingProfile, type ProfileDescriptor } from "@/lib/staging-workbook";
 import type {
   ContractAnalysisResult,
   DiscoverSchemaResult,
@@ -121,6 +123,25 @@ function NewExtractionPageContent() {
 
   // Overlap Render cold-start with browsing/file pick — upload auto-starts when healthy.
   useEffect(() => {
+    const documentId = document?.document_id;
+    if (!documentId || !extraction) {
+      setStagingProfile(null);
+      return;
+    }
+    let active = true;
+    getStagingProfile(documentId)
+      .then((profile) => {
+        if (active) setStagingProfile(profile);
+      })
+      .catch(() => {
+        if (active) setStagingProfile(null);
+      });
+    return () => {
+      active = false;
+    };
+  }, [document?.document_id, extraction]);
+
+  useEffect(() => {
     startBackendWarmup().catch(() => {
       // Background only; uploader awaits readiness and auto-uploads the selected file.
     });
@@ -156,6 +177,17 @@ function NewExtractionPageContent() {
 
   const [contractAnalysis, setContractAnalysis] =
     useState<ContractAnalysisResult | null>(null);
+
+  // A profile that declares its own presentation (e.g. FAR Part 52) is
+  // reviewed in its document workspace, not the generic analysis tabs.
+  const [stagingProfile, setStagingProfile] =
+    useState<ProfileDescriptor | null>(null);
+  const presentedProfile = stagingProfile?.views?.length ? stagingProfile : null;
+  // Once a specific profile is resolved (XML Document, FAR Part 52,
+  // Contract…), it — not incidental keyword hits such as "Amount Due" —
+  // names the document. The generic profile defers to keyword detection.
+  const resolvedProfile =
+    stagingProfile && stagingProfile.profile_id !== "generic_business_document" ? stagingProfile : null;
 
   const [analyzingContract, setAnalyzingContract] =
     useState(false);
@@ -921,7 +953,7 @@ function NewExtractionPageContent() {
         description="Contracts, invoices, regulatory documents, spreadsheets, scans, images, and business records. Data Agent detects the type and staging profile."
       />
 
-      <ContentSection>
+      <ContentSection wide>
         <BackendStatusBanner />
         <div className="mb-8">
           <WorkflowBreadcrumb
@@ -937,7 +969,7 @@ function NewExtractionPageContent() {
           />
         </div>
 
-        <div className="extraction-workspace -mx-[max(1.5rem,3vw)]">
+        <div className="extraction-workspace">
           <div className="extraction-bar-inner">
             {!document ? (
               <div className="grid gap-6 lg:grid-cols-[minmax(0,0.48fr)_minmax(0,0.52fr)]">
@@ -975,7 +1007,7 @@ function NewExtractionPageContent() {
                 </section>
               </div>
             ) : (
-              <div className="grid gap-5 lg:grid-cols-[minmax(280px,0.38fr)_minmax(0,0.62fr)]">
+              <div className="grid gap-5 lg:grid-cols-[minmax(300px,30fr)_minmax(0,70fr)]">
                 <section className="space-y-4 lg:sticky lg:top-4 lg:self-start">
                   <DocumentOverview
                     document={document}
@@ -1022,46 +1054,90 @@ function NewExtractionPageContent() {
                 </section>
 
                 <section className="min-w-0 space-y-5">
-                  <AnalysisRequest
-                    disabled={!extraction || extracting}
-                    onAnalyze={handleAnalyze}
-                    onExtractTargets={handleExtractTargets}
-                    waking={waking}
-                    extractionJob={targetExtractionJob}
-                    onAddCustomField={handleAddCustomField}
-                    onRenameCustomField={handleRenameCustomField}
-                    onDeleteCustomField={handleDeleteCustomField}
-                    targets={(schemaDiscovery?.targets ?? []).filter(
-                      (target) =>
-                        target.source !== "template" &&
-                        target.source_examples.length > 0 &&
-                        target.target_type !== "clause" &&
-                        target.target_type !== "section" &&
-                        target.target_type !== "obligation" &&
-                        !target.key.startsWith("table_p"),
-                    )}
-                    documentFamily={schemaDiscovery?.document_family}
-                    documentFamilyLabel={
-                      schemaDiscovery?.document_family_label
-                    }
-                    documentFamilyConfidence={
-                      schemaDiscovery?.document_family_confidence
-                    }
-                    schemaDiscovering={schemaDiscovering}
-                    documentProcessing={extracting && !schemaDiscovering}
-                    pipelineStage={pipelineStage}
-                    schemaDiscoveryError={schemaDiscoveryError}
-                    onRetryDiscovery={() =>
-                      document && runSchemaDiscovery(document.document_id)
-                    }
-                  />
+                  {!presentedProfile && (
+                    <AnalysisRequest
+                      disabled={!extraction || extracting}
+                      onAnalyze={handleAnalyze}
+                      onExtractTargets={handleExtractTargets}
+                      waking={waking}
+                      extractionJob={targetExtractionJob}
+                      onAddCustomField={handleAddCustomField}
+                      onRenameCustomField={handleRenameCustomField}
+                      onDeleteCustomField={handleDeleteCustomField}
+                      targets={(schemaDiscovery?.targets ?? []).filter(
+                        (target) =>
+                          target.source !== "template" &&
+                          target.source_examples.length > 0 &&
+                          target.target_type !== "clause" &&
+                          target.target_type !== "section" &&
+                          target.target_type !== "obligation" &&
+                          !target.key.startsWith("table_p"),
+                      )}
+                      documentFamily={
+                        resolvedProfile
+                          ? (resolvedProfile.document_families[0] ?? null)
+                          : schemaDiscovery?.document_family
+                      }
+                      documentFamilyLabel={
+                        resolvedProfile?.display_name ??
+                        schemaDiscovery?.document_family_label
+                      }
+                      documentFamilyConfidence={
+                        resolvedProfile
+                          ? undefined
+                          : schemaDiscovery?.document_family_confidence
+                      }
+                      schemaDiscovering={schemaDiscovering}
+                      documentProcessing={extracting && !schemaDiscovering}
+                      pipelineStage={pipelineStage}
+                      schemaDiscoveryError={schemaDiscoveryError}
+                      onRetryDiscovery={() =>
+                        document && runSchemaDiscovery(document.document_id)
+                      }
+                    />
+                  )}
 
-                  {extraction && !contractAnalysis && (
+                  {extraction && presentedProfile && document && (
+                    <div className="editorial-card animate-fade-in p-6">
+                      <p className="text-base font-medium text-foreground">
+                        {presentedProfile.display_name}
+                      </p>
+                      <p className="mt-2 text-sm leading-6 text-text-secondary">
+                        {presentedProfile.description}
+                      </p>
+                      <ul className="mt-4 flex flex-wrap gap-2">
+                        {(presentedProfile.views ?? []).map((view) => (
+                          <li key={view.view_id}>
+                            <Link
+                              href={`/documents/${document.document_id}?view=${view.view_id}`}
+                              className="inline-flex rounded-full border border-border px-3 py-1 text-xs text-text-secondary hover:bg-surface-soft hover:text-foreground"
+                            >
+                              {view.label}
+                            </Link>
+                          </li>
+                        ))}
+                      </ul>
+                      <Link
+                        href={`/documents/${document.document_id}`}
+                        className="btn-primary mt-5"
+                      >
+                        Open {presentedProfile.views?.[0]?.label}
+                        <ArrowRight className="h-4 w-4" />
+                      </Link>
+                    </div>
+                  )}
+
+                  {extraction && !contractAnalysis && !presentedProfile && (
                     <div className="editorial-card animate-fade-in p-6">
                       <p className="text-base font-medium text-foreground">
                         Document Intelligence
                       </p>
-                      {schemaDiscovery &&
+                      {resolvedProfile ? (
+                        <p className="mt-1 text-xs text-text-secondary">
+                          Detected: {resolvedProfile.display_name}
+                        </p>
+                      ) : (
+                        schemaDiscovery &&
                         schemaDiscovery.document_family !== "unknown" && (
                           <p className="mt-1 text-xs text-text-secondary">
                             Detected: {schemaDiscovery.document_family_label}
@@ -1070,7 +1146,8 @@ function NewExtractionPageContent() {
                               schemaDiscovery.document_family_confidence,
                             )}
                           </p>
-                        )}
+                        )
+                      )}
                       <p className="mt-2 text-sm leading-6 text-text-secondary">
                         Classify this document, extract structured metadata, and
                         detect related documents when present.
@@ -1197,7 +1274,7 @@ function NewExtractionPageContent() {
           </div>
         </div>
 
-        {document && targetResult && !contractAnalysis && (
+        {document && targetResult && !contractAnalysis && !presentedProfile && (
           <div className="extraction-workspace -mx-[max(1.5rem,3vw)] mt-8">
             <div
               ref={targetResultRef}
@@ -1228,7 +1305,7 @@ function NewExtractionPageContent() {
           </div>
         )}
 
-        {document && universalResult && !contractAnalysis && (
+        {document && universalResult && !contractAnalysis && !presentedProfile && (
           <div className="extraction-workspace -mx-[max(1.5rem,3vw)] mt-8">
             <div
               ref={universalResultRef}

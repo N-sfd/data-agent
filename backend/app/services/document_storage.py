@@ -276,11 +276,14 @@ def delete_object(settings: Settings, object_name: str) -> None:
     if not is_remote_storage_configured(settings):
         return
 
-    httpx.delete(
+    response = httpx.delete(
         _object_url(settings, object_name),
         headers=_headers(settings),
         timeout=REQUEST_TIMEOUT_SECONDS,
     )
+    # Already gone is fine; any other failure is reported to the caller.
+    if response.status_code >= 400 and not _is_not_found_response(response):
+        raise RuntimeError(f"Storage delete failed ({response.status_code}) for {object_name}.")
 
 
 def classify_source_location(

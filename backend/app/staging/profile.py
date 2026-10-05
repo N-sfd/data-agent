@@ -22,6 +22,7 @@ from app.staging.models import (
     CellProvenance,
     DatasetRole,
     ExportCapability,
+    ProfileView,
     SourceColumn,
     SourceColumnValue,
     ValidationCheck,
@@ -94,6 +95,17 @@ class DatasetDefinition:
     # column_labels) are listed in the served dataset, so a view can keep
     # every column the source prints even when it is empty.
     source_adaptive_columns: bool = False
+    # Only the columns a document names (AdapterResult.column_labels) are
+    # served — for sources whose columns are entirely the file's own (XML
+    # element names), declared as generic slots.
+    labelled_columns_only: bool = False
+    # Grid rows carry complete values (no long-text preview) and the grid
+    # shows them in full — for a dataset that IS the reading view of a
+    # document (FAR Clauses & Provisions).
+    full_text_grid: bool = False
+    # False for a presentation over records other datasets already hold
+    # (e.g. Contract Data): its rows are reviewed but not counted again.
+    counts_records: bool = True
 
 
 @dataclass
@@ -130,6 +142,12 @@ class AdapterResult:
     # For tables whose columns a document names itself ("Unit Code" where
     # the field is course.code). Canonical ids never change.
     column_labels: dict[str, dict[str, str]] = field(default_factory=dict)
+    # Per-document dataset captions and descriptions (dataset id → text),
+    # e.g. "Clauses" for the records of an XML file's <Clause> elements.
+    dataset_names: dict[str, str] = field(default_factory=dict)
+    dataset_descriptions: dict[str, str] = field(default_factory=dict)
+    # Datasets this document has no use for (unused record slots).
+    omit_datasets: set[str] = field(default_factory=set)
 
 
 AdapterFn = Callable[[Session, Document], AdapterResult]
@@ -171,6 +189,22 @@ ExporterFn = Callable[[Session, Document, str], "ExportArtifact | None"]
 
 
 @dataclass(frozen=True)
+class ExportSheet:
+    """One sheet of a profile's Excel workbook: the datasets it combines,
+    in order. `title` None = the (first populated) dataset's own name.
+    `first_populated` takes only the first dataset that has records (e.g.
+    the schedule's line items, else the V3 CLINs). Empty sheets are never
+    written."""
+
+    title: str | None
+    dataset_ids: tuple[str, ...]
+    first_populated: bool = False
+
+
+SOURCE_SHEET = "Source"
+
+
+@dataclass(frozen=True)
 class StagingProfile:
     profile_id: str
     profile_version: int
@@ -196,6 +230,12 @@ class StagingProfile:
     contract_pipeline: bool = True
     materializer: MaterializerFn | None = None
     exporter: ExporterFn | None = None
+    # Document-specific presentation: the tabs and the datasets in each.
+    views: tuple[ProfileView, ...] = ()
+    # The Excel workbook's sheets (export.xlsx); empty = one sheet per
+    # dataset. A sheet titled SOURCE_SHEET lists the document and its
+    # source datasets.
+    export_sheets: tuple[ExportSheet, ...] = ()
 
     @property
     def key(self) -> str:

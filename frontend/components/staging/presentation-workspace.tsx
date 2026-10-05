@@ -6,6 +6,9 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { SourceViewRequest } from "@/components/source-verification-panel";
 import EvidenceDrawer, { type EvidenceTarget } from "@/components/staging/evidence-drawer";
 import { cellSourceRequest, formatCellValue } from "@/components/staging/review-status";
+import ResizeHandle, { useGridSizes } from "@/components/staging/resize-handle";
+import SelectCheckbox from "@/components/staging/select-checkbox";
+import SelectionToolbar from "@/components/staging/selection-toolbar";
 import StagingDatasetTable from "@/components/staging/staging-dataset-table";
 import StagingFieldList from "@/components/staging/staging-field-list";
 import StagingRecordDrawer from "@/components/staging/staging-record-drawer";
@@ -13,10 +16,29 @@ import {
   composePresentation,
   isBlank,
   type FieldItem,
+  type FieldSource,
   type PresentationGroup,
   type PresentationSection,
 } from "@/lib/presentation-manifest";
-import type { StagingCell, StagingColumn, StagingRecord, StagingWorkbook } from "@/lib/staging-workbook";
+import {
+  downloadSelectedFieldsExport,
+  type SelectedExportFormat,
+  type SelectedFieldRef,
+  type StagingCell,
+  type StagingColumn,
+  type StagingRecord,
+  type StagingWorkbook,
+} from "@/lib/staging-workbook";
+import {
+  allSelected,
+  isSelected,
+  rangeBlock,
+  setCells,
+  someSelected,
+  toggleBlock,
+  toggleCell,
+  useTableSelection,
+} from "@/lib/table-selection";
 
 export interface MoreAction {
   label: string;
@@ -32,6 +54,10 @@ interface WorkspaceProps {
   /** Reviewer/developer views offered under "More" (extraction details,
    * source structure, diagnostics); raw staging data is always offered. */
   moreActions?: MoreAction[];
+  /** Off where the page already names the document (its own heading). */
+  showHeading?: boolean;
+  /** Off where the page has its own technical tabs (Staging …). */
+  showTechnical?: boolean;
 }
 
 const ISO_DATE = /^(\d{4})-(\d{2})-(\d{2})$/;
@@ -49,13 +75,49 @@ export function displayText(text: string): string {
 /** The business-facing workspace: what information is in this document.
  * How it was extracted lives behind Details (the evidence drawer) and the
  * collapsed technical view. */
-export default function PresentationWorkspace({ workbook, documentId, onOpenSource, onViewInDocument, moreActions = [] }: WorkspaceProps) {
+export default function PresentationWorkspace({
+  workbook,
+  documentId,
+  onOpenSource,
+  onViewInDocument,
+  moreActions = [],
+  showHeading = true,
+  showTechnical: offerTechnical = true,
+}: WorkspaceProps) {
   const manifest = useMemo(() => composePresentation(workbook), [workbook]);
   const [active, setActive] = useState(manifest.groups[0]?.id ?? "");
   const [target, setTarget] = useState<EvidenceTarget | null>(null);
   const [showTechnical, setShowTechnical] = useState(false);
   const technicalRef = useRef<HTMLDivElement>(null);
   const current = manifest.groups.find((group) => group.id === active) ?? manifest.groups[0];
+
+  // Values picked in label / value lists (Supplier, Charges & Totals …),
+  // across tabs, by item id; exported together as Section | Field | Value.
+  const [picked, setPicked] = useState<ReadonlySet<string>>(new Set());
+  const pick = (items: FieldItem[], on: boolean) =>
+    setPicked((previous) => {
+      const next = new Set(previous);
+      for (const item of items) {
+        if (!item.source) continue;
+        if (on) next.add(item.id);
+        else next.delete(item.id);
+      }
+      return next;
+    });
+  // Display order, each stored value once.
+  const pickedItems = useMemo(() => {
+    const seen = new Set<string>();
+    return manifest.groups
+      .flatMap((group) => group.sections)
+      .filter((section) => section.pattern !== "grid")
+      .flatMap((section) => section.items)
+      .filter((item) => {
+        if (!picked.has(item.id) || !item.source || seen.has(item.id)) return false;
+        seen.add(item.id);
+        return true;
+      });
+  }, [manifest, picked]);
+  const listItems = (current?.sections ?? []).filter((section) => section.pattern !== "grid").flatMap((section) => section.items);
 
   const viewInDocument = (evidence: EvidenceTarget) => {
     setTarget(null);
@@ -64,26 +126,41 @@ export default function PresentationWorkspace({ workbook, documentId, onOpenSour
     else onViewInDocument?.(evidence);
   };
 
+  const hasHeader = showHeading || Boolean(manifest.subtitle) || moreActions.length > 0 || offerTechnical;
+
   return (
-    <div className="space-y-5">
+    // While anything is picked, every list checkbox shows (selection mode).
+    <div className={`space-y-5 ${picked.size > 0 ? "list-selecting" : ""}`}>
+      {hasHeader && (
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <h3 className="text-lg font-semibold tracking-tight text-foreground">{manifest.heading}</h3>
-          {manifest.subtitle && <p className="mt-0.5 text-sm text-text-secondary">{manifest.subtitle}</p>}
+          {showHeading && <h3 className="text-lg font-semibold tracking-tight text-foreground">{manifest.heading}</h3>}
+          {manifest.subtitle && (
+            <p className={showHeading ? "mt-0.5 text-sm text-text-secondary" : "text-sm font-medium text-foreground"}>
+              {manifest.subtitle}
+            </p>
+          )}
         </div>
-        <MoreMenu
-          actions={[
-            ...moreActions,
-            {
-              label: "Raw staging data",
-              onSelect: () => {
-                setShowTechnical(true);
-                requestAnimationFrame(() => technicalRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }));
-              },
-            },
-          ]}
-        />
+        {(offerTechnical || moreActions.length > 0) && (
+          <MoreMenu
+            actions={[
+              ...moreActions,
+              ...(offerTechnical
+                ? [
+                    {
+                      label: "Raw staging data",
+                      onSelect: () => {
+                        setShowTechnical(true);
+                        requestAnimationFrame(() => technicalRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }));
+                      },
+                    },
+                  ]
+                : []),
+            ]}
+          />
+        )}
       </div>
+      )}
 
       {manifest.groups.length > 0 && (
         <div role="tablist" aria-label="Document sections" className="flex flex-wrap gap-1.5">
@@ -111,8 +188,35 @@ export default function PresentationWorkspace({ workbook, documentId, onOpenSour
         </div>
       )}
 
+      {pickedItems.length > 0 && (
+        <SelectionToolbar
+          documentId={documentId}
+          datasetId=""
+          filename={workbook.document_filename}
+          selection={new Map(pickedItems.map((item) => [item.id, new Set(["value"])]))}
+          summary={`${pickedItems.length} value${pickedItems.length === 1 ? "" : "s"} selected`}
+          onClear={() => setPicked(new Set())}
+          onSelectVisible={() => pick(listItems, true)}
+          exportSelection={(format) =>
+            downloadSelectedFieldsExport(
+              documentId,
+              format,
+              pickedItems.flatMap((item) => (item.source ? [fieldRef(item.source)] : [])),
+              workbook.document_filename,
+            )
+          }
+        />
+      )}
+
       {current ? (
-        <GroupBody group={current} documentId={documentId} onSelect={setTarget} onOpenSource={onOpenSource} />
+        <GroupBody
+          group={current}
+          documentId={documentId}
+          onSelect={setTarget}
+          onOpenSource={onOpenSource}
+          picked={picked}
+          onPick={pick}
+        />
       ) : (
         <p className="rounded-xl border border-border bg-surface-soft px-4 py-8 text-center text-sm text-text-secondary">
           No business information was found in this document. Use Source to inspect the file.
@@ -136,17 +240,56 @@ export default function PresentationWorkspace({ workbook, documentId, onOpenSour
   );
 }
 
+/** Selection in a label / value list: which values are picked, and a
+ * setter for a set of them (a row, or a whole section). */
+interface ListPicking {
+  picked: ReadonlySet<string>;
+  onPick: (items: FieldItem[], on: boolean) => void;
+}
+
+function fieldRef(source: FieldSource): SelectedFieldRef {
+  return { dataset_id: source.datasetId, record_id: source.recordId, field: source.field };
+}
+
+/** A list section's checkbox: every selectable value in it. */
+function SectionCheckbox({ items, label, picked, onPick }: { items: FieldItem[]; label: string } & ListPicking) {
+  const selectable = items.filter((item) => item.source);
+  if (selectable.length === 0) return null;
+  const count = selectable.filter((item) => picked.has(item.id)).length;
+  const all = count === selectable.length;
+  return (
+    <SelectCheckbox
+      className="list-check"
+      checked={all}
+      indeterminate={count > 0}
+      onChange={() => onPick(selectable, !all)}
+      label={`Select all values in ${label}`}
+    />
+  );
+}
+
+/** A list row's checkbox (a spacer for a value with no stored cell). */
+function ItemCheckbox({ item, picked, onPick }: { item: FieldItem } & ListPicking) {
+  if (!item.source) return <span className="inline-block w-3.5 shrink-0" aria-hidden="true" />;
+  const on = picked.has(item.id);
+  return (
+    <SelectCheckbox className="list-check" checked={on} onChange={() => onPick([item], !on)} label={`Select ${item.label}`} />
+  );
+}
+
 function GroupBody({
   group,
   documentId,
   onSelect,
   onOpenSource,
+  picked,
+  onPick,
 }: {
   group: PresentationGroup;
   documentId: string;
   onSelect: (target: EvidenceTarget) => void;
   onOpenSource?: (request: SourceViewRequest) => void;
-}) {
+} & ListPicking) {
   // A tab may offer alternative views of the same records (Contract View /
   // Transformation View); sections without a view always show.
   const views = [...new Set(group.sections.map((section) => section.view).filter((view): view is string => Boolean(view)))];
@@ -178,21 +321,28 @@ function GroupBody({
           {section.supertitle && (
             <h3 className="border-b border-border pb-1 pt-2 text-sm font-semibold text-foreground">{section.supertitle}</h3>
           )}
-          {section.title && section.pattern !== "card" && (
-            <h4 className="text-xs font-semibold uppercase tracking-[0.08em] text-text-secondary">{section.title}</h4>
-          )}
-          {section.title && section.pattern === "card" && (
-            <h4 className="text-sm font-semibold text-foreground">{section.title}</h4>
+          {section.title && (
+            // The checkbox sits beside the heading, not in it (the heading's name stays the title).
+            <div className="list-row flex items-center gap-2">
+              {section.pattern !== "grid" && (
+                <SectionCheckbox items={section.items} label={section.title} picked={picked} onPick={onPick} />
+              )}
+              {section.pattern === "card" ? (
+                <h4 className="text-sm font-semibold text-foreground">{section.title}</h4>
+              ) : (
+                <h4 className="text-xs font-semibold uppercase tracking-[0.08em] text-text-secondary">{section.title}</h4>
+              )}
+            </div>
           )}
           {section.note && <p className="text-xs text-text-muted">{section.note}</p>}
           {section.pattern === "grid" ? (
             <RecordGrid section={section} groupLabel={group.label} documentId={documentId} onSelect={onSelect} onOpenSource={onOpenSource} />
           ) : section.pattern === "summary" ? (
-            <SummaryBlock items={section.items} onSelect={onSelect} />
+            <SummaryBlock items={section.items} onSelect={onSelect} picked={picked} onPick={onPick} />
           ) : section.pattern === "card" ? (
-            <SummaryCard items={section.items} onSelect={onSelect} />
+            <SummaryCard items={section.items} onSelect={onSelect} picked={picked} onPick={onPick} />
           ) : (
-            <DetailList items={section.items} onSelect={onSelect} />
+            <DetailList items={section.items} onSelect={onSelect} picked={picked} onPick={onPick} />
           )}
         </section>
       ))}
@@ -233,11 +383,14 @@ function ValueButton({
   onOpen,
   className = "",
   wrap = false,
+  whole = false,
 }: {
   text: string;
   onOpen: () => void;
   className?: string;
   wrap?: boolean;
+  /** Never ellipsized (amounts): one line, at its full width. */
+  whole?: boolean;
 }) {
   return (
     <button
@@ -246,7 +399,7 @@ function ValueButton({
       title="View source evidence"
       className={`group/value -mx-1 inline-flex max-w-full items-baseline gap-1.5 rounded px-1 text-left text-foreground transition-colors hover:bg-primary/[0.06] hover:text-primary ${className}`}
     >
-      <span className={wrap ? "min-w-0 whitespace-pre-line break-words" : "min-w-0 truncate"}>{text}</span>
+      <span className={wrap ? "min-w-0 whitespace-pre-line break-words" : whole ? "whitespace-nowrap" : "min-w-0 truncate"}>{text}</span>
       <FileSearch
         aria-hidden="true"
         className="h-3.5 w-3.5 shrink-0 self-center text-primary opacity-0 transition-opacity group-hover/value:opacity-70 group-focus-visible/value:opacity-70"
@@ -259,16 +412,19 @@ function ValueButton({
 
 /** A document-summary card: label over value, two or three per row. Each
  * value still opens its source evidence. */
-function SummaryCard({ items, onSelect }: { items: FieldItem[]; onSelect: (target: EvidenceTarget) => void }) {
+function SummaryCard({ items, onSelect, picked, onPick }: { items: FieldItem[]; onSelect: (target: EvidenceTarget) => void } & ListPicking) {
   return (
     <dl className="grid gap-x-8 gap-y-4 rounded-xl border border-border bg-surface px-5 py-4 sm:grid-cols-2 lg:grid-cols-3">
       {items.map((item) => {
         const open = () => onSelect(itemTarget(item));
         const text = formatCellValue(item.cell);
         return (
-          <div key={item.id} className={`min-w-0 ${text.length > 80 ? "sm:col-span-2 lg:col-span-3" : ""}`}>
-            <dt className="text-xs text-text-secondary">{item.label}</dt>
-            <dd className="mt-0.5 flex min-w-0 flex-wrap items-center gap-2 text-sm">
+          <div key={item.id} className={`list-row min-w-0 ${text.length > 80 ? "sm:col-span-2 lg:col-span-3" : ""}`}>
+            <dt className="flex items-center gap-1.5 text-xs text-text-secondary">
+              <ItemCheckbox item={item} picked={picked} onPick={onPick} />
+              {item.label}
+            </dt>
+            <dd className="mt-0.5 flex min-w-0 flex-wrap items-center gap-2 pl-5 text-sm">
               <ValueButton text={displayText(text)} onOpen={open} className="font-medium" wrap />
               <ReviewMark cell={item.cell} onOpen={open} />
             </dd>
@@ -281,14 +437,22 @@ function SummaryCard({ items, onSelect }: { items: FieldItem[]; onSelect: (targe
 
 // --- A. Detail group ------------------------------------------------------------
 
-function DetailList({ items, onSelect }: { items: FieldItem[]; onSelect: (target: EvidenceTarget) => void }) {
+function DetailList({ items, onSelect, picked, onPick }: { items: FieldItem[]; onSelect: (target: EvidenceTarget) => void } & ListPicking) {
   return (
     <dl className="divide-y divide-border overflow-hidden rounded-xl border border-border bg-surface">
       {items.map((item) => {
         const open = () => onSelect(itemTarget(item));
         return (
-          <div key={item.id} className="grid gap-x-6 gap-y-0.5 px-4 py-2.5 sm:grid-cols-[minmax(10rem,32%)_1fr]">
-            <dt className="text-sm text-text-secondary">{item.label}</dt>
+          <div
+            key={item.id}
+            className={`list-row grid gap-x-6 gap-y-0.5 px-4 py-2.5 sm:grid-cols-[minmax(10rem,32%)_1fr] ${picked.has(item.id) ? "cell-selected" : ""}`}
+          >
+            <dt className="flex items-start gap-2 text-sm text-text-secondary">
+              <span className="flex h-5 items-center">
+                <ItemCheckbox item={item} picked={picked} onPick={onPick} />
+              </span>
+              {item.label}
+            </dt>
             <dd className="flex min-w-0 flex-wrap items-center justify-between gap-2 text-sm">
               <ValueButton text={displayText(formatCellValue(item.cell))} onOpen={open} className="font-medium" wrap />
               <ReviewMark cell={item.cell} onOpen={open} />
@@ -302,7 +466,7 @@ function DetailList({ items, onSelect }: { items: FieldItem[]; onSelect: (target
 
 // --- C. Summary block -------------------------------------------------------------
 
-function SummaryBlock({ items, onSelect }: { items: FieldItem[]; onSelect: (target: EvidenceTarget) => void }) {
+function SummaryBlock({ items, onSelect, picked, onPick }: { items: FieldItem[]; onSelect: (target: EvidenceTarget) => void } & ListPicking) {
   return (
     <dl className="max-w-md rounded-xl border border-border bg-surface px-4 py-2">
       {items.map((item) => {
@@ -311,14 +475,18 @@ function SummaryBlock({ items, onSelect }: { items: FieldItem[]; onSelect: (targ
           <div
             key={item.id}
             className={[
-              "flex items-baseline justify-between gap-4 py-1.5 text-sm",
+              "list-row flex items-baseline justify-between gap-4 py-1.5 text-sm",
               item.emphasis === "total" ? "mt-1 border-t border-border pt-2.5 font-semibold" : "",
+              picked.has(item.id) ? "cell-selected -mx-2 rounded px-2" : "",
             ].join(" ")}
           >
-            <dt className={item.emphasis === "total" ? "text-foreground" : "text-text-secondary"}>{item.label}</dt>
-            <dd className="flex items-center gap-2">
+            <dt className={`flex items-center gap-2 ${item.emphasis === "total" ? "text-foreground" : "text-text-secondary"}`}>
+              <ItemCheckbox item={item} picked={picked} onPick={onPick} />
+              {item.label}
+            </dt>
+            <dd className="flex shrink-0 items-center gap-2">
               <ReviewMark cell={item.cell} onOpen={open} />
-              <ValueButton text={formatCellValue(item.cell)} onOpen={open} className="tabular-nums" />
+              <ValueButton text={formatCellValue(item.cell)} onOpen={open} className="tabular-nums" whole />
             </dd>
           </div>
         );
@@ -331,6 +499,9 @@ function SummaryBlock({ items, onSelect }: { items: FieldItem[]; onSelect: (targ
 
 type Filter = "all" | "Verified" | "Needs Review";
 const PAGE_SIZE = 25;
+/** A grid cell's padding (px-3 / py-2): a set size is the cell's outer size. */
+const CELL_PAD_X = 24;
+const CELL_PAD_Y = 16;
 
 function RecordGrid({
   section,
@@ -376,6 +547,57 @@ function RecordGrid({
   const keepWhole = (text: string) =>
     (columns.length > 8 && text.length <= 32) || (Boolean(section.inlineReview) && text.length <= 16);
   const identity = columns.find((column) => /description|title|name|clause|far_number|clin/i.test(column.canonical_field)) ?? columns[0];
+
+  // Excel-style selection (cell / row / column) with Export Selected, as in
+  // the staging data grid. A value still opens its evidence on click.
+  // A composed table (no staged dataset of its own) keeps its selection
+  // local, so the page's Export menu never offers it as a dataset.
+  const [selection, setSelection] = useTableSelection(
+    section.cellSources ? undefined : documentId,
+    dataset.dataset_id,
+    dataset.display_name,
+  );
+  const [anchor, setAnchor] = useState<{ recordId: string; field: string } | null>(null);
+  const fieldIds = useMemo(() => columns.map((column) => column.canonical_field), [columns]);
+  const resultIds = useMemo(() => records.map((record) => record.record_id), [records]);
+  const pagedIds = paged.map((record) => record.record_id);
+  const rowName = (record: StagingRecord) =>
+    (identity ? String(record.cells[identity.canonical_field]?.value ?? "") : "") || record.record_id;
+
+  // Excel-style column widths / row heights set by dragging an edge.
+  const sizes = useGridSizes();
+  const columnStyle = (field: string): React.CSSProperties | undefined => {
+    const width = sizes.columns[field];
+    return width ? { width: width - CELL_PAD_X, minWidth: width - CELL_PAD_X, maxWidth: width - CELL_PAD_X } : undefined;
+  };
+
+  // A table composed for display (not a staged dataset) exports its
+  // selected cells by where each value is stored.
+  function exportComposed(format: SelectedExportFormat) {
+    const refs = resultIds.flatMap((recordId) =>
+      fieldIds
+        .filter((field) => isSelected(selection, recordId, field))
+        .map((field) => section.cellSources?.[recordId]?.[field])
+        .filter((source): source is FieldSource => Boolean(source))
+        .map(fieldRef),
+    );
+    if (refs.length === 0) return Promise.reject(new Error("Select a value (not the Item column) to export."));
+    return downloadSelectedFieldsExport(documentId, format, refs, dataset.display_name);
+  }
+
+  function selectCell(event: React.MouseEvent, recordId: string, field: string) {
+    // Clicking the value itself opens its evidence.
+    if ((event.target as HTMLElement).closest("button, input")) return;
+    if (event.shiftKey && anchor) {
+      const block = rangeBlock(resultIds, fieldIds, anchor, { recordId, field });
+      if (block) {
+        setSelection((current) => setCells(current, block.recordIds, block.fields, true));
+        return;
+      }
+    }
+    setAnchor({ recordId, field });
+    setSelection((current) => toggleCell(current, recordId, field));
+  }
 
   function openCell(record: StagingRecord, column: StagingColumn) {
     const cell = record.cells[column.canonical_field];
@@ -441,17 +663,55 @@ function RecordGrid({
         </div>
       )}
 
+      <SelectionToolbar
+        documentId={documentId}
+        datasetId={dataset.dataset_id}
+        filename={dataset.display_name}
+        exportSelection={section.cellSources ? exportComposed : undefined}
+        selection={selection}
+        onClear={() => setSelection(new Map())}
+        onSelectVisible={() => setSelection((current) => setCells(current, pagedIds, fieldIds, true))}
+        resultCount={resultIds.length}
+        allResultsSelected={allSelected(selection, resultIds, fieldIds)}
+        onSelectAllResults={() => setSelection((current) => setCells(current, resultIds, fieldIds, true))}
+      />
+
       <div className="max-h-[65vh] overflow-auto rounded-xl border border-border bg-surface">
         {/* Wide target templates scroll sideways instead of squeezing every value. */}
         <table className={columns.length > 8 ? "w-max min-w-full text-sm" : "w-full text-sm"}>
           <thead className="sticky top-0 z-10 bg-surface-soft">
             <tr>
+              <th scope="col" className="w-9 px-2 py-2 text-center">
+                <SelectCheckbox
+                  checked={allSelected(selection, pagedIds, fieldIds)}
+                  indeterminate={someSelected(selection, pagedIds, fieldIds)}
+                  onChange={() => setSelection((current) => toggleBlock(current, pagedIds, fieldIds))}
+                  label={`Select all ${pagedIds.length} ${plural} on this page`}
+                />
+              </th>
               {columns.map((column) => (
                 <th
                   key={column.canonical_field}
-                  className="whitespace-nowrap px-3 py-2 text-left text-[11px] font-semibold uppercase tracking-wide text-text-secondary"
+                  className="relative whitespace-nowrap px-3 py-2 text-left text-[11px] font-semibold uppercase tracking-wide text-text-secondary"
                 >
-                  {column.display_label}
+                  <span className="flex items-center gap-1.5" style={columnStyle(column.canonical_field)}>
+                    <SelectCheckbox
+                      checked={allSelected(selection, resultIds, [column.canonical_field])}
+                      indeterminate={someSelected(selection, resultIds, [column.canonical_field])}
+                      onChange={() => setSelection((current) => toggleBlock(current, resultIds, [column.canonical_field]))}
+                      label={`Select column ${column.display_label}`}
+                      className="col-check"
+                    />
+                    <span className="min-w-0 truncate" title={column.display_label}>
+                      {column.display_label}
+                    </span>
+                  </span>
+                  <ResizeHandle
+                    axis="column"
+                    label={`Resize column ${column.display_label}`}
+                    onResize={(size) => sizes.setColumn(column.canonical_field, size)}
+                    onReset={() => sizes.setColumn(column.canonical_field, null)}
+                  />
                 </th>
               ))}
               {needsDetails && (
@@ -462,22 +722,61 @@ function RecordGrid({
             </tr>
           </thead>
           <tbody className="divide-y divide-border">
-            {paged.map((record) => (
-              <tr key={record.record_id} className="hover:bg-surface-soft/60">
+            {paged.map((record) => {
+              const height = sizes.rows[record.record_id];
+              return (
+              <tr
+                key={record.record_id}
+                className={`hover:bg-surface-soft/60 ${height ? "grid-row-wrap" : ""}`}
+                style={height ? { height } : undefined}
+              >
+                <td className="relative w-9 px-2 py-2 text-center align-top">
+                  <SelectCheckbox
+                    checked={allSelected(selection, [record.record_id], fieldIds)}
+                    indeterminate={someSelected(selection, [record.record_id], fieldIds)}
+                    onChange={() => setSelection((current) => toggleBlock(current, [record.record_id], fieldIds))}
+                    label={`Select ${singular} ${rowName(record)}`}
+                  />
+                  <ResizeHandle
+                    axis="row"
+                    label={`Resize ${singular} ${rowName(record)}`}
+                    onResize={(size) => sizes.setRow(record.record_id, size)}
+                    onReset={() => sizes.setRow(record.record_id, null)}
+                  />
+                </td>
                 {columns.map((column, index) => {
                   const cell = record.cells[column.canonical_field];
                   const text = cell && !isBlank(cell.value) ? displayText(formatCellValue(cell)) : "";
                   // Inline review: the record's identity (clause number,
                   // title) opens its details; review state is a small mark.
                   const opensRecord = section.inlineReview && (index === 0 || column.canonical_field.endsWith(".title"));
+                  const picked = isSelected(selection, record.record_id, column.canonical_field);
+                  // A hand-set width wins over keeping short values whole.
+                  const whole = keepWhole(text) && !sizes.columns[column.canonical_field];
+                  const sized = columnStyle(column.canonical_field);
                   return (
                     <td
                       key={column.canonical_field}
+                      onMouseDown={(event) => event.shiftKey && event.preventDefault()}
+                      onClick={(event) => selectCell(event, record.record_id, column.canonical_field)}
+                      aria-selected={picked}
                       // Content-sized (wide) tables: short values (numbers, codes) are
                       // never truncated; long text keeps its ellipsis.
-                      className={`max-w-[24rem] px-3 py-2 align-top ${keepWhole(text) ? "whitespace-nowrap pr-6" : ""}`}
+                      className={`max-w-[24rem] cursor-cell px-3 py-2 align-top ${picked ? "cell-selected" : ""} ${whole ? "whitespace-nowrap pr-6" : ""}`}
                       title={text}
                     >
+                      <span
+                        className={`flex min-w-0 items-baseline gap-1.5 ${height ? "overflow-hidden" : ""}`}
+                        style={height ? { ...sized, maxHeight: Math.max(0, height - CELL_PAD_Y) } : sized}
+                      >
+                      <SelectCheckbox
+                        small
+                        className="cell-check self-center"
+                        checked={picked}
+                        onChange={() => setSelection((current) => toggleCell(current, record.record_id, column.canonical_field))}
+                        label={`Select ${column.display_label} of ${rowName(record)}`}
+                      />
+                      <span className="min-w-0 flex-1">
                       {text && section.inlineReview && index === 0 && record.record_status === "Needs Review" ? (
                         <span className="flex min-w-0 items-baseline gap-1">
                           <span className="shrink-0 text-[11px] font-semibold text-warning" title="Needs review — open details" aria-label="Needs review">
@@ -489,9 +788,11 @@ function RecordGrid({
                         <ValueButton
                           text={text}
                           onOpen={() => (opensRecord ? setOpenRecord(record) : openCell(record, column))}
-                          className={keepWhole(text) ? "max-w-none" : ""}
+                          className={whole ? "max-w-none" : ""}
                         />
                       ) : null}
+                      </span>
+                      </span>
                     </td>
                   );
                 })}
@@ -512,7 +813,8 @@ function RecordGrid({
                   </td>
                 )}
               </tr>
-            ))}
+              );
+            })}
           </tbody>
         </table>
       </div>

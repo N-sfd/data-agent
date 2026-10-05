@@ -11,6 +11,7 @@ _SOURCE_TYPE_BY_SUFFIX: dict[str, SourceType] = {
     ".pdf": "pdf",
     ".html": "html",
     ".htm": "html",
+    ".xml": "xml",
     ".docx": "docx",
     ".doc": "docx",
     ".xlsx": "xlsx",

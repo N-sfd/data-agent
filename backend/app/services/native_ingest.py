@@ -17,6 +17,7 @@ from app.parsers.office_text_parsers import (
     parse_plain_text,
     parse_pptx_slides,
     parse_rtf_file,
+    parse_xml_file,
     parse_xlsx_sheets,
 )
 from app.services.security_validation import UploadTypeSpec
@@ -117,6 +118,8 @@ def ingest_native_document(
         parsed = parse_csv_file(file_path)
     elif kind == "html":
         parsed = parse_html_file(file_path)
+    elif kind == "xml":
+        parsed = parse_xml_file(file_path)
     elif kind == "rtf":
         parsed = parse_rtf_file(file_path)
     elif kind == "text":

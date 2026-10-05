@@ -5,6 +5,7 @@ import { cellSourceRequest } from "@/components/staging/review-status";
 import StagingWorkbook from "@/components/staging/staging-workbook";
 import { ApiError } from "@/lib/api";
 import {
+  downloadSelectedFieldsExport,
   getStagingWorkbook,
   type CellProvenance,
   type StagingCell,
@@ -15,9 +16,11 @@ import {
 vi.mock("@/lib/staging-workbook", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/staging-workbook")>()),
   getStagingWorkbook: vi.fn(),
+  downloadSelectedFieldsExport: vi.fn(),
 }));
 
 const getWorkbook = vi.mocked(getStagingWorkbook);
+const exportFields = vi.mocked(downloadSelectedFieldsExport);
 
 function provenance(overrides: Partial<CellProvenance> = {}): CellProvenance {
   return {
@@ -366,11 +369,11 @@ describe("StagingWorkbook rendering", () => {
     expect(screen.getByText("7. ISSUED BY — CODE")).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("tab", { name: "Line Items" }));
-    const headers = screen.getAllByRole("columnheader").map((th) => th.textContent?.trim());
+    const headers = screen.getAllByRole("columnheader").map((th) => th.textContent?.trim()).filter(Boolean); // not the selection column
     expect(headers).toEqual(["ITEM NO", "MAX QUANTITY", "MAX AMOUNT"]);
 
     fireEvent.click(screen.getByRole("tab", { name: "Clauses" }));
-    expect(screen.getAllByRole("columnheader").map((th) => th.textContent?.trim())).toEqual([
+    expect(screen.getAllByRole("columnheader").map((th) => th.textContent?.trim()).filter(Boolean)).toEqual([
       "Clause Number",
       "Title",
       "Date",
@@ -378,7 +381,7 @@ describe("StagingWorkbook rendering", () => {
     ]);
     expect(screen.getByText("Incorporated in Full Text")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Transformation View" }));
-    expect(screen.getAllByRole("columnheader").map((th) => th.textContent?.trim())).toEqual(["Number", "Lock Text Yn"]);
+    expect(screen.getAllByRole("columnheader").map((th) => th.textContent?.trim()).filter(Boolean)).toEqual(["Number", "Lock Text Yn"]);
   });
 
   it("renders a different profile from metadata alone", async () => {
@@ -764,7 +767,7 @@ describe("Academic transcript presentation", () => {
     getWorkbook.mockResolvedValue(transcriptWorkbook());
     render(<StagingWorkbook documentId="doc-1" />);
     fireEvent.click(await screen.findByRole("tab", { name: /Academic Record/ }));
-    const headers = Array.from(document.querySelectorAll("thead th")).map((th) => th.textContent);
+    const headers = Array.from(document.querySelectorAll("thead th")).map((th) => th.textContent).filter(Boolean); // not the selection column
     expect(headers).toEqual(["Course Code", "Course Title", "Grade"]);
   });
 });
@@ -905,7 +908,7 @@ describe("Invoice presentation", () => {
     getWorkbook.mockResolvedValue(invoiceWorkbook());
     render(<StagingWorkbook documentId="doc-1" />);
     fireEvent.click(await screen.findByRole("tab", { name: "Line Items" }));
-    const headers = Array.from(document.querySelectorAll("thead th")).map((th) => th.textContent);
+    const headers = Array.from(document.querySelectorAll("thead th")).map((th) => th.textContent).filter(Boolean); // not the selection column
     expect(headers).toEqual(["Description", "Qty", "Unit Price", "Amount"]);
     expect(screen.queryByText("Table 1 (page 1)")).toBeNull();
     expect(screen.queryByText("Tax (10%)")).toBeNull();
@@ -918,6 +921,32 @@ describe("Invoice presentation", () => {
     const rows = Array.from(document.querySelectorAll("dl > div")).map((row) => row.querySelector("dt")?.textContent);
     expect(rows).toEqual(["Subtotal", "Tax (10%)", "Total"]);
     expect(screen.getByText("$385.00")).toBeInTheDocument();
+  });
+
+  it("selects values in label / value lists across tabs and exports them by id", async () => {
+    exportFields.mockReset();
+    exportFields.mockResolvedValue();
+    getWorkbook.mockResolvedValue(invoiceWorkbook());
+    render(<StagingWorkbook documentId="doc-1" />);
+    fireEvent.click(await screen.findByRole("tab", { name: "Parties" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "Select all values in Supplier" }));
+    fireEvent.click(screen.getByRole("tab", { name: "Charges & Totals" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "Select Total" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "Select Tax (10%)" }));
+    expect(screen.getByTestId("selection-toolbar")).toHaveTextContent("3 values selected");
+
+    fireEvent.click(screen.getByRole("button", { name: /Export Selected/ }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "CSV" }));
+    await waitFor(() => expect(exportFields).toHaveBeenCalledTimes(1));
+    // Ids only, in display order (Parties before Charges & Totals; Tax above Total).
+    expect(exportFields.mock.calls[0][2]).toEqual([
+      { dataset_id: "supplier", record_id: "supplier", field: "invoice.supplier.name" },
+      { dataset_id: "invoice_lines", record_id: "l3", field: "invoice.line.amount" },
+      { dataset_id: "totals", record_id: "totals", field: "invoice.total.invoice_amount" },
+    ]);
+
+    fireEvent.click(screen.getByRole("button", { name: "Clear" }));
+    expect(screen.queryByTestId("selection-toolbar")).toBeNull();
   });
 });
 
